@@ -38,7 +38,7 @@
     "phases": [
       {
         "phase": "negotiation",
-        "repeat": "until_accepted_or_cancelled",
+        "repeat": "until game_over",
         "exchange": [
           {"message": "bid", "direction": "guest_to_host"},
           {"message": "bid_result", "direction": "host_to_guest"}
@@ -48,6 +48,7 @@
   },
   "rules": {
     "settlement": "A bid settles only when status is accepted.",
+    "game_over": "Set game_over=true when a bid is accepted or the negotiation is cancelled (matches repeat=until game_over).",
     "timeout": "If either side times out, send cancel for the active bid_id."
   },
   "parameters": {

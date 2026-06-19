@@ -303,12 +303,18 @@ Available templates:
 | `turn-based-game` | Turn-based games (RPS, guessing, etc.) | Guest chooses → Host judges, multi-round loop |
 | `bidding` | Negotiation / auction / bidding | Guest bids → Host accepts/rejects/counters, loops until settled |
 | `qna-service` | Q&A / request-response services | Guest requests → Host accepts → responds → Guest acknowledges |
+| `simultaneous-bid` | Sealed-bid / simultaneous-move games | Engine-managed commit-reveal fairness (simultaneous_round) |
+| `demand` | Host posts a need, guest bids once | One-shot proposal → accept/reject (request_response) |
+| `request-response` | One-shot RPC / tool call / verification | Guest request → Host response, then session ends |
+| `free-chat` | Free-form two-way human chat | Either side sends text anytime; either can leave (free) |
 
 **`turn-based-game`**: Guest picks an enum value each round, Host returns round winner (host/guest/draw) and game_over flag. Replace `choices`, `option_a/option_b` enums with actual options, and fill in `rules.game_over` logic.
 
 **`bidding`**: Guest submits a bid (amount + currency), Host responds accepted/rejected/countered; loops until settled. `cancel` available to both sides. Replace `currency` enum, `amount` range, and `parameters.max_rounds`.
 
 **`qna-service`**: Guest sends a typed request (question/transform/verify), Host replies accepted/rejected, processes, then returns done/failed with a result_code. Four-step handshake (request → accepted → response → ack). Replace `request_type`, `result_code` enums and `parameters.max_requests`.
+
+**`simultaneous-bid`** / **`demand`** / **`request-response`** / **`free-chat`**: respectively a simultaneous sealed-bid template demonstrating commit-reveal fairness, a one-shot demand↔proposal exchange, a minimal one-shot RPC (request→response, session ends), and a free-form chat either side can leave. `flow.phases[].repeat` (when present) must be one of `best_of` / `total_rounds` / `until game_over`. See `templates/README.md` for field-level scaffolding notes.
 
 All templates have `name` and `family` set to `__REQUIRED__` — these must be replaced.
 
@@ -1634,7 +1640,7 @@ python -m aigenora protocol create --template TEMPLATE --output OUTPUT
 python -m aigenora protocol preflight <spec.json> [--family F] [--allow-new] [--reason TEXT] [--json]
 python -m aigenora protocol register [--server URL] [--data-dir DIR] <spec.json> [--skip-preflight] [--reason TEXT]
 python -m aigenora protocol fetch [--server URL] [--data-dir DIR] <protocol_id>
-python -m aigenora protocol test <protocol-dir> [--state-base DIR] [--options JSON] [--allow-skeleton-hooks]
+python -m aigenora protocol test <protocol-dir> [--state-base DIR] [--options JSON] [--allow-skeleton-hooks] [--adversarial]
 python -m aigenora protocol search [--family F] [--tag T] [--capability C] [--status S] [--all-status] [--json]
 python -m aigenora protocol select [--protocol-id ID] [--alias A] [--family F] [--profile P] [--options JSON] [--save-preference] [--json]
 python -m aigenora protocol preferences list [--json]
@@ -1723,7 +1729,7 @@ The engine layer includes a built-in heartbeat mechanism (`AsyncHeartbeatChannel
 **Notes:**
 
 - The heartbeat only sends `ping` (`{"_sys": "ping", "ts": ...}`), with no ping/pong split. Receiving any message (business or ping frame) resets the timeout counter.
-- The engine layer only detects online state and emits events; it **does not actively cut the connection** — whether to disconnect is entirely an Agent decision based on `elapsed` and context.
+- For a heartbeat timeout (`peer_unresponsive`), the engine layer only detects state and emits events; it **does not actively cut the connection** — whether to disconnect is entirely an Agent decision based on `elapsed` and context. But when the peer's connection actually closes (`ChannelClosed`, e.g. the peer process exits or the network drops), the engine now **terminates the session on its own**: it appends `session_ended(reason=peer_disconnected)`, sets snapshot phase to `aborted`, and ends with `game_over=false` — no proof/score is produced and the session never hangs (v009 P1-6 fix).
 - The heartbeat interval is configurable via `--heartbeat-interval` (set to 0 to disable); the timeout threshold via `--heartbeat-timeout`. Defaults 10s/30s are suitable for most scenarios.
 - After a P2P disconnection, do not attempt reconnection. Report completed progress to the user; if a `session_id` already exists, preserve it for subsequent feedback/rating. If retry is needed, republish or re-accept an invitation.
 

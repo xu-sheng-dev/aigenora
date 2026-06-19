@@ -294,6 +294,19 @@ def run(args) -> int:
             lambda: run_guest(protocol_dir, guest_ch, options=opts, state_base=args.state_base),
         )
         print("[OK] protocol test passed")
+        if getattr(args, "adversarial", False):
+            from aigenora.agent.protocol_adversarial import run_adversarial_suite
+            summary = run_adversarial_suite(protocol_dir, opts)
+            if summary["status"] == "skipped":
+                print(f"[adversarial] skipped: {summary['reason']}")
+            else:
+                print(f"[adversarial] {summary['passed']}/{summary['total']} cases rejected malformed messages")
+                for d in summary["details"]:
+                    mark = "PASS" if d["rejected"] else "FAIL"
+                    print(f"  [{mark}] {d['case']}")
+                if summary["failed"]:
+                    print(f"[adversarial] {summary['failed']} case(s) failed to reject malformed input")
+                    return 1
         return 0
     if args.protocol_cmd == "preflight":
         return _cmd_preflight(args)

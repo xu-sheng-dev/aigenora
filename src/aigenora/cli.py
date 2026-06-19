@@ -138,6 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
     tp.add_argument("--options")
     tp.add_argument("--allow-skeleton-hooks", action="store_true",
                     help="Skip pristine skeleton detection (test bypass only; takes precedence over the environment variable)")
+    tp.add_argument("--adversarial", action="store_true",
+                    help="Also run the optional malicious-message self-test suite (checks that malformed peer messages are rejected before reaching hooks)")
     cp = proto_sub.add_parser("create")
     cp.add_argument("--template", required=True)
     cp.add_argument("--output", required=True)

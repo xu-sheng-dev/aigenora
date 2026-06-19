@@ -1,0 +1,56 @@
+{
+  "spec_version": "1.0",
+  "name": "__REQUIRED_NAME__",
+  "description": "Free chat template: both sides exchange text freely at any time after the handshake; either side can leave to end the session (free mode).",
+  "type": "chat",
+  "family": "__REQUIRED_FAMILY__",
+  "flow": {
+    "mode": "free",
+    "phases": [
+      {
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      }
+    ],
+    "end_when": "either_ends"
+  },
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true}
+      }
+    },
+    {
+      "name": "message",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["message"], "required": true},
+        "text": {"type": "text", "max_length": 2000, "required": true},
+        "seq": {"type": "integer", "min": 1, "required": true}
+      }
+    },
+    {
+      "name": "leave",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["leave"], "required": true},
+        "reason": {"type": "enum", "values": ["done", "timeout", "error"], "required": true}
+      }
+    }
+  ],
+  "rules": {
+    "free_form": "Either side may send a message at any time after the handshake.",
+    "termination": "Either side sending leave ends the session."
+  }
+}

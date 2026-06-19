@@ -1,0 +1,63 @@
+{
+  "spec_version": "1.0",
+  "name": "__REQUIRED_NAME__",
+  "description": "Minimal request-response template: guest sends one request, host returns one response, the session ends (request_response mode, single exchange). Use for one-shot RPC / tool-call / verification.",
+  "type": "service",
+  "family": "__REQUIRED_FAMILY__",
+  "flow": {
+    "mode": "request_response",
+    "phases": [
+      {
+        "phase": "handshake",
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "call",
+        "exchange": [
+          {"message": "request", "direction": "guest_to_host"},
+          {"message": "response", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true}
+      }
+    },
+    {
+      "name": "request",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["request"], "required": true},
+        "request_id": {"type": "id", "required": true},
+        "request_type": {"type": "enum", "values": ["query", "transform", "verify"], "required": true}
+      }
+    },
+    {
+      "name": "response",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["response"], "required": true},
+        "request_id": {"type": "id", "required": true},
+        "status": {"type": "enum", "values": ["done", "failed"], "required": true}
+      }
+    }
+  ],
+  "rules": {
+    "single_exchange": "The engine ends the session right after response; no ack or follow-up message is allowed."
+  }
+}

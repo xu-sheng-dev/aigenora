@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from aigenora.engine.p2p import AsyncJsonLineChannel, JsonLineChannel
+from aigenora.engine.p2p import AsyncJsonLineChannel, ChannelClosed, JsonLineChannel
 from aigenora.engine.crypto import commit_hash, random_nonce, sha256
 
 from .hooks import HookResult, ProtocolHooks
@@ -84,6 +84,17 @@ def _snapshot_phase(hooks: Any, phase: str, summary: str, **structured: Any) -> 
     if snap is None:
         return
     snap.set_phase(phase, summary=summary, **structured)
+
+
+def _handle_peer_disconnect(hooks: Any, event_bus: EventBus | None, **result_extra: Any) -> dict[str, Any]:
+    """Clean termination when the peer channel closes mid-session (v009 P1-6).
+
+    Emits session_ended(peer_disconnected), marks the snapshot aborted, and returns a
+    game_over=False result so no session proof is produced and no score is polluted.
+    """
+    _emit(event_bus, "session_ended", {"game_over": False, "reason": "peer_disconnected"})
+    _snapshot_phase(hooks, "aborted", "Peer disconnected", reason="peer_disconnected")
+    return {"game_over": False, "reason": "peer_disconnected", **result_extra}
 
 
 async def _maybe_wrap_heartbeat(
@@ -342,49 +353,52 @@ async def _run_session_loop_async_host(
     channel = await _maybe_wrap_heartbeat(
         channel, heartbeat_interval, heartbeat_timeout, event_bus, hooks,
     )
-    join_msg = await channel.recv()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
-    ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
-    if ready_result.response is None:
-        raise RuntimeError("host join hook did not return ready response")
-    if validate:
-        _validate(spec, ready_result.response, "host_to_guest")
-    _display(hooks, ready_result.response, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
-    if ready_result.game_over or ready_result.abort:
-        await channel.send(ready_result.response)
-        _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
-        _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
-                        "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over}
-    msg = await channel.send_wait(ready_result.response)
-    while True:
+    try:
+        join_msg = await channel.recv()
         if validate:
-            _validate(spec, msg, "guest_to_host")
-        _display(hooks, msg, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": msg})
-        result = _as_result(hooks.proto_host_handle(msg))
-        if result.response:
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
+        ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
+        if ready_result.response is None:
+            raise RuntimeError("host join hook did not return ready response")
+        if validate:
+            _validate(spec, ready_result.response, "host_to_guest")
+        _display(hooks, ready_result.response, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
+        if ready_result.game_over or ready_result.abort:
+            await channel.send(ready_result.response)
+            _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
+            _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
+                            "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
+            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over}
+        msg = await channel.send_wait(ready_result.response)
+        while True:
             if validate:
-                _validate(spec, result.response, "host_to_guest")
-            _display(hooks, result.response, "sent")
-            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
-                  summary=hooks.proto_display(result.response, "sent"))
-            if result.game_over or result.abort:
-                await channel.send(result.response)
-                _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
-                _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                "Session ended", reason="abort" if result.abort else "game_over")
+                _validate(spec, msg, "guest_to_host")
+            _display(hooks, msg, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": msg})
+            result = _as_result(hooks.proto_host_handle(msg))
+            if result.response:
+                if validate:
+                    _validate(spec, result.response, "host_to_guest")
+                _display(hooks, result.response, "sent")
+                _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
+                      summary=hooks.proto_display(result.response, "sent"))
+                if result.game_over or result.abort:
+                    await channel.send(result.response)
+                    _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                    _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
+                                    "Session ended", reason="abort" if result.abort else "game_over")
+                    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+                if pace > 0:
+                    await asyncio.sleep(pace)
+                msg = await channel.send_wait(result.response)
+            else:
+                _snapshot_phase(hooks, "game_over", "Session completed")
                 return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
-            if pace > 0:
-                await asyncio.sleep(pace)
-            msg = await channel.send_wait(result.response)
-        else:
-            _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
 
 async def _run_session_loop_async_guest(
@@ -411,50 +425,53 @@ async def _run_session_loop_async_guest(
     channel = await _maybe_wrap_heartbeat(
         channel, heartbeat_interval, heartbeat_timeout, event_bus, hooks,
     )
-    join_msg = hooks.proto_guest_join_message()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
-    ready_msg = await channel.send_wait(join_msg)
-    if validate:
-        _validate(spec, ready_msg, "host_to_guest")
-    _display(hooks, ready_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
-    hooks.proto_guest_handle_ready(ready_msg)
-    first = hooks.proto_guest_first_action()
-    if not first:
-        _snapshot_phase(hooks, "game_over", "Guest ended after handshake")
-        return {"state_dir": str(state_dir), "game_over": False}
-    if validate:
-        _validate(spec, first, "guest_to_host")
-    _display(hooks, first, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": first})
-    msg = await channel.send_wait(first)
-    while True:
+    try:
+        join_msg = hooks.proto_guest_join_message()
         if validate:
-            _validate(spec, msg, "host_to_guest")
-        _display(hooks, msg, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": msg})
-        result = _as_result(hooks.proto_guest_handle(msg))
-        if result.response:
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
+        ready_msg = await channel.send_wait(join_msg)
+        if validate:
+            _validate(spec, ready_msg, "host_to_guest")
+        _display(hooks, ready_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
+        hooks.proto_guest_handle_ready(ready_msg)
+        first = hooks.proto_guest_first_action()
+        if not first:
+            _snapshot_phase(hooks, "game_over", "Guest ended after handshake")
+            return {"state_dir": str(state_dir), "game_over": False}
+        if validate:
+            _validate(spec, first, "guest_to_host")
+        _display(hooks, first, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": first})
+        msg = await channel.send_wait(first)
+        while True:
             if validate:
-                _validate(spec, result.response, "guest_to_host")
-            _display(hooks, result.response, "sent")
-            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
-                  summary=hooks.proto_display(result.response, "sent"))
-            if result.game_over or result.abort:
-                await channel.send(result.response)
-                _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
-                _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                "Session ended", reason="abort" if result.abort else "game_over")
+                _validate(spec, msg, "host_to_guest")
+            _display(hooks, msg, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": msg})
+            result = _as_result(hooks.proto_guest_handle(msg))
+            if result.response:
+                if validate:
+                    _validate(spec, result.response, "guest_to_host")
+                _display(hooks, result.response, "sent")
+                _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
+                      summary=hooks.proto_display(result.response, "sent"))
+                if result.game_over or result.abort:
+                    await channel.send(result.response)
+                    _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                    _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
+                                    "Session ended", reason="abort" if result.abort else "game_over")
+                    return {"state_dir": str(state_dir), "game_over": result.game_over}
+                if pace > 0:
+                    await asyncio.sleep(pace)
+                msg = await channel.send_wait(result.response)
+            else:
+                _snapshot_phase(hooks, "game_over", "Session completed")
                 return {"state_dir": str(state_dir), "game_over": result.game_over}
-            if pace > 0:
-                await asyncio.sleep(pace)
-            msg = await channel.send_wait(result.response)
-        else:
-            _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"state_dir": str(state_dir), "game_over": result.game_over}
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
 
 def _run_free(
@@ -936,42 +953,45 @@ async def _run_rr_async_host(
     )
 
     # join/ready handshake
-    join_msg = await channel.recv()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
-    ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
-    if ready_result.response is None:
-        raise RuntimeError("host join hook did not return ready response")
-    if validate:
-        _validate(spec, ready_result.response, "host_to_guest")
-    _display(hooks, ready_result.response, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
-    await channel.send(ready_result.response)
+    try:
+        join_msg = await channel.recv()
+        if validate:
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
+        ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
+        if ready_result.response is None:
+            raise RuntimeError("host join hook did not return ready response")
+        if validate:
+            _validate(spec, ready_result.response, "host_to_guest")
+        _display(hooks, ready_result.response, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
+        await channel.send(ready_result.response)
 
-    # Wait for Guest request
-    request_msg = await channel.recv()
-    if validate:
-        _validate(spec, request_msg, "guest_to_host")
-    _display(hooks, request_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": request_msg})
+        # Wait for Guest request
+        request_msg = await channel.recv()
+        if validate:
+            _validate(spec, request_msg, "guest_to_host")
+        _display(hooks, request_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": request_msg})
 
-    # Host handles request -> response
-    result = _as_result(hooks.proto_host_handle(request_msg))
-    if result.response is None:
-        _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
-        _snapshot_phase(hooks, "aborted", "Host did not return response")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
-    if validate:
-        _validate(spec, result.response, "host_to_guest")
-    _display(hooks, result.response, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response})
-    await channel.send(result.response)
+        # Host handles request -> response
+        result = _as_result(hooks.proto_host_handle(request_msg))
+        if result.response is None:
+            _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+            _snapshot_phase(hooks, "aborted", "Host did not return response")
+            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+        if validate:
+            _validate(spec, result.response, "host_to_guest")
+        _display(hooks, result.response, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response})
+        await channel.send(result.response)
 
-    _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
-    _snapshot_phase(hooks, "game_over", "Request-response completed")
-    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+        _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+        _snapshot_phase(hooks, "game_over", "Request-response completed")
+        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
 
 async def _run_rr_async_guest(
@@ -1000,40 +1020,43 @@ async def _run_rr_async_guest(
     )
 
     # join/ready handshake
-    join_msg = hooks.proto_guest_join_message()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
-    ready_msg = await channel.send_wait(join_msg)
-    if validate:
-        _validate(spec, ready_msg, "host_to_guest")
-    _display(hooks, ready_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
-    hooks.proto_guest_handle_ready(ready_msg)
+    try:
+        join_msg = hooks.proto_guest_join_message()
+        if validate:
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
+        ready_msg = await channel.send_wait(join_msg)
+        if validate:
+            _validate(spec, ready_msg, "host_to_guest")
+        _display(hooks, ready_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
+        hooks.proto_guest_handle_ready(ready_msg)
 
-    # Guest sends request
-    request = hooks.proto_guest_first_action()
-    if not request:
-        _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
-        _snapshot_phase(hooks, "aborted", "Guest did not send request")
-        return {"state_dir": str(state_dir), "game_over": False}
-    if validate:
-        _validate(spec, request, "guest_to_host")
-    _display(hooks, request, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": request})
+        # Guest sends request
+        request = hooks.proto_guest_first_action()
+        if not request:
+            _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+            _snapshot_phase(hooks, "aborted", "Guest did not send request")
+            return {"state_dir": str(state_dir), "game_over": False}
+        if validate:
+            _validate(spec, request, "guest_to_host")
+        _display(hooks, request, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": request})
 
-    # Wait for Host response
-    response_msg = await channel.send_wait(request)
-    if validate:
-        _validate(spec, response_msg, "host_to_guest")
-    _display(hooks, response_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": response_msg})
-    hooks.proto_guest_handle(response_msg)
+        # Wait for Host response
+        response_msg = await channel.send_wait(request)
+        if validate:
+            _validate(spec, response_msg, "host_to_guest")
+        _display(hooks, response_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": response_msg})
+        hooks.proto_guest_handle(response_msg)
 
-    _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
-    _snapshot_phase(hooks, "game_over", "Request-response completed")
-    return {"state_dir": str(state_dir), "game_over": True}
+        _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+        _snapshot_phase(hooks, "game_over", "Request-response completed")
+        return {"state_dir": str(state_dir), "game_over": True}
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
 def _run_simultaneous_round_sync(
     spec: dict[str, Any],
@@ -1343,86 +1366,89 @@ async def _run_sr_async_host(
     _value_field = _resolve_value_field(spec)
 
     # join/ready
-    join_msg = await channel.recv()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
-    ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
-    if ready_result.response is None:
-        raise RuntimeError("host join hook did not return ready response")
-    if validate:
-        _validate(spec, ready_result.response, "host_to_guest")
-    _display(hooks, ready_result.response, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
-    await channel.send(ready_result.response)
-
-    while True:
-        host_value = hooks.proto_round_value(round_num, state)
-        nonce = random_nonce()
-        h = sha256(f"{host_value}:{nonce}")
-
-        commit_msg = {"action": "commit", "round": round_num, "hash": h}
+    try:
+        join_msg = await channel.recv()
         if validate:
-            _validate(spec, commit_msg, "host_to_guest")
-        _display(hooks, commit_msg, "sent")
-        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": commit_msg})
-
-        guest_commit = await channel.send_wait(commit_msg)
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": join_msg})
+        ready_result = _as_result(hooks.proto_host_handle_join(join_msg))
+        if ready_result.response is None:
+            raise RuntimeError("host join hook did not return ready response")
         if validate:
-            _validate(spec, guest_commit, "guest_to_host")
-        _display(hooks, guest_commit, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": guest_commit})
+            _validate(spec, ready_result.response, "host_to_guest")
+        _display(hooks, ready_result.response, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
+        await channel.send(ready_result.response)
 
-        reveal_msg = {"action": "reveal", "round": round_num, _value_field: host_value, "nonce": nonce}
-        if validate:
-            _validate(spec, reveal_msg, "host_to_guest")
-        _display(hooks, reveal_msg, "sent")
-        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": reveal_msg})
+        while True:
+            host_value = hooks.proto_round_value(round_num, state)
+            nonce = random_nonce()
+            h = sha256(f"{host_value}:{nonce}")
 
-        guest_reveal = await channel.send_wait(reveal_msg)
-        if validate:
-            _validate(spec, guest_reveal, "guest_to_host")
-        _display(hooks, guest_reveal, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": guest_reveal})
-
-        guest_value = guest_reveal.get(_value_field)
-        guest_nonce = guest_reveal.get("nonce")
-        guest_hash = guest_commit.get("hash")
-        expected_hash = sha256(f"{guest_value}:{guest_nonce}")
-        if expected_hash != guest_hash:
-            _emit(event_bus, "commit_mismatch_detected", {
-                "round": round_num, "role": "guest",
-                "expected": expected_hash, "actual": guest_hash,
-            })
-            _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
-            abort_msg = {"action": "error", "round": round_num, "reason": "commit_mismatch"}
-            await channel.send(abort_msg)
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
-
-        judge_result = _as_result(hooks.proto_round_judge(round_num, host_value, guest_value, state))
-        if judge_result.response:
+            commit_msg = {"action": "commit", "round": round_num, "hash": h}
             if validate:
-                _validate(spec, judge_result.response, "host_to_guest")
-            _display(hooks, judge_result.response, "sent")
-            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": judge_result.response})
-            await channel.send(judge_result.response)
+                _validate(spec, commit_msg, "host_to_guest")
+            _display(hooks, commit_msg, "sent")
+            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": commit_msg})
 
-        round_num += 1
-        if judge_result.game_over or judge_result.abort:
-            # After Host game_over, send an end signal so Guest exits
-            end_msg = {"action": "end"}
-            await channel.send(end_msg)
-            _emit(event_bus, "session_ended", {
-                "game_over": True,
-                "reason": "abort" if judge_result.abort else "game_over",
-            })
-            _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
-                            "Session ended", reason="abort" if judge_result.abort else "game_over")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over}
+            guest_commit = await channel.send_wait(commit_msg)
+            if validate:
+                _validate(spec, guest_commit, "guest_to_host")
+            _display(hooks, guest_commit, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": guest_commit})
 
-        if pace > 0:
-            await asyncio.sleep(pace)
+            reveal_msg = {"action": "reveal", "round": round_num, _value_field: host_value, "nonce": nonce}
+            if validate:
+                _validate(spec, reveal_msg, "host_to_guest")
+            _display(hooks, reveal_msg, "sent")
+            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": reveal_msg})
+
+            guest_reveal = await channel.send_wait(reveal_msg)
+            if validate:
+                _validate(spec, guest_reveal, "guest_to_host")
+            _display(hooks, guest_reveal, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": guest_reveal})
+
+            guest_value = guest_reveal.get(_value_field)
+            guest_nonce = guest_reveal.get("nonce")
+            guest_hash = guest_commit.get("hash")
+            expected_hash = sha256(f"{guest_value}:{guest_nonce}")
+            if expected_hash != guest_hash:
+                _emit(event_bus, "commit_mismatch_detected", {
+                    "round": round_num, "role": "guest",
+                    "expected": expected_hash, "actual": guest_hash,
+                })
+                _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
+                abort_msg = {"action": "error", "round": round_num, "reason": "commit_mismatch"}
+                await channel.send(abort_msg)
+                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+
+            judge_result = _as_result(hooks.proto_round_judge(round_num, host_value, guest_value, state))
+            if judge_result.response:
+                if validate:
+                    _validate(spec, judge_result.response, "host_to_guest")
+                _display(hooks, judge_result.response, "sent")
+                _emit(event_bus, "protocol_message", {"direction": "sent", "msg": judge_result.response})
+                await channel.send(judge_result.response)
+
+            round_num += 1
+            if judge_result.game_over or judge_result.abort:
+                # After Host game_over, send an end signal so Guest exits
+                end_msg = {"action": "end"}
+                await channel.send(end_msg)
+                _emit(event_bus, "session_ended", {
+                    "game_over": True,
+                    "reason": "abort" if judge_result.abort else "game_over",
+                })
+                _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
+                                "Session ended", reason="abort" if judge_result.abort else "game_over")
+                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over}
+
+            if pace > 0:
+                await asyncio.sleep(pace)
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
 
 async def _run_sr_async_guest(
@@ -1453,80 +1479,83 @@ async def _run_sr_async_guest(
     round_num = 0
     _value_field = _resolve_value_field(spec)
 
-    join_msg = hooks.proto_guest_join_message()
-    if validate:
-        _validate(spec, join_msg, "guest_to_host")
-    _display(hooks, join_msg, "sent")
-    _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
-    ready_msg = await channel.send_wait(join_msg)
-    if validate:
-        _validate(spec, ready_msg, "host_to_guest")
-    _display(hooks, ready_msg, "received")
-    _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
-    hooks.proto_guest_handle_ready(ready_msg)
-
-    pending_host_commit = None
-    while True:
-        guest_value = hooks.proto_round_value(round_num, state)
-        nonce = random_nonce()
-        h = sha256(f"{guest_value}:{nonce}")
-
-        if pending_host_commit is not None:
-            host_commit = pending_host_commit
-            pending_host_commit = None
-        else:
-            host_commit = await channel.recv()
-        if _is_control_end(host_commit):
-            _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
-            _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"state_dir": str(state_dir), "game_over": True}
+    try:
+        join_msg = hooks.proto_guest_join_message()
         if validate:
-            _validate(spec, host_commit, "host_to_guest")
-        _display(hooks, host_commit, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": host_commit})
-
-        commit_msg = {"action": "commit", "round": round_num, "hash": h}
+            _validate(spec, join_msg, "guest_to_host")
+        _display(hooks, join_msg, "sent")
+        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": join_msg})
+        ready_msg = await channel.send_wait(join_msg)
         if validate:
-            _validate(spec, commit_msg, "guest_to_host")
-        _display(hooks, commit_msg, "sent")
-        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": commit_msg})
-        await channel.send(commit_msg)
+            _validate(spec, ready_msg, "host_to_guest")
+        _display(hooks, ready_msg, "received")
+        _emit(event_bus, "protocol_message", {"direction": "received", "msg": ready_msg})
+        hooks.proto_guest_handle_ready(ready_msg)
 
-        host_reveal = await channel.recv()
-        if validate:
-            _validate(spec, host_reveal, "host_to_guest")
-        _display(hooks, host_reveal, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": host_reveal})
+        pending_host_commit = None
+        while True:
+            guest_value = hooks.proto_round_value(round_num, state)
+            nonce = random_nonce()
+            h = sha256(f"{guest_value}:{nonce}")
 
-        host_value = host_reveal.get(_value_field)
-        host_nonce = host_reveal.get("nonce")
-        host_hash = host_commit.get("hash")
-        expected_hash = sha256(f"{host_value}:{host_nonce}")
-        if expected_hash != host_hash:
-            _emit(event_bus, "commit_mismatch_detected", {
-                "round": round_num, "role": "host",
-                "expected": expected_hash, "actual": host_hash,
-            })
-            _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
-            return {"state_dir": str(state_dir), "game_over": False}
+            if pending_host_commit is not None:
+                host_commit = pending_host_commit
+                pending_host_commit = None
+            else:
+                host_commit = await channel.recv()
+            if _is_control_end(host_commit):
+                _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
+                _snapshot_phase(hooks, "game_over", "Session completed")
+                return {"state_dir": str(state_dir), "game_over": True}
+            if validate:
+                _validate(spec, host_commit, "host_to_guest")
+            _display(hooks, host_commit, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": host_commit})
 
-        reveal_msg = {"action": "reveal", "round": round_num, _value_field: guest_value, "nonce": nonce}
-        if validate:
-            _validate(spec, reveal_msg, "guest_to_host")
-        _display(hooks, reveal_msg, "sent")
-        _emit(event_bus, "protocol_message", {"direction": "sent", "msg": reveal_msg})
+            commit_msg = {"action": "commit", "round": round_num, "hash": h}
+            if validate:
+                _validate(spec, commit_msg, "guest_to_host")
+            _display(hooks, commit_msg, "sent")
+            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": commit_msg})
+            await channel.send(commit_msg)
 
-        result_msg = await channel.send_wait(reveal_msg)
-        if validate:
-            _validate(spec, result_msg, "host_to_guest")
-        _display(hooks, result_msg, "received")
-        _emit(event_bus, "protocol_message", {"direction": "received", "msg": result_msg})
-        hooks.proto_guest_handle(result_msg)
+            host_reveal = await channel.recv()
+            if validate:
+                _validate(spec, host_reveal, "host_to_guest")
+            _display(hooks, host_reveal, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": host_reveal})
 
-        round_num += 1
-        if pace > 0:
-            await asyncio.sleep(pace)
-        pending_host_commit = await channel.recv()
+            host_value = host_reveal.get(_value_field)
+            host_nonce = host_reveal.get("nonce")
+            host_hash = host_commit.get("hash")
+            expected_hash = sha256(f"{host_value}:{host_nonce}")
+            if expected_hash != host_hash:
+                _emit(event_bus, "commit_mismatch_detected", {
+                    "round": round_num, "role": "host",
+                    "expected": expected_hash, "actual": host_hash,
+                })
+                _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
+                return {"state_dir": str(state_dir), "game_over": False}
+
+            reveal_msg = {"action": "reveal", "round": round_num, _value_field: guest_value, "nonce": nonce}
+            if validate:
+                _validate(spec, reveal_msg, "guest_to_host")
+            _display(hooks, reveal_msg, "sent")
+            _emit(event_bus, "protocol_message", {"direction": "sent", "msg": reveal_msg})
+
+            result_msg = await channel.send_wait(reveal_msg)
+            if validate:
+                _validate(spec, result_msg, "host_to_guest")
+            _display(hooks, result_msg, "received")
+            _emit(event_bus, "protocol_message", {"direction": "received", "msg": result_msg})
+            hooks.proto_guest_handle(result_msg)
+
+            round_num += 1
+            if pace > 0:
+                await asyncio.sleep(pace)
+            pending_host_commit = await channel.recv()
+    except ChannelClosed:
+        return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
 
 # Engine registry

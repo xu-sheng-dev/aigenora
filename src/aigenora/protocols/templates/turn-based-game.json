@@ -61,7 +61,7 @@
       },
       {
         "phase": "round",
-        "repeat": "rounds",
+        "repeat": "total_rounds",
         "exchange": [
           {"message": "move", "direction": "guest_to_host"},
           {"message": "round_result", "direction": "host_to_guest"}

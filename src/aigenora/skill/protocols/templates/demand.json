@@ -1,0 +1,64 @@
+{
+  "spec_version": "1.0",
+  "name": "__REQUIRED_NAME__",
+  "description": "Demand template: host posts a need (described in the invitation), guest submits a one-shot proposal, host accepts or rejects (request_response mode, single exchange).",
+  "type": "demand",
+  "family": "__REQUIRED_FAMILY__",
+  "flow": {
+    "mode": "request_response",
+    "phases": [
+      {
+        "phase": "handshake",
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "settle",
+        "exchange": [
+          {"message": "proposal", "direction": "guest_to_host"},
+          {"message": "respond", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true}
+      }
+    },
+    {
+      "name": "proposal",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["proposal"], "required": true},
+        "proposal_id": {"type": "id", "required": true},
+        "terms": {"type": "integer", "min": 0, "max": 100000000, "required": true}
+      }
+    },
+    {
+      "name": "respond",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["respond"], "required": true},
+        "proposal_id": {"type": "id", "required": true},
+        "status": {"type": "enum", "values": ["accepted", "rejected"], "required": true}
+      }
+    }
+  ],
+  "rules": {
+    "single_exchange": "The engine ends the session right after respond; no further business messages are allowed.",
+    "decision": "Host accepts or rejects the proposal based on the demand described in the invitation."
+  }
+}

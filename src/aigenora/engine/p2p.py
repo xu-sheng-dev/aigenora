@@ -381,12 +381,24 @@ class AsyncHeartbeatChannel(AsyncJsonLineChannel):
             await self._inner.send(msg)
 
     async def recv(self, timeout: float | None = None) -> dict[str, Any]:
-        if timeout is None:
-            return await self._business_queue.get()
-        try:
-            return await asyncio.wait_for(self._business_queue.get(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            raise TimeoutError("timed out waiting for peer message") from exc
+        # Poll the business queue with a short wait so that a dead reader (the peer
+        # disconnected and _reader captured ChannelClosed) surfaces as ChannelClosed
+        # instead of blocking the business loop forever. Without this, once _reader
+        # exits on ChannelClosed the business recv would hang indefinitely and the
+        # session would never terminate or emit a clean abort. v009 P1-6.
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if self._reader_error is not None:
+                raise ChannelClosed("peer channel closed during recv")
+            wait = 0.5 if deadline is None else max(0.0, min(0.5, deadline - time.monotonic()))
+            try:
+                return await asyncio.wait_for(self._business_queue.get(), timeout=wait)
+            except asyncio.TimeoutError:
+                if self._reader_error is not None:
+                    raise ChannelClosed("peer channel closed during recv")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("timed out waiting for peer message")
+            # else: still within caller timeout and reader still alive; loop again.
 
     def is_unresponsive(self) -> bool:
         return self._unresponsive
