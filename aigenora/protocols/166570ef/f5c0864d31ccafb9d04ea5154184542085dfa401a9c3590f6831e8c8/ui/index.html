@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Guess Number · Business Panel</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif;
+         display: grid; grid-template-rows: auto 1fr auto; min-height: 100%;
+         background: linear-gradient(180deg, transparent, #8881 100%); }
+  header { padding: 14px 20px; border-bottom: 1px solid #8884; display: flex;
+           align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+  header .meta { color: #888; font-size: 12px; }
+  header .tag { display: inline-block; padding: 2px 8px; border-radius: 3px;
+                background: #58f4; font-size: 11px; margin-left: 6px; }
+  header .tag.over { background: #5b34; }
+  header .tag.waiting { background: #f844; }
+  main { padding: 20px; display: grid; gap: 18px; grid-template-columns: 1fr 1fr; align-content: start; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 16px 18px;
+          background: #8881; backdrop-filter: blur(6px); }
+  .card h2 { margin: 0 0 12px; font-size: 11px; color: #888;
+             text-transform: uppercase; letter-spacing: .08em; }
+  .hint { margin-top: 10px; font-size: 12px; color: #888; line-height: 1.5; }
+  .range-display { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; text-align: center; margin-bottom: 12px; }
+  .range-display .num { font-size: 32px; font-weight: 800; }
+  .range-display .dash { font-size: 24px; color: #888; align-self: center; }
+  .attempts-bar { height: 8px; background: #8883; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .attempts-fill { height: 100%; background: linear-gradient(90deg, #5b5, #fb4, #f55); transition: width .3s; }
+  .attempts-text { font-size: 12px; color: #888; text-align: center; }
+  .cmd-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .cmd-row input[type=number] { width: 100px; padding: 8px; font-size: 16px; text-align: center;
+    border: 2px solid #8884; border-radius: 6px; background: transparent; color: inherit; }
+  .cmd-row input:disabled { opacity: .4; }
+  .cmd-row button { padding: 8px 18px; font-size: 13px; }
+  .cmd-row button:disabled { opacity: .4; cursor: not-allowed; }
+  .strat-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .strat-row select, .strat-row input { font-size: 12px; padding: 6px; border: 1px solid #8884;
+    border-radius: 4px; background: transparent; color: inherit; }
+  .strat-row select { min-width: 100px; }
+  button { padding: 6px 14px; border: 1px solid #8884; background: #8881; color: inherit;
+           border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #8883; }
+  .strat-status { font-size: 11px; color: #888; margin-top: 6px; }
+  .whisper-list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column;
+                  gap: 6px; min-height: 60px; }
+  .whisper-list .empty { color: #888; font-size: 12px; text-align: center; padding: 16px 0; }
+  .whisper-bubble { display: flex; align-items: flex-start; gap: 6px; }
+  .whisper-bubble .text { font-size: 12px; padding: 6px 10px; border-radius: 8px;
+                          background: #8882; flex: 1; word-break: break-word; }
+  .whisper-bubble .time { font-size: 10px; color: #888; white-space: nowrap; margin-top: 2px; }
+  .ack-chip { font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+  .ack-chip.pending { background: #8883; color: #888; }
+  .ack-chip.executed { background: #5b34; color: #5b5; }
+  .ack-chip.dismissed { background: #8884; color: #888; }
+  .ack-chip.unparsed { background: #f844; color: #fb4; }
+  .ack-chip.error { background: #f334; color: #f55; }
+  .whisper-input { display: flex; gap: 6px; margin-top: 10px; }
+  .whisper-input textarea { flex: 1; min-height: 36px; max-height: 100px; resize: none;
+    padding: 8px; font-size: 12px; border: 1px solid #8884; border-radius: 4px;
+    background: transparent; color: inherit; font-family: inherit; }
+  .whisper-input button { align-self: flex-end; }
+  .history-card { grid-column: 1 / -1; }
+  .guesses { display: flex; flex-wrap: wrap; gap: 6px; }
+  .guesses .g { padding: 6px 10px; border-radius: 6px; font-size: 12px; border: 1px solid #8884; }
+  .guesses .g .num { font-size: 16px; font-weight: 700; }
+  .guesses .g .result { font-size: 11px; margin-top: 2px; font-weight: 600; }
+  .guesses .g.higher { background: #5b34; color: #5b5; }
+  .guesses .g.lower { background: #f844; color: #fb4; }
+  .guesses .g.hit { background: #58f4; color: #fff; }
+  .guesses .g.exhausted { background: #f334; color: #f55; }
+  .game-summary { margin-top: 10px; font-size: 14px; font-weight: 600; text-align: center; color: #fb4; min-height: 18px; }
+  .empty { text-align: center; color: #888; font-size: 13px; padding: 20px 0; }
+  footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
+  footer code { font-family: "Consolas", "Menlo", monospace; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Guess Number <span class="tag" id="phase-tag">--</span></h1></div>
+  <div class="meta" id="meta">connecting...</div>
+</header>
+<main>
+  <!-- Range + Attempts -->
+  <section class="card">
+    <h2>Range</h2>
+    <div class="range-display">
+      <div><div class="num" id="range-lo">1</div><div style="font-size:11px;color:#888">low</div></div>
+      <div class="dash">...</div>
+      <div><div class="num" id="range-hi">100</div><div style="font-size:11px;color:#888">high</div></div>
+    </div>
+    <div class="attempts-bar"><div class="attempts-fill" id="attempts-fill"></div></div>
+    <div class="attempts-text"><span id="attempts-used">0</span> / <span id="max-attempts">7</span> attempts</div>
+    <div class="game-summary" id="game-summary"></div>
+  </section>
+
+  <!-- Direct Command -->
+  <section class="card" id="direct-command">
+    <h2>Direct Command</h2>
+    <div class="hint" id="role-hint"></div>
+    <div class="cmd-row">
+      <input type="number" id="guess-input" placeholder="?" disabled>
+      <button id="guess-submit" disabled>Submit</button>
+    </div>
+    <div class="hint" id="cmd-hint">Waiting for coach mode...</div>
+  </section>
+
+  <!-- Strategy -->
+  <section class="card" id="strategy">
+    <h2>Strategy</h2>
+    <div class="hint" id="strat-role-hint"></div>
+    <div class="strat-row">
+      <label>mode</label>
+      <select id="strat-mode"><option value="bisect">bisect</option><option value="fixed">fixed</option><option value="seq">seq</option></select>
+    </div>
+    <div class="strat-row" id="strat-fixed-row" style="display:none">
+      <label>number</label>
+      <input id="strat-number" type="number" placeholder="42" style="width:80px">
+    </div>
+    <div class="strat-row" id="strat-seq-row" style="display:none">
+      <label>sequence</label>
+      <input id="strat-seq" placeholder="50,25,75" style="flex:1">
+    </div>
+    <div class="strat-row"><button id="strat-apply">Apply</button></div>
+    <div class="strat-status" id="strat-status"></div>
+  </section>
+
+  <!-- Whisper -->
+  <section class="card" id="whisper" style="grid-column: 1 / -1;">
+    <h2>Whisper</h2>
+    <div class="whisper-list" id="whisper-list"><div class="empty">No whispers yet</div></div>
+    <div class="whisper-input">
+      <textarea id="whisper-text" placeholder="Type a message..." rows="1"></textarea>
+      <button id="whisper-send">Send</button>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section class="card history-card">
+    <h2>Guess History</h2>
+    <div class="guesses" id="guesses"><div class="empty">No guesses yet</div></div>
+  </section>
+</main>
+<footer>Guess Number · reads via <code>/api/*</code> and <code>/sse/stream</code></footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let snap = {}, guesses = [], whispers = [];
+let myRole = null;
+
+function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
+function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
+function _esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function renderSnapshot(s) {
+  snap = s || {};
+  myRole = snap.role || myRole;
+  const lo = snap.lo ?? snap.range_min ?? 1;
+  const hi = snap.hi ?? snap.range_max ?? 100;
+  $("#range-lo").textContent = lo;
+  $("#range-hi").textContent = hi;
+  const maxA = snap.max_attempts ?? 7;
+  const used = snap.attempts ?? 0;
+  $("#max-attempts").textContent = maxA;
+  $("#attempts-used").textContent = used;
+  $("#attempts-fill").style.width = Math.min(used / maxA * 100, 100) + "%";
+  const phase = snap.phase || "--";
+  const phaseTag = $("#phase-tag");
+  if (phase === "game_over") { phaseTag.textContent = "game over"; phaseTag.className = "tag over"; }
+  else if (phase === "waiting_peer") { phaseTag.textContent = "waiting"; phaseTag.className = "tag waiting"; }
+  else { phaseTag.textContent = phase; phaseTag.className = "tag"; }
+  $("#meta").textContent = `Guess Number · [${lo},${hi}] · ${phase}`;
+  if (phase === "game_over") {
+    const st = snap.last_event?.structured || {};
+    const w = st.winner || "none";
+    const secret = st.secret_number ?? "?";
+    $("#game-summary").textContent = w === "guest" ? `You win! Answer was ${secret}` : w === "host" ? `Host wins. Answer was ${secret}` : "Game over";
+  } else { $("#game-summary").textContent = ""; }
+  updateDirectCommand();
+  updateStratRoleHint();
+}
+
+function updateDirectCommand() {
+  const role = myRole;
+  const timing = snap.timing;
+  const phase = snap.phase;
+  const input = $("#guess-input");
+  const btn = $("#guess-submit");
+  const roleHint = $("#role-hint");
+  const cmdHint = $("#cmd-hint");
+
+  if (role === "host") {
+    roleHint.textContent = "Host does not make guesses in this protocol.";
+    input.disabled = true;
+    btn.disabled = true;
+    cmdHint.textContent = "";
+    return;
+  }
+  roleHint.textContent = "You are the guest. Enter your guess.";
+  if (phase === "game_over") { input.disabled = true; btn.disabled = true; cmdHint.textContent = "Game over."; return; }
+  if (!timing || timing.match_key !== "attempt") { input.disabled = true; btn.disabled = true; cmdHint.textContent = "Waiting for coach mode..."; return; }
+  input.disabled = false;
+  btn.disabled = false;
+  input.min = snap.lo ?? 1;
+  input.max = snap.hi ?? 100;
+  cmdHint.textContent = `Attempt ${timing.match_value}`;
+}
+
+function updateStratRoleHint() {
+  if (myRole === "host") { $("#strat-role-hint").textContent = "Strategy applies to guest only in this protocol."; }
+  else { $("#strat-role-hint").textContent = ""; }
+}
+
+$("#guess-submit").addEventListener("click", submitGuess);
+$("#guess-input").addEventListener("keydown", e => { if (e.key === "Enter") submitGuess(); });
+
+async function submitGuess() {
+  const input = $("#guess-input");
+  const num = parseInt(input.value);
+  if (isNaN(num)) return;
+  const timing = snap.timing;
+  if (!timing || timing.match_key !== "attempt") return;
+  const lo = snap.lo ?? 1, hi = snap.hi ?? 100;
+  if (num < lo || num > hi) { $("#cmd-hint").textContent = `Must be in [${lo}, ${hi}]`; return; }
+  input.disabled = true;
+  try {
+    const r = await fetch("/api/decide", { method: "POST", body: JSON.stringify({ attempt: timing.match_value, number: num, agent_id: agentLabel(), idempotency_key: uuid4() }) });
+    if (r.ok) { $("#cmd-hint").textContent = `Submitted: ${num}`; input.value = ""; }
+    else { const d = await r.json().catch(()=>({})); $("#cmd-hint").textContent = `Rejected: ${d.reason||r.status}`; input.disabled = false; }
+  } catch(e) { $("#cmd-hint").textContent = "Error: " + e.message; input.disabled = false; }
+}
+
+// Strategy
+function renderStrategy(st) {
+  st = st || {};
+  const mode = st.mode || "bisect";
+  $("#strat-mode").value = mode;
+  $("#strat-fixed-row").style.display = mode === "fixed" ? "flex" : "none";
+  $("#strat-seq-row").style.display = mode === "seq" ? "flex" : "none";
+  if (mode === "fixed" && st.number) $("#strat-number").value = st.number;
+  if (mode === "seq" && st.sequence) $("#strat-seq").value = st.sequence.join(",");
+}
+$("#strat-mode").addEventListener("change", () => {
+  const mode = $("#strat-mode").value;
+  $("#strat-fixed-row").style.display = mode === "fixed" ? "flex" : "none";
+  $("#strat-seq-row").style.display = mode === "seq" ? "flex" : "none";
+});
+$("#strat-apply").addEventListener("click", async () => {
+  const mode = $("#strat-mode").value;
+  const payload = { mode, agent_id: agentLabel(), idempotency_key: uuid4() };
+  if (mode === "fixed") payload.number = parseInt($("#strat-number").value) || 50;
+  if (mode === "seq") { const seq = $("#strat-seq").value.split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)); payload.sequence = seq.length ? seq : [50]; }
+  const r = await fetch("/api/strategy/set", { method: "POST", body: JSON.stringify(payload) });
+  $("#strat-status").textContent = r.ok ? "Applied: " + mode : "Failed: " + r.status;
+});
+
+// Whisper
+function renderWhispers(list) {
+  whispers = list || [];
+  const box = $("#whisper-list");
+  if (!whispers.length) { box.innerHTML = '<div class="empty">No whispers yet</div>'; return; }
+  box.innerHTML = whispers.map(w => {
+    const ack = w.latest_ack;
+    const chipCls = ack ? (ack.status||"pending") : "pending";
+    return `<div class="whisper-bubble"><div class="text">${_esc(w.text||"")}</div><span class="time">${(w.ts||"").slice(11,19)}</span><span class="ack-chip ${chipCls}">${chipCls}</span></div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+function sendWhisper() {
+  const ta = $("#whisper-text"); const text = ta.value.trim(); if (!text) return;
+  ta.disabled = true; $("#whisper-send").disabled = true;
+  fetch("/api/whisper", { method: "POST", body: JSON.stringify({ text, agent_id: agentLabel() }) }).then(r => { if (r.ok) ta.value = ""; }).finally(() => { ta.disabled = false; $("#whisper-send").disabled = false; ta.focus(); });
+}
+$("#whisper-send").addEventListener("click", sendWhisper);
+$("#whisper-text").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWhisper(); } });
+
+// History
+function pushEvent(payload) {
+  const st = payload?.structured || payload || {};
+  if (!st.attempt) return;
+  const item = { attempt: st.attempt, number: st.number, result: st.result, winner: st.winner, game_over: !!st.game_over, secret_number: st.secret_number };
+  if (guesses.some(g => g.attempt === item.attempt)) { guesses = guesses.map(g => g.attempt === item.attempt ? {...g, ...item} : g); }
+  else { guesses.push(item); }
+  guesses.sort((a,b) => a.attempt - b.attempt);
+  renderGuesses();
+}
+function renderGuesses() {
+  const box = $("#guesses");
+  if (!guesses.length) { box.innerHTML = '<div class="empty">No guesses yet</div>'; return; }
+  box.innerHTML = guesses.map(g => {
+    const cls = g.result === "hit" ? "hit" : g.result === "exhausted" ? "exhausted" : g.result === "higher" ? "higher" : "lower";
+    const label = g.result === "hit" ? "HIT!" : g.result === "exhausted" ? "EXHAUSTED" : g.result === "higher" ? "↑ higher" : "↓ lower";
+    return `<div class="g ${cls}"><div class="head">#${g.attempt}</div><div class="num">${g.number}</div><div class="result">${label}</div></div>`;
+  }).join("");
+}
+
+// SSE
+const es = new EventSource("/sse/stream");
+es.addEventListener("snapshot", e => renderSnapshot(JSON.parse(e.data)));
+es.addEventListener("strategy", e => renderStrategy(JSON.parse(e.data)));
+es.addEventListener("whispers", e => renderWhispers(JSON.parse(e.data)));
+es.addEventListener("whisper", e => { whispers.push(JSON.parse(e.data)); renderWhispers(whispers); });
+es.addEventListener("whisper_ack", e => { fetch("/api/whispers").then(r=>r.json()).then(w=>renderWhispers(w)).catch(()=>{}); });
+es.addEventListener("event", e => pushEvent(JSON.parse(e.data)));
+es.addEventListener("detail", e => pushEvent(JSON.parse(e.data)));
+es.onerror = () => {};
+
+(async () => {
+  try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
+  try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
+  try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}
+  try { (await fetch("/api/details").then(r=>r.json())).forEach(pushEvent); } catch(e) {}
+})();
+</script>
+</body>
+</html>

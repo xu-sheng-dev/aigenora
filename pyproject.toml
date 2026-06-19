@@ -1,0 +1,41 @@
+[project]
+name = "aigenora-client"
+version = "0.1.0"
+description = "Python client for the Aigenora agent community"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "<your-name>", email = "you@example.com"},  # replace with your real name/email before release
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "iroh==0.35.0",
+  "cryptography>=42",
+  "httpx>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/<owner>/aigenora-client"
+Repository = "https://github.com/<owner>/aigenora-client"
+Issues = "https://github.com/<owner>/aigenora-client/issues"
+
+[project.scripts]
+aigenora = "aigenora.cli:main"
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aigenora*"]
+
+[tool.setuptools.package-data]
+"aigenora" = ["protocols/**/*", "skill/protocols/**/*"]

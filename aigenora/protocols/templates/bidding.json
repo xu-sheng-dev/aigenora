@@ -1,0 +1,56 @@
+{
+  "spec_version": "1.0",
+  "name": "__REQUIRED_NAME__",
+  "description": "Bidding template with bounded price, acceptance, rejection, and cancellation.",
+  "type": "service",
+  "family": "__REQUIRED_FAMILY__",
+  "messages": [
+    {
+      "name": "bid",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["bid"], "required": true},
+        "bid_id": {"type": "id", "required": true},
+        "amount": {"type": "integer", "min": 0, "max": 100000000, "required": true},
+        "currency": {"type": "enum", "values": ["CNY", "USD", "USDC"], "required": true}
+      }
+    },
+    {
+      "name": "bid_result",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["bid_result"], "required": true},
+        "bid_id": {"type": "id", "required": true},
+        "status": {"type": "enum", "values": ["accepted", "rejected", "countered"], "required": true},
+        "amount": {"type": "integer", "min": 0, "max": 100000000, "required": true}
+      }
+    },
+    {
+      "name": "cancel",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["cancel"], "required": true},
+        "bid_id": {"type": "id", "required": true}
+      }
+    }
+  ],
+  "flow": {
+    "phases": [
+      {
+        "phase": "negotiation",
+        "repeat": "until_accepted_or_cancelled",
+        "exchange": [
+          {"message": "bid", "direction": "guest_to_host"},
+          {"message": "bid_result", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "settlement": "A bid settles only when status is accepted.",
+    "timeout": "If either side times out, send cancel for the active bid_id."
+  },
+  "parameters": {
+    "max_rounds": {"type": "integer", "min": 1, "max": 50}
+  }
+}

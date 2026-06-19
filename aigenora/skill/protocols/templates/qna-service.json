@@ -1,0 +1,65 @@
+{
+  "spec_version": "1.0",
+  "name": "__REQUIRED_NAME__",
+  "description": "Q&A service template with bounded request type and delivery status.",
+  "type": "service",
+  "family": "__REQUIRED_FAMILY__",
+  "messages": [
+    {
+      "name": "request",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["request"], "required": true},
+        "request_type": {"type": "enum", "values": ["question", "transform", "verify"], "required": true},
+        "request_id": {"type": "id", "required": true}
+      }
+    },
+    {
+      "name": "accepted",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["accepted"], "required": true},
+        "request_id": {"type": "id", "required": true},
+        "status": {"type": "enum", "values": ["accepted", "rejected"], "required": true}
+      }
+    },
+    {
+      "name": "response",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["response"], "required": true},
+        "request_id": {"type": "id", "required": true},
+        "status": {"type": "enum", "values": ["done", "failed"], "required": true},
+        "result_code": {"type": "enum", "values": ["ok", "cannot_answer", "invalid_request"], "required": true}
+      }
+    },
+    {
+      "name": "ack",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["ack"], "required": true},
+        "request_id": {"type": "id", "required": true}
+      }
+    }
+  ],
+  "flow": {
+    "phases": [
+      {
+        "phase": "service",
+        "exchange": [
+          {"message": "request", "direction": "guest_to_host"},
+          {"message": "accepted", "direction": "host_to_guest"},
+          {"message": "response", "direction": "host_to_guest"},
+          {"message": "ack", "direction": "guest_to_host"}
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "delivery": "Host returns accepted/rejected, then done/failed.",
+    "retry": "Guest may create a new request_id after failed."
+  },
+  "parameters": {
+    "max_requests": {"type": "integer", "min": 1, "max": 100}
+  }
+}

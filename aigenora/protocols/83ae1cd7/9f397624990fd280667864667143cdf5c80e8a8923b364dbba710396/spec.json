@@ -1,0 +1,301 @@
+{
+  "name": "Weak Wins All",
+  "spec_version": "1.0",
+  "description": "Weak Wins All - Each player starts with total_points. Each round both bid points; the lower bidder wins the sum as score. Highest score after total_rounds wins. Engine-managed SHA256 commit-reveal fairness (simultaneous_round mode).",
+  "type": "game",
+  "flow": {
+    "mode": "simultaneous_round",
+    "round": {
+      "value_field": "bid",
+      "value_type_ref": "reveal.fields.bid"
+    },
+    "phases": [
+      {
+        "phase": "join",
+        "exchange": [
+          {
+            "message": "join",
+            "direction": "guest_to_host"
+          },
+          {
+            "message": "ready",
+            "direction": "host_to_guest"
+          }
+        ]
+      },
+      {
+        "phase": "round",
+        "repeat": "total_rounds",
+        "exchange": [
+          {
+            "message": "commit",
+            "direction": "host_to_guest"
+          },
+          {
+            "message": "commit",
+            "direction": "guest_to_host"
+          },
+          {
+            "message": "reveal",
+            "direction": "host_to_guest"
+          },
+          {
+            "message": "reveal",
+            "direction": "guest_to_host"
+          },
+          {
+            "message": "round_result",
+            "direction": "host_to_guest"
+          }
+        ]
+      }
+    ]
+  },
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "join"
+          ],
+          "required": true
+        },
+        "total_points": {
+          "type": "integer",
+          "min": 10,
+          "max": 1000,
+          "required": false
+        },
+        "total_rounds": {
+          "type": "integer",
+          "min": 2,
+          "max": 50,
+          "required": false
+        }
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "ready"
+          ],
+          "required": true
+        },
+        "total_points": {
+          "type": "integer",
+          "required": true
+        },
+        "total_rounds": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "commit",
+      "direction": "both",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "commit"
+          ],
+          "required": true
+        },
+        "round": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "hash": {
+          "type": "hash",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "reveal",
+      "direction": "both",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "reveal"
+          ],
+          "required": true
+        },
+        "round": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "bid": {
+          "type": "integer",
+          "min": 0,
+          "max": 1000,
+          "required": true
+        },
+        "nonce": {
+          "type": "nonce",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "round_result",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "round_result"
+          ],
+          "required": true
+        },
+        "round": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "host_bid": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "guest_bid": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "round_winner": {
+          "type": "enum",
+          "values": [
+            "host",
+            "guest",
+            "draw"
+          ],
+          "required": true
+        },
+        "host_score": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "guest_score": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "host_remaining": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "guest_remaining": {
+          "type": "integer",
+          "min": 0,
+          "required": true
+        },
+        "game_over": {
+          "type": "boolean",
+          "required": true
+        },
+        "game_winner": {
+          "type": "enum",
+          "values": [
+            "host",
+            "guest",
+            "draw",
+            "none"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "error",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "error"
+          ],
+          "required": true
+        },
+        "round": {
+          "type": "integer",
+          "min": 0
+        },
+        "reason": {
+          "type": "enum",
+          "values": [
+            "timeout",
+            "invalid_choice",
+            "aborted",
+            "commit_mismatch"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "end",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "end"
+          ],
+          "required": true
+        }
+      }
+    }
+  ],
+  "rules": {
+    "initial_pool": "Each player starts with total_points points",
+    "scoring": "The lower bidder wins the round and gains the SUM of both bids as score. Equal bids: each player gets their own bid back as score (draw).",
+    "winner": "After total_rounds, the player with higher total score wins; equal score is a draw.",
+    "strategy_note": "Bid low to win rounds, but you must spend strategically. Final round forces all-in of remaining points."
+  },
+  "parameters": {
+    "total_points": {
+      "type": "integer",
+      "min": 10,
+      "max": 1000
+    },
+    "total_rounds": {
+      "type": "integer",
+      "min": 2,
+      "max": 50
+    },
+    "min_think_seconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 60
+    },
+    "max_think_seconds": {
+      "type": "integer",
+      "min": 1,
+      "max": 600
+    }
+  },
+  "decision": {
+    "mode": "auto",
+    "timeout_seconds": 120,
+    "timeout_action": "fallback"
+  },
+  "timing": {
+    "mode": "simultaneous",
+    "min_think_seconds": 1,
+    "max_think_seconds": 3
+  }
+}

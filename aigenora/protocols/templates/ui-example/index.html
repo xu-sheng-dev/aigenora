@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Aigenora UI Example</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 24px; }
+    h1 { color: #2c3e50; }
+    .snapshot { background: #f4f6f8; padding: 12px; border-radius: 6px; margin: 8px 0; }
+    .actions button { margin-right: 8px; padding: 8px 16px; cursor: pointer; }
+    .status { font-style: italic; color: #6c757d; }
+  </style>
+</head>
+<body>
+  <h1>Aigenora UI Example</h1>
+  <p class="status">Waiting for parent broadcast bridge...</p>
+
+  <div class="snapshot" id="snapshot">No snapshot yet</div>
+
+  <div class="actions">
+    <button id="btn-decide" disabled>Submit Decision</button>
+    <button id="btn-refresh" disabled>Refresh Snapshot</button>
+  </div>
+
+<script>
+// ============================================================================
+// v006 P4 UI <-> broadcast bridge
+// Docs: docs/cn/SKILL.md §UI postMessage protocol
+// ============================================================================
+
+(function () {
+  "use strict";
+
+  // Parent origin from query string (?parent=http://127.0.0.1:PORT)
+  // Fallback to window.location.origin for direct iframe testing.
+  var PARENT_ORIGIN = new URLSearchParams(window.location.search).get("parent")
+                     || window.location.origin;
+
+  // Pending requests by id
+  var pending = {};
+
+  function sendToParent(msg) {
+    // Always target PARENT_ORIGIN (never "*")
+    window.parent.postMessage(Object.assign({ source: "aigenora-ui" }, msg), PARENT_ORIGIN);
+  }
+
+  // Handle responses + pushes from parent
+  window.addEventListener("message", function (ev) {
+    var data = ev.data || {};
+    if (data.source !== "aigenora-broadcast") return;
+    // Strict origin check
+    if (ev.origin !== PARENT_ORIGIN) {
+      console.warn("ignoring message from unexpected origin:", ev.origin);
+      return;
+    }
+    if (data.type === "hello-ack") {
+      console.log("granted capabilities:", data.granted);
+      return;
+    }
+    if (data.type === "response") {
+      var cb = pending[data.id];
+      if (cb) {
+        cb(data);
+        delete pending[data.id];
+      }
+      return;
+    }
+    if (data.type === "push") {
+      if (data.event === "snapshot") {
+        renderSnapshot(data.data);
+      }
+      return;
+    }
+  });
+
+  function request(method, body) {
+    return new Promise(function (resolve) {
+      var id = "r_" + Math.random().toString(36).slice(2);
+      pending[id] = resolve;
+      sendToParent({ type: "request", id: id, method: method, body: body });
+    });
+  }
+
+  function renderSnapshot(snap) {
+    var el = document.getElementById("snapshot");
+    if (!snap) { el.textContent = "No snapshot yet"; return; }
+    el.innerHTML = "<pre>" + JSON.stringify(snap, null, 2) + "</pre>";
+  }
+
+  // Hello handshake — declare capabilities
+  sendToParent({
+    type: "hello",
+    capabilities: ["snapshot", "strategy", "decide", "details", "events"],
+  });
+
+  // Enable action buttons once parent bridge responds
+  setTimeout(function () {
+    document.querySelector(".status").textContent = "Connected to broadcast.";
+    document.getElementById("btn-decide").disabled = false;
+    document.getElementById("btn-refresh").disabled = false;
+    // Initial snapshot pull
+    request("snapshot").then(function (r) {
+      if (r.ok) renderSnapshot(r.data);
+    });
+  }, 500);
+
+  document.getElementById("btn-refresh").addEventListener("click", function () {
+    request("snapshot").then(function (r) {
+      if (r.ok) renderSnapshot(r.data);
+    });
+  });
+
+  document.getElementById("btn-decide").addEventListener("click", function () {
+    var body = window.prompt("Enter decision JSON (e.g. {\"action\":\"commit\",\"value\":\"rock\"})");
+    if (!body) return;
+    try {
+      var parsed = JSON.parse(body);
+      request("decide", parsed).then(function (r) {
+        alert(r.ok ? "Submitted" : ("Failed: " + (r.data && r.data.error)));
+      });
+    } catch (e) {
+      alert("Invalid JSON: " + e.message);
+    }
+  });
+})();
+</script>
+</body>
+</html>

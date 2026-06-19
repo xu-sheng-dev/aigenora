@@ -1,0 +1,237 @@
+{
+  "name": "Guess Number",
+  "spec_version": "1.0",
+  "description": "Host picks a secret number, guest guesses with higher/lower hints",
+  "type": "game",
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "join"
+          ],
+          "required": true
+        },
+        "max_attempts": {
+          "type": "integer",
+          "min": 1,
+          "max": 100,
+          "required": false
+        }
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "ready"
+          ],
+          "required": true
+        },
+        "range_min": {
+          "type": "integer",
+          "required": true
+        },
+        "range_max": {
+          "type": "integer",
+          "required": true
+        },
+        "max_attempts": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "guess",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "guess"
+          ],
+          "required": true
+        },
+        "attempt": {
+          "type": "integer",
+          "min": 1,
+          "required": true
+        },
+        "number": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "hint",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "hint"
+          ],
+          "required": true
+        },
+        "attempt": {
+          "type": "integer",
+          "required": true
+        },
+        "result": {
+          "type": "enum",
+          "values": [
+            "higher",
+            "lower",
+            "correct"
+          ],
+          "required": true
+        },
+        "attempts_used": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "game_over",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "game_over"
+          ],
+          "required": true
+        },
+        "winner": {
+          "type": "enum",
+          "values": [
+            "host",
+            "guest"
+          ],
+          "required": true
+        },
+        "secret_number": {
+          "type": "integer",
+          "required": true
+        },
+        "total_attempts": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "error",
+      "direction": "both",
+      "fields": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "error"
+          ],
+          "required": true
+        },
+        "reason": {
+          "type": "enum",
+          "values": [
+            "invalid_guess",
+            "unexpected_action",
+            "invalid_message"
+          ],
+          "required": true
+        }
+      }
+    }
+  ],
+  "flow": {
+    "mode": "session_loop",
+    "phases": [
+      {
+        "phase": "join",
+        "exchange": [
+          {
+            "message": "join",
+            "direction": "guest_to_host"
+          },
+          {
+            "message": "ready",
+            "direction": "host_to_guest"
+          }
+        ]
+      },
+      {
+        "phase": "play",
+        "repeat": "until game_over",
+        "exchange": [
+          {
+            "message": "guess",
+            "direction": "guest_to_host"
+          },
+          {
+            "message": "hint",
+            "direction": "host_to_guest"
+          }
+        ]
+      },
+      {
+        "phase": "end",
+        "exchange": [
+          {
+            "message": "game_over",
+            "direction": "host_to_guest"
+          }
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "setup": "Host randomly picks secret number in [range_min, range_max]",
+    "turn": "Guest sends guess. Host replies higher/lower/correct.",
+    "game_over": "Guest guesses correctly -> guest wins. max_attempts reached -> host wins.",
+    "cheat_detection": "After game, guest can verify host's hints are self-consistent with the revealed secret."
+  },
+  "parameters": {
+    "range_min": {
+      "type": "integer",
+      "min": 1
+    },
+    "range_max": {
+      "type": "integer",
+      "max": 10000
+    },
+    "max_attempts": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "min_think_seconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 60
+    },
+    "max_think_seconds": {
+      "type": "integer",
+      "min": 1,
+      "max": 600
+    }
+  },
+  "decision": {
+    "mode": "auto",
+    "timeout_seconds": 120,
+    "timeout_action": "fallback"
+  },
+  "timing": {
+    "mode": "sequential",
+    "min_think_seconds": 1,
+    "max_think_seconds": 3
+  }
+}

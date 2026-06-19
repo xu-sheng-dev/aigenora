@@ -1,0 +1,255 @@
+{
+  "version": 2,
+  "layout": "sha256-8-56",
+  "protocols": [
+    {
+      "alias": "rps-v1",
+      "name": "Rock-Paper-Scissors",
+      "description": "Best-of-N Rock-Paper-Scissors with SHA256 commit-reveal fairness guarantee and v004 turn timing",
+      "type": "game",
+      "family": "rps",
+      "tags": [
+        "game",
+        "rps",
+        "commit-reveal",
+        "timing"
+      ],
+      "capabilities": [
+        "simultaneous_choice",
+        "commit_reveal",
+        "score_best_of",
+        "turn_timing"
+      ],
+      "status": "active",
+      "protocol_id": "b5d235f2fab5e22983329505a44f3778a06946d6107f1884370e2bb6656fcfe2",
+      "path": "b5d235f2/fab5e22983329505a44f3778a06946d6107f1884370e2bb6656fcfe2",
+      "parent_protocol_id": null,
+      "created_reason": "v009: timing 1/3 + per-invitation min/max_think_seconds override",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "single round quick match",
+          "options": {
+            "best_of": 1,
+            "termination": "first_to_win",
+            "round_delay_seconds": 0
+          }
+        },
+        "standard": {
+          "description": "best of 3, first to win",
+          "options": {
+            "best_of": 3,
+            "termination": "first_to_win",
+            "round_delay_seconds": 0
+          }
+        },
+        "long": {
+          "description": "best of 5, first to win",
+          "options": {
+            "best_of": 5,
+            "termination": "first_to_win",
+            "round_delay_seconds": 0
+          }
+        },
+        "marathon": {
+          "description": "play exactly 5 rounds, more wins takes it",
+          "options": {
+            "best_of": 5,
+            "termination": "fixed_rounds",
+            "round_delay_seconds": 0
+          }
+        },
+        "paced": {
+          "description": "best of 3 with 2s pause between rounds",
+          "options": {
+            "best_of": 3,
+            "termination": "first_to_win",
+            "round_delay_seconds": 2
+          }
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
+    },
+    {
+      "alias": "coin-flip-v1",
+      "name": "Coin Flip",
+      "description": "Guest calls heads or tails, Host flips a coin. SHA256 commit-reveal prevents cheating. v004 turn timing.",
+      "type": "game",
+      "family": "coin-flip",
+      "tags": [
+        "game",
+        "coin-flip",
+        "timing"
+      ],
+      "capabilities": [
+        "call_choice",
+        "commit_reveal",
+        "binary_outcome",
+        "turn_timing"
+      ],
+      "status": "active",
+      "protocol_id": "9e5df77c31b613dd16b015ed802d4d063d446c4e381382885683c89b7f5ee48f",
+      "path": "9e5df77c/31b613dd16b015ed802d4d063d446c4e381382885683c89b7f5ee48f",
+      "parent_protocol_id": null,
+      "created_reason": "v009: timing 1/3 + per-invitation min/max_think_seconds override",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "single flip",
+          "options": {
+            "best_of": 1
+          }
+        },
+        "standard": {
+          "description": "best of 3",
+          "options": {
+            "best_of": 3
+          }
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
+    },
+    {
+      "alias": "guess-number-v1",
+      "name": "Guess Number",
+      "description": "Host picks a secret number, guest guesses with higher/lower hints. v004 turn timing.",
+      "type": "game",
+      "family": "guess-number",
+      "tags": [
+        "game",
+        "guess-number",
+        "timing"
+      ],
+      "capabilities": [
+        "secret_number",
+        "bounded_integer_guess",
+        "higher_lower_hint",
+        "turn_timing"
+      ],
+      "status": "active",
+      "protocol_id": "166570eff5c0864d31ccafb9d04ea5154184542085dfa401a9c3590f6831e8c8",
+      "path": "166570ef/f5c0864d31ccafb9d04ea5154184542085dfa401a9c3590f6831e8c8",
+      "parent_protocol_id": null,
+      "created_reason": "v009: timing 1/3 + per-invitation min/max_think_seconds override",
+      "default_profile": "standard",
+      "profiles": {
+        "easy": {
+          "description": "range 1-50, 10 attempts",
+          "options": {
+            "range_min": 1,
+            "range_max": 50,
+            "max_attempts": 10
+          }
+        },
+        "standard": {
+          "description": "range 1-100, 7 attempts",
+          "options": {
+            "range_min": 1,
+            "range_max": 100,
+            "max_attempts": 7
+          }
+        },
+        "hard": {
+          "description": "range 1-200, 5 attempts",
+          "options": {
+            "range_min": 1,
+            "range_max": 200,
+            "max_attempts": 5
+          }
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
+    },
+    {
+      "alias": "weak-wins-all",
+      "name": "Weak Wins All",
+      "description": "Strategic bidding game with commit-reveal. v004 turn timing.",
+      "type": "game",
+      "family": "weak-wins-all",
+      "tags": [
+        "game",
+        "weak-wins-all",
+        "timing"
+      ],
+      "capabilities": [
+        "resource_allocation",
+        "multi_round_score",
+        "lower_bid_wins",
+        "commit_reveal",
+        "turn_timing"
+      ],
+      "status": "active",
+      "protocol_id": "83ae1cd79f397624990fd280667864667143cdf5c80e8a8923b364dbba710396",
+      "path": "83ae1cd7/9f397624990fd280667864667143cdf5c80e8a8923b364dbba710396",
+      "parent_protocol_id": null,
+      "created_reason": "v009: timing 1/3 + per-invitation min/max_think_seconds override",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "3 rounds, 50 points",
+          "options": {
+            "total_points": 50
+          }
+        },
+        "standard": {
+          "description": "5 rounds, 100 points",
+          "options": {
+            "total_points": 100
+          }
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
+    },
+    {
+      "alias": "human-chat-v1",
+      "name": "Human Chat",
+      "description": "Two human users chat via P2P. Agents only relay messages without interpretation; both CLI stdin and webui can drive sending.",
+      "type": "chat",
+      "family": "human-chat",
+      "tags": [
+        "chat",
+        "human",
+        "p2p"
+      ],
+      "capabilities": [
+        "free_form_chat",
+        "seq_ordered",
+        "webui",
+        "stdin"
+      ],
+      "status": "active",
+      "protocol_id": "59da01bc80d2ac385e0c9c642ad578ffa83b8fe273c4df21d80b2555437b8a31",
+      "path": "59da01bc/80d2ac385e0c9c642ad578ffa83b8fe273c4df21d80b2555437b8a31",
+      "parent_protocol_id": null,
+      "created_reason": "v006 P5: free-mode inbox + webui (replaces proxy-chat)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "free-form bidirectional chat",
+          "options": {}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
+    }
+  ]
+}

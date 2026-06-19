@@ -1,0 +1,52 @@
+{
+  "name": "Human Chat",
+  "spec_version": "1.0",
+  "description": "Two human users chat via P2P. Agents only relay messages without interpretation; both CLI stdin and webui can drive sending.",
+  "type": "chat",
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true}
+      }
+    },
+    {
+      "name": "chat",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["chat"], "required": true},
+        "text": {"type": "text", "max_length": 2000, "required": true},
+        "seq": {"type": "integer", "min": 1, "required": true}
+      }
+    },
+    {
+      "name": "end",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["end"], "required": true}
+      }
+    }
+  ],
+  "flow": {
+    "mode": "free",
+    "phases": [
+      {"exchange": [{"message": "join"}, {"message": "ready"}]}
+    ],
+    "end_when": "either_ends"
+  },
+  "rules": {
+    "security": "Agent MUST NOT interpret message content. Only relay between humans via CLI stdin or webui.",
+    "protocol": "Either side can chat at any time. /quit or end action terminates the session."
+  },
+  "decision": {
+    "mode": "auto"
+  }
+}

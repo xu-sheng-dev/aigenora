@@ -1,0 +1,36 @@
+# Sensitive: local identity and private key (NEVER commit)
+.aigenora/
+
+# Python build artifacts and caches
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.local
+
+# Development-only directories (not part of the open-source release)
+tests/
+scripts/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+
+# Operating systems
+.DS_Store
+Thumbs.db

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weak Wins All · Business Panel</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif;
+         display: grid; grid-template-rows: auto 1fr auto; min-height: 100%;
+         background: linear-gradient(180deg, transparent, #8881 100%); }
+  header { padding: 14px 20px; border-bottom: 1px solid #8884; display: flex;
+           align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+  header .meta { color: #888; font-size: 12px; }
+  header .tag { display: inline-block; padding: 2px 8px; border-radius: 3px;
+                background: #58f4; font-size: 11px; margin-left: 6px; }
+  header .tag.over { background: #5b34; }
+  header .tag.waiting { background: #f844; }
+  main { padding: 20px; display: grid; gap: 18px; grid-template-columns: 1fr 1fr; align-content: start; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 16px 18px;
+          background: #8881; backdrop-filter: blur(6px); }
+  .card h2 { margin: 0 0 12px; font-size: 11px; color: #888;
+             text-transform: uppercase; letter-spacing: .08em; }
+  .hint { margin-top: 10px; font-size: 12px; color: #888; line-height: 1.5; }
+  .score-display { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; text-align: center; margin-bottom: 8px; }
+  .score-display .num { font-size: 36px; font-weight: 800; }
+  .score-display .dash { font-size: 24px; color: #888; align-self: center; }
+  .score-display .role { font-size: 11px; color: #888; }
+  .pool-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: center; margin-top: 8px; }
+  .pool-row .label { font-size: 11px; color: #888; }
+  .pool-row .val { font-size: 14px; font-weight: 600; }
+  .score-meta { font-size: 12px; color: #888; text-align: center; margin-top: 6px; }
+  .game-summary { margin-top: 10px; font-size: 14px; font-weight: 600; text-align: center; color: #fb4; min-height: 18px; }
+  .bid-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .bid-row input[type=number] { width: 110px; padding: 8px; font-size: 18px; text-align: center;
+    border: 2px solid #8884; border-radius: 6px; background: transparent; color: inherit; }
+  .bid-row input:disabled { opacity: .4; }
+  .bid-row button { padding: 8px 18px; font-size: 13px; }
+  .bid-row button:disabled { opacity: .4; cursor: not-allowed; }
+  .strat-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .strat-row select, .strat-row input { font-size: 12px; padding: 6px; border: 1px solid #8884;
+    border-radius: 4px; background: transparent; color: inherit; }
+  .strat-row select { min-width: 100px; }
+  button { padding: 6px 14px; border: 1px solid #8884; background: #8881; color: inherit;
+           border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #8883; }
+  .strat-status { font-size: 11px; color: #888; margin-top: 6px; }
+  .whisper-list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column;
+                  gap: 6px; min-height: 60px; }
+  .whisper-list .empty { color: #888; font-size: 12px; text-align: center; padding: 16px 0; }
+  .whisper-bubble { display: flex; align-items: flex-start; gap: 6px; }
+  .whisper-bubble .text { font-size: 12px; padding: 6px 10px; border-radius: 8px;
+                          background: #8882; flex: 1; word-break: break-word; }
+  .whisper-bubble .time { font-size: 10px; color: #888; white-space: nowrap; margin-top: 2px; }
+  .ack-chip { font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+  .ack-chip.pending { background: #8883; color: #888; }
+  .ack-chip.executed { background: #5b34; color: #5b5; }
+  .ack-chip.dismissed { background: #8884; color: #888; }
+  .ack-chip.unparsed { background: #f844; color: #fb4; }
+  .ack-chip.error { background: #f334; color: #f55; }
+  .whisper-input { display: flex; gap: 6px; margin-top: 10px; }
+  .whisper-input textarea { flex: 1; min-height: 36px; max-height: 100px; resize: none;
+    padding: 8px; font-size: 12px; border: 1px solid #8884; border-radius: 4px;
+    background: transparent; color: inherit; font-family: inherit; }
+  .whisper-input button { align-self: flex-end; }
+  .history-card { grid-column: 1 / -1; }
+  .rounds { display: flex; flex-direction: column; gap: 6px; }
+  .rounds .rd { display: grid; grid-template-columns: 40px 1fr 1fr 80px 90px; gap: 8px; align-items: center;
+                padding: 6px 10px; border: 1px solid #8884; border-radius: 6px; font-size: 12px; }
+  .rounds .rd .no { font-weight: 700; color: #888; }
+  .rounds .rd .winner { text-align: center; font-weight: 600; }
+  .rounds .rd .winner.host { color: #5b5; }
+  .rounds .rd .winner.guest { color: #58f; }
+  .rounds .rd .winner.draw { color: #888; }
+  .empty { text-align: center; color: #888; font-size: 13px; padding: 20px 0; }
+  footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
+  footer code { font-family: "Consolas", "Menlo", monospace; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Weak Wins All <span class="tag" id="phase-tag">--</span></h1></div>
+  <div class="meta" id="meta">connecting...</div>
+</header>
+<main>
+  <!-- Score -->
+  <section class="card">
+    <h2>Score</h2>
+    <div class="score-display">
+      <div><div class="num" id="host-score">0</div><div class="role">Host</div></div>
+      <div class="dash">vs</div>
+      <div><div class="num" id="guest-score">0</div><div class="role">Guest</div></div>
+    </div>
+    <div class="pool-row">
+      <div><div class="label">Host pool left</div><div class="val" id="host-remaining">-</div></div>
+      <div><div class="label">Guest pool left</div><div class="val" id="guest-remaining">-</div></div>
+    </div>
+    <div class="score-meta">Round <span id="round-num">1</span> of <span id="total-rounds">5</span> · pool <span id="total-points">100</span></div>
+    <div class="game-summary" id="game-summary"></div>
+  </section>
+
+  <!-- Direct Command -->
+  <section class="card" id="direct-command">
+    <h2>Direct Command</h2>
+    <div class="hint">Lower bidder wins the round and gains the sum. Final round: forced all-in.</div>
+    <div class="hint" id="role-hint"></div>
+    <div class="bid-row">
+      <input type="number" id="bid-input" placeholder="?" min="0" disabled>
+      <button id="bid-submit" disabled>Submit Bid</button>
+    </div>
+    <div class="hint" id="cmd-hint">Waiting for coach mode...</div>
+  </section>
+
+  <!-- Strategy -->
+  <section class="card" id="strategy">
+    <h2>Strategy</h2>
+    <div class="hint">Auto bid strategy when not coaching.</div>
+    <div class="strat-row">
+      <label>mode</label>
+      <select id="strat-mode"><option value="even_split">even_split</option><option value="fixed">fixed</option><option value="percent">percent</option><option value="seq">seq</option><option value="random">random</option></select>
+    </div>
+    <div class="strat-row" id="strat-fixed-row" style="display:none">
+      <label>bid</label>
+      <input id="strat-bid" type="number" placeholder="5" style="width:80px">
+    </div>
+    <div class="strat-row" id="strat-percent-row" style="display:none">
+      <label>percent</label>
+      <input id="strat-percent" type="number" placeholder="20" style="width:80px">%
+    </div>
+    <div class="strat-row" id="strat-seq-row" style="display:none">
+      <label>sequence</label>
+      <input id="strat-seq" placeholder="5,5,10,15" style="flex:1">
+    </div>
+    <div class="strat-row"><button id="strat-apply">Apply</button></div>
+    <div class="strat-status" id="strat-status"></div>
+  </section>
+
+  <!-- Whisper -->
+  <section class="card" id="whisper" style="grid-column: 1 / -1;">
+    <h2>Whisper</h2>
+    <div class="whisper-list" id="whisper-list"><div class="empty">No whispers yet</div></div>
+    <div class="whisper-input">
+      <textarea id="whisper-text" placeholder="Type a message..." rows="1"></textarea>
+      <button id="whisper-send">Send</button>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section class="card history-card">
+    <h2>Round History</h2>
+    <div class="rounds" id="rounds"><div class="empty">No rounds played yet</div></div>
+  </section>
+</main>
+<footer>Weak Wins All · reads via <code>/api/*</code> and <code>/sse/stream</code></footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let snap = {}, rounds = [], whispers = [];
+let myRole = null;
+
+function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
+function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
+function _esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function myRemaining() { const r = snap.remaining || {}; return myRole === "host" ? (r.host ?? snap.total_points ?? 0) : myRole === "guest" ? (r.guest ?? snap.total_points ?? 0) : (r.host ?? 0); }
+
+function renderSnapshot(s) {
+  snap = s || {};
+  myRole = snap.role || myRole;
+  const score = snap.score || { host: 0, guest: 0 };
+  const remaining = snap.remaining || {};
+  $("#host-score").textContent = score.host ?? 0;
+  $("#guest-score").textContent = score.guest ?? 0;
+  $("#host-remaining").textContent = remaining.host ?? snap.total_points ?? "-";
+  $("#guest-remaining").textContent = remaining.guest ?? snap.total_points ?? "-";
+  $("#round-num").textContent = snap.round ?? 1;
+  $("#total-rounds").textContent = snap.total_rounds ?? 5;
+  $("#total-points").textContent = snap.total_points ?? 100;
+  const phase = snap.phase || "--";
+  const phaseTag = $("#phase-tag");
+  if (phase === "game_over") { phaseTag.textContent = "game over"; phaseTag.className = "tag over"; }
+  else if (phase === "waiting_peer") { phaseTag.textContent = "waiting"; phaseTag.className = "tag waiting"; }
+  else { phaseTag.textContent = phase; phaseTag.className = "tag"; }
+  $("#meta").textContent = `Weak Wins All · ${myRole || "?"} · ${phase}`;
+  if (phase === "game_over") {
+    const st = snap.last_event?.structured || {};
+    const w = st.game_winner || "none";
+    $("#game-summary").textContent = w === "host" ? "Host wins!" : w === "guest" ? "Guest wins!" : w === "draw" ? "Draw!" : "Game over";
+  } else { $("#game-summary").textContent = ""; }
+  updateDirectCommand();
+}
+
+function updateDirectCommand() {
+  const timing = snap.timing;
+  const phase = snap.phase;
+  const roleHint = $("#role-hint");
+  const cmdHint = $("#cmd-hint");
+  const input = $("#bid-input");
+  const btn = $("#bid-submit");
+  const enable = timing && timing.match_key === "round" && phase !== "game_over";
+  input.disabled = !enable;
+  btn.disabled = !enable;
+  const rem = myRemaining();
+  input.max = rem;
+  if (myRole) { roleHint.textContent = `You are the ${myRole}. You have ${rem} pool points left to bid.`; }
+  else { roleHint.textContent = ""; }
+  if (phase === "game_over") { cmdHint.textContent = "Game over."; }
+  else if (!timing || timing.match_key !== "round") { cmdHint.textContent = "Waiting for coach mode..."; }
+  else { cmdHint.textContent = `Round ${timing.match_value + 1} — bid 0..${rem}.`; }
+}
+
+$("#bid-submit").addEventListener("click", submitBid);
+$("#bid-input").addEventListener("keydown", e => { if (e.key === "Enter") submitBid(); });
+
+async function submitBid() {
+  const input = $("#bid-input");
+  const timing = snap.timing;
+  if (!timing || timing.match_key !== "round") return;
+  const bid = parseInt(input.value);
+  const rem = myRemaining();
+  if (isNaN(bid) || bid < 0 || bid > rem) { $("#cmd-hint").textContent = `Bid must be in [0, ${rem}]`; return; }
+  input.disabled = true;
+  $("#bid-submit").disabled = true;
+  try {
+    const r = await fetch("/api/decide", { method: "POST", body: JSON.stringify({ round: timing.match_value, bid, agent_id: agentLabel(), idempotency_key: uuid4() }) });
+    if (r.ok) { $("#cmd-hint").textContent = `Submitted: ${bid}`; input.value = ""; }
+    else { const d = await r.json().catch(()=>({})); $("#cmd-hint").textContent = `Rejected: ${d.reason||r.status}`; input.disabled = false; $("#bid-submit").disabled = false; }
+  } catch(e) { $("#cmd-hint").textContent = "Error: " + e.message; input.disabled = false; $("#bid-submit").disabled = false; }
+}
+
+// Strategy
+function renderStrategy(st) {
+  st = st || {};
+  const mode = st.mode || "even_split";
+  $("#strat-mode").value = mode;
+  $("#strat-fixed-row").style.display = mode === "fixed" ? "flex" : "none";
+  $("#strat-percent-row").style.display = mode === "percent" ? "flex" : "none";
+  $("#strat-seq-row").style.display = mode === "seq" ? "flex" : "none";
+  if (mode === "fixed" && st.bid !== undefined) $("#strat-bid").value = st.bid;
+  if (mode === "percent" && st.percent !== undefined) $("#strat-percent").value = st.percent;
+  if (mode === "seq" && Array.isArray(st.sequence)) $("#strat-seq").value = st.sequence.join(",");
+}
+$("#strat-mode").addEventListener("change", () => {
+  const mode = $("#strat-mode").value;
+  $("#strat-fixed-row").style.display = mode === "fixed" ? "flex" : "none";
+  $("#strat-percent-row").style.display = mode === "percent" ? "flex" : "none";
+  $("#strat-seq-row").style.display = mode === "seq" ? "flex" : "none";
+});
+$("#strat-apply").addEventListener("click", async () => {
+  const mode = $("#strat-mode").value;
+  const payload = { mode, agent_id: agentLabel(), idempotency_key: uuid4() };
+  if (mode === "fixed") payload.bid = parseInt($("#strat-bid").value) || 5;
+  if (mode === "percent") payload.percent = parseFloat($("#strat-percent").value) || 20;
+  if (mode === "seq") { const seq = $("#strat-seq").value.split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)); payload.sequence = seq.length ? seq : [5]; }
+  const r = await fetch("/api/strategy/set", { method: "POST", body: JSON.stringify(payload) });
+  $("#strat-status").textContent = r.ok ? "Applied: " + mode : "Failed: " + r.status;
+});
+
+// Whisper
+function renderWhispers(list) {
+  whispers = list || [];
+  const box = $("#whisper-list");
+  if (!whispers.length) { box.innerHTML = '<div class="empty">No whispers yet</div>'; return; }
+  box.innerHTML = whispers.map(w => {
+    const ack = w.latest_ack;
+    const chipCls = ack ? (ack.status||"pending") : "pending";
+    return `<div class="whisper-bubble"><div class="text">${_esc(w.text||"")}</div><span class="time">${(w.ts||"").slice(11,19)}</span><span class="ack-chip ${chipCls}">${chipCls}</span></div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+function sendWhisper() {
+  const ta = $("#whisper-text"); const text = ta.value.trim(); if (!text) return;
+  ta.disabled = true; $("#whisper-send").disabled = true;
+  fetch("/api/whisper", { method: "POST", body: JSON.stringify({ text, agent_id: agentLabel() }) }).then(r => { if (r.ok) ta.value = ""; }).finally(() => { ta.disabled = false; $("#whisper-send").disabled = false; ta.focus(); });
+}
+$("#whisper-send").addEventListener("click", sendWhisper);
+$("#whisper-text").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWhisper(); } });
+
+// History
+function pushEvent(payload) {
+  const st = payload?.structured || payload || {};
+  if (st.round === undefined) return;
+  const item = {
+    round: st.round,
+    host_bid: st.host_bid,
+    guest_bid: st.guest_bid,
+    winner: st.winner,
+    host_score: st.host_score,
+    guest_score: st.guest_score,
+    host_remaining: st.host_remaining,
+    guest_remaining: st.guest_remaining,
+    game_over: !!st.game_over,
+    game_winner: st.game_winner,
+  };
+  if (rounds.some(g => g.round === item.round)) { rounds = rounds.map(g => g.round === item.round ? {...g, ...item} : g); }
+  else { rounds.push(item); }
+  rounds.sort((a,b) => a.round - b.round);
+  renderRounds();
+}
+function renderRounds() {
+  const box = $("#rounds");
+  if (!rounds.length) { box.innerHTML = '<div class="empty">No rounds played yet</div>'; return; }
+  box.innerHTML = rounds.map(g => {
+    const winnerCls = g.winner || "";
+    return `<div class="rd">
+      <span class="no">#${g.round}</span>
+      <span>Host bid ${g.host_bid ?? "?"}</span>
+      <span>Guest bid ${g.guest_bid ?? "?"}</span>
+      <span class="winner ${winnerCls}">${g.winner || "-"}</span>
+      <span>${g.host_score ?? 0}-${g.guest_score ?? 0}</span>
+    </div>`;
+  }).join("");
+}
+
+// SSE
+const es = new EventSource("/sse/stream");
+es.addEventListener("snapshot", e => renderSnapshot(JSON.parse(e.data)));
+es.addEventListener("strategy", e => renderStrategy(JSON.parse(e.data)));
+es.addEventListener("whispers", e => renderWhispers(JSON.parse(e.data)));
+es.addEventListener("whisper", e => { whispers.push(JSON.parse(e.data)); renderWhispers(whispers); });
+es.addEventListener("whisper_ack", e => { fetch("/api/whispers").then(r=>r.json()).then(w=>renderWhispers(w)).catch(()=>{}); });
+es.addEventListener("event", e => pushEvent(JSON.parse(e.data)));
+es.addEventListener("detail", e => pushEvent(JSON.parse(e.data)));
+es.onerror = () => {};
+
+(async () => {
+  try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
+  try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
+  try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}
+  try { (await fetch("/api/details").then(r=>r.json())).forEach(pushEvent); } catch(e) {}
+})();
+</script>
+</body>
+</html>
