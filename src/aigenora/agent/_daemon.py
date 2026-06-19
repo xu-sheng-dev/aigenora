@@ -9,7 +9,10 @@ from typing import Any
 from aigenora.proto.sdk import EventBus
 
 
-DEFAULT_STARTUP_WAIT_SECONDS = 15.0
+# Cold start of the business subprocess (iroh node + spec load + invitation publish) has been
+# observed at ~18-30s on Windows. 15s caused false "timeout waiting for invite_created" while
+# the subprocess was still alive. Override with AIGENORA_DAEMON_STARTUP_TIMEOUT env if needed.
+DEFAULT_STARTUP_WAIT_SECONDS = 30.0
 
 
 def startup_wait_seconds() -> float:

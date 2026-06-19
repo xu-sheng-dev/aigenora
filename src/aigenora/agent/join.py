@@ -104,12 +104,16 @@ def _run_daemon(args) -> int:
     if startup_event is not None:
         startup_data = startup_event.get("data") or {}
         session_id = str(startup_data.get("session_id") or "")
+        protocol_dir = str(startup_data.get("protocol_dir") or "")
         if session_id:
             session_meta["session_id"] = session_id
+        if protocol_dir:
+            session_meta["protocol_dir"] = protocol_dir
+        if session_id or protocol_dir:
             write_session_meta(state_dir, session_meta)
     else:
         exit_code = proc.poll()
-        if exit_code is not None:
+        if isinstance(exit_code, int):
             session_meta["status"] = "startup_failed"
             session_meta["exit_code"] = exit_code
             session_meta["startup_error"] = "process exited before peer_joined"
@@ -236,7 +240,14 @@ async def _join(args) -> int:
         await channel.send({"_session_ready": True, "session_id": session_id})
         print(f"[join] session_id: {session_id}")
         if event_bus:
-            event_bus.emit("peer_joined", {"host_public_key": host_public_key, "session_id": session_id})
+            # Carry protocol_dir back to the daemon parent so its session.json records it
+            # (mirrors host._run_daemon). Without this, web.resolve_protocol_dir cannot
+            # reverse-lookup the protocol on the guest side and /api/ui-available stays false.
+            event_bus.emit("peer_joined", {
+                "host_public_key": host_public_key,
+                "session_id": session_id,
+                "protocol_dir": str(proto_dir),
+            })
         await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
                               state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
                               heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),

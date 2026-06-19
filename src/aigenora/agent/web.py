@@ -50,8 +50,9 @@ def resolve_protocol_dir(root_dir: str | Path) -> Path | None:
     """Reverse-lookup protocol_dir from the daemon parent / child session.json.
 
     - For host, the parent session.json writes protocol_dir right after _resolve_state_dir.
-    - For guest, the parent session.json is written by _run_daemon, but the protocol_dir field is
-      back-filled in _join after prepare_protocol (see join.py calling _stamp_session_protocol_dir).
+    - For guest, the parent session.json is written by _run_daemon; protocol_dir is carried back
+      from the subprocess via the peer_joined event (see join._join emitting it and
+      _run_daemon reading startup_data["protocol_dir"] into session_meta).
     - Also covers the case where a session.json exists in the child directory.
 
     Returns None if it cannot be resolved. The web side uses this to decide whether /api/ui-available is true.
@@ -869,6 +870,53 @@ class _Broadcaster:
             for q in self._subs:
                 q.append((event, data))
 
+    def _forward_parent_state(self, parent: Path, child: Path) -> None:
+        """Carry strategy.json / whispers.jsonl from the daemon parent dir into the nested
+        business child dir when the effective directory switches parent -> child.
+
+        Why: in daemon mode the business subprocess runs in a nested <role>-<ts>/ under the
+        parent. If a user (or test) injects strategy/whisper via the web API before the child
+        exists, the write lands in parent/ and the subprocess (which only reads child/) never
+        sees it -- an "orphan". This runs once at the switch moment so early injections survive.
+        """
+        if parent == child:
+            return
+        # strategy.json: copy parent's only if child has none (never overwrite runtime state).
+        p_strat = parent / "strategy.json"
+        c_strat = child / "strategy.json"
+        if p_strat.exists() and not c_strat.exists():
+            try:
+                c_strat.write_bytes(p_strat.read_bytes())
+            except Exception:
+                pass
+        # whispers.jsonl: append parent entries the child doesn't already have (dedup by id).
+        p_w = parent / "whispers.jsonl"
+        if not p_w.exists():
+            return
+        try:
+            seen: set = set()
+            c_w = child / "whispers.jsonl"
+            if c_w.exists():
+                for raw in c_w.read_text(encoding="utf-8").splitlines():
+                    try:
+                        seen.add(json.loads(raw).get("id"))
+                    except Exception:
+                        pass
+            with open(c_w, "a", encoding="utf-8") as f:
+                for raw in p_w.read_text(encoding="utf-8").splitlines():
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        wid = json.loads(raw).get("id")
+                    except Exception:
+                        wid = None
+                    if wid and wid in seen:
+                        continue
+                    f.write(raw + "\n")
+        except Exception:
+            pass
+
     def _loop(self) -> None:
         # Each effective directory maintains its own counters; all are reset on switch
         effective = self._effective()
@@ -883,9 +931,12 @@ class _Broadcaster:
             try:
                 cur = self._effective()
                 if cur != effective:
-                    # parent -> child switch: broadcast a full snapshot and reset counters
+                    # parent -> child switch: forward any parent-phase strategy/whispers so they
+                    # reach the subprocess living in the child dir, then reset counters.
+                    old_effective = effective
                     effective = cur
                     self.state_dir = cur
+                    self._forward_parent_state(old_effective, cur)
                     snap_mtime = 0.0
                     strat_mtime = 0.0
                     events_seen = 0

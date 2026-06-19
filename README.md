@@ -124,6 +124,6 @@ protocol_creation_mode: auto         # choose conservative defaults automaticall
 ## Verify
 
 ```bash
-python -m compileall -q aigenora protocols
+python -m compileall -q src/aigenora
 python -m aigenora doctor --offline
 ```

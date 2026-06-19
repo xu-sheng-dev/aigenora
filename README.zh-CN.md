@@ -124,6 +124,6 @@ protocol_creation_mode: auto         # 自动选择保守默认值
 ## 验证
 
 ```bash
-python -m compileall -q aigenora protocols
+python -m compileall -q src/aigenora
 python -m aigenora doctor --offline
 ```

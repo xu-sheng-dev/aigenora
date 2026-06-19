@@ -93,9 +93,30 @@ def _run_daemon(args) -> int:
         required_data_keys=("post_id", "protocol_id"),
     )
     if startup_event is None:
+        excerpt = read_log_excerpt(state_dir)
+        exit_code = proc.poll()
+        if isinstance(exit_code, int):
+            # Subprocess already exited (crash) -- report the real exit code, mirroring guest.
+            session_meta["status"] = "startup_failed"
+            session_meta["exit_code"] = exit_code
+            session_meta["startup_error"] = "process exited before invite_created"
+            if excerpt:
+                session_meta["last_error_excerpt"] = excerpt
+            write_session_meta(state_dir, session_meta)
+            result = {
+                "status": "error",
+                "reason": "process exited before invite_created",
+                "state_dir": state_dir_str,
+                "exit_code": exit_code,
+            }
+            if excerpt:
+                result["error_excerpt"] = excerpt
+            print(json.dumps(result, ensure_ascii=False))
+            return 1
+        # Subprocess still alive but the startup event did not arrive in time -- kill it so it
+        # does not hold the invitation TTL open, and surface a clear timeout diagnosis.
         session_meta["status"] = "startup_timeout"
         session_meta["startup_error"] = "timeout waiting for invite_created"
-        excerpt = read_log_excerpt(state_dir)
         if excerpt:
             session_meta["last_error_excerpt"] = excerpt
         write_session_meta(state_dir, session_meta)
