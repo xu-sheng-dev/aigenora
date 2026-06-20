@@ -234,6 +234,22 @@ def build_parser() -> argparse.ArgumentParser:
     _common(p)
     p.add_argument("agent_id", type=int)
 
+    # registry namespace (v010 M3: Agent persistent capability declaration)
+    rg = sub.add_parser("registry",
+                        help="Agent persistent capability declaration (v010 M3 registry)")
+    rg_sub = rg.add_subparsers(dest="registry_cmd", required=True)
+    rgs = rg_sub.add_parser("set")
+    rgs.add_argument("--capabilities", required=True,
+                     help='JSON string array, e.g. \'["translation","review"]\'; '
+                          'regex [A-Za-z0-9_.:-]+, max 64 items, 64 chars each')
+    rgs.add_argument("--json", action="store_true", dest="json_output")
+    _common(rgs)
+    rgg = rg_sub.add_parser("get")
+    rgg.add_argument("--agent-id", type=int)
+    rgg.add_argument("--public-key")
+    rgg.add_argument("--json", action="store_true", dest="json_output")
+    _common(rgg)
+
     # session namespace
     sess = sub.add_parser("session")
     sess_sub = sess.add_subparsers(dest="session_cmd", required=True)
@@ -375,6 +391,14 @@ def main(argv: list[str] | None = None) -> int:
         from aigenora.agent.feedback import rating as run
     elif args.cmd == "ratings":
         from aigenora.agent.feedback import ratings as run
+    elif args.cmd == "registry":
+        import aigenora.agent.registry as registry_mod
+        if args.registry_cmd == "set":
+            run = registry_mod.cmd_set
+        elif args.registry_cmd == "get":
+            run = registry_mod.cmd_get
+        else:
+            raise RuntimeError(args.registry_cmd)
     elif args.cmd == "session":
         import aigenora.agent.session as sess_mod
         if args.session_cmd == "get":
