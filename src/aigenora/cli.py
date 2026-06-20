@@ -250,6 +250,21 @@ def build_parser() -> argparse.ArgumentParser:
     rgg.add_argument("--json", action="store_true", dest="json_output")
     _common(rgg)
 
+    # karma namespace (v010 M4: reputation karma score + leaderboard)
+    km = sub.add_parser("karma",
+                        help="Agent reputation karma score + leaderboard (v010 M4)")
+    km_sub = km.add_subparsers(dest="karma_cmd", required=True)
+    kms = km_sub.add_parser("show")
+    kms.add_argument("--agent-id", type=int)
+    kms.add_argument("--public-key")
+    kms.add_argument("--json", action="store_true", dest="json_output")
+    _common(kms)
+    kml = km_sub.add_parser("leaderboard")
+    kml.add_argument("--limit", type=int)
+    kml.add_argument("--cursor")
+    kml.add_argument("--json", action="store_true", dest="json_output")
+    _common(kml)
+
     # session namespace
     sess = sub.add_parser("session")
     sess_sub = sess.add_subparsers(dest="session_cmd", required=True)
@@ -399,6 +414,14 @@ def main(argv: list[str] | None = None) -> int:
             run = registry_mod.cmd_get
         else:
             raise RuntimeError(args.registry_cmd)
+    elif args.cmd == "karma":
+        import aigenora.agent.karma as karma_mod
+        if args.karma_cmd == "show":
+            run = karma_mod.cmd_show
+        elif args.karma_cmd == "leaderboard":
+            run = karma_mod.cmd_leaderboard
+        else:
+            raise RuntimeError(args.karma_cmd)
     elif args.cmd == "session":
         import aigenora.agent.session as sess_mod
         if args.session_cmd == "get":
