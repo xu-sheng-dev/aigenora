@@ -265,6 +265,36 @@ def build_parser() -> argparse.ArgumentParser:
     kml.add_argument("--json", action="store_true", dest="json_output")
     _common(kml)
 
+    # elo namespace (v010 M5: game ELO rating)
+    el = sub.add_parser("elo",
+                        help="Agent ELO rating for game sessions (v010 M5)")
+    el_sub = el.add_subparsers(dest="elo_cmd", required=True)
+    els = el_sub.add_parser("show")
+    els.add_argument("--agent-id", type=int)
+    els.add_argument("--public-key")
+    els.add_argument("--json", action="store_true", dest="json_output")
+    _common(els)
+
+    # inbox namespace (v010 M5: offline encrypted inbox)
+    ib = sub.add_parser("inbox",
+                        help="Offline encrypted inbox (v010 M5)")
+    ib_sub = ib.add_subparsers(dest="inbox_cmd", required=True)
+    ibs = ib_sub.add_parser("send")
+    ibs.add_argument("--to", required=True,
+                     help="recipient 64-char hex Ed25519 public_key")
+    ibs.add_argument("--message", required=True, help="plaintext to encrypt and deliver")
+    ibs.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibs)
+    ibl = ib_sub.add_parser("list")
+    ibl.add_argument("--limit", type=int)
+    ibl.add_argument("--cursor")
+    ibl.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibl)
+    ibr = ib_sub.add_parser("read")
+    ibr.add_argument("id", type=int)
+    ibr.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibr)
+
     # session namespace
     sess = sub.add_parser("session")
     sess_sub = sess.add_subparsers(dest="session_cmd", required=True)
@@ -275,6 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     ss = sess_sub.add_parser("status")
     ss.add_argument("session_id")
     ss.add_argument("--status", required=True, choices=["closed", "failed", "cancelled"])
+    ss.add_argument("--winner", choices=["host", "guest", "draw"],
+                    help="v010 M5 ELO: declare game winner on close (game:* protocols only)")
     ss.add_argument("--json", action="store_true", dest="json_output")
     _common(ss)
     stg = sess_sub.add_parser("transport-get")
@@ -422,6 +454,22 @@ def main(argv: list[str] | None = None) -> int:
             run = karma_mod.cmd_leaderboard
         else:
             raise RuntimeError(args.karma_cmd)
+    elif args.cmd == "elo":
+        import aigenora.agent.elo as elo_mod
+        if args.elo_cmd == "show":
+            run = elo_mod.cmd_show
+        else:
+            raise RuntimeError(args.elo_cmd)
+    elif args.cmd == "inbox":
+        import aigenora.agent.inbox as inbox_mod
+        if args.inbox_cmd == "send":
+            run = inbox_mod.cmd_send
+        elif args.inbox_cmd == "list":
+            run = inbox_mod.cmd_list
+        elif args.inbox_cmd == "read":
+            run = inbox_mod.cmd_read
+        else:
+            raise RuntimeError(args.inbox_cmd)
     elif args.cmd == "session":
         import aigenora.agent.session as sess_mod
         if args.session_cmd == "get":

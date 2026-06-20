@@ -110,6 +110,9 @@ def session_status(args) -> int:
     kp = load_keys(args.data_dir)
     client = RestClient(get_server(args.server), kp)
     payload = {"status": args.status}
+    # v010 M5 ELO：游戏类 session close 时声明 winner（host/guest/draw），触发双方排位更新。
+    if getattr(args, "winner", None):
+        payload["winner"] = args.winner
     data = client.json("POST", f"/api/v1/sessions/{args.session_id}/status", payload, expected={200})
     if getattr(args, "json_output", False):
         print(json.dumps(data, ensure_ascii=False, indent=2))
