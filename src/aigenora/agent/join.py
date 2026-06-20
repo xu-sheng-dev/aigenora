@@ -10,7 +10,7 @@ from typing import Any
 
 from aigenora.agent.protocol import prepare_protocol
 from aigenora.agent.skeleton import assert_hooks_implemented
-from aigenora.agent._daemon import read_log_excerpt, wait_for_event, write_session_meta
+from aigenora.agent._daemon import read_log_excerpt, wait_for_event, update_session_meta, write_session_meta
 from aigenora.engine.config import get_server
 from aigenora.engine.crypto import session_canonical, transport_binding_canonical
 from aigenora.engine.keys import load_keys
@@ -248,14 +248,21 @@ async def _join(args) -> int:
                 "session_id": session_id,
                 "protocol_dir": str(proto_dir),
             })
-        await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
+        result = await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
                               state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
                               heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
-                              heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0))
+                              heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0)) or {}
+        game_over = bool(result.get("game_over", True))
+        end_reason = result.get("reason")
         print("done")
-        if event_bus:
+        # engine emits session_ended on every terminal path (game_over=True for a completed match,
+        # game_over=False + peer_disconnected on disconnect). Only mirror the normal path here;
+        # never re-emit game_over=True over a disconnect (would fake a successful match outcome).
+        if event_bus and game_over:
             event_bus.emit("session_ended", {"game_over": True})
-        close_session(client, session_id)
+        close_session(client, session_id, status="failed" if not game_over else "closed")
+        update_session_meta(state_base, status="aborted" if not game_over else "closed",
+                            game_over=game_over, ended_at=time.time(), end_reason=end_reason)
         return 0
     finally:
         await node.node().shutdown()

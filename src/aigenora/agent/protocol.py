@@ -318,7 +318,11 @@ def run(args) -> int:
         template = templates_root(args.data_dir) / f"{args.template}.json"
         if not template.exists():
             raise FileNotFoundError(template)
-        shutil.copyfile(template, args.output)
+        output_path = Path(args.output)
+        # Create the parent dir so `--output ./draft/spec.json` works without a pre-existing
+        # ./draft/ (shutil.copyfile does not create intermediate dirs).
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(template, output_path)
         print(f"[OK] created {args.output}")
         return 0
     if args.protocol_cmd == "search":

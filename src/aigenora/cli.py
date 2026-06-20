@@ -143,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     cp = proto_sub.add_parser("create")
     cp.add_argument("--template", required=True)
     cp.add_argument("--output", required=True)
+    cp.add_argument("--data-dir")
 
     flp = proto_sub.add_parser("preflight")
     flp.add_argument("spec")

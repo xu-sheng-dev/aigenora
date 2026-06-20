@@ -52,6 +52,29 @@ def write_session_meta(state_dir: str | Path, meta: dict[str, Any]) -> None:
     Path(state_dir, "session.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
+def update_session_meta(state_dir: str | Path | None, **updates: Any) -> None:
+    """Read-modify-write session.json.
+
+    The daemon parent process (host._run_daemon / join._run_daemon) writes the initial
+    session.json and returns right after startup, so it never observes how the business
+    subprocess ends. The business subprocess therefore calls this on its terminal path to
+    record the final status (closed/aborted), ended_at, game_over and end_reason — otherwise
+    console/list keeps showing a stale "running" session for a process that already exited.
+    Best-effort: a missing/unreadable session.json or a None state_dir is a silent no-op.
+    """
+    if not state_dir:
+        return
+    path = Path(state_dir, "session.json")
+    if not path.exists():
+        return
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    meta.update(updates)
+    path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+
 def read_log_excerpt(state_dir: str | Path, name: str = "daemon.err.log", limit: int = 500) -> str:
     path = Path(state_dir) / name
     if not path.exists() or path.stat().st_size <= 0:

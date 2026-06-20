@@ -12,7 +12,7 @@ from aigenora.engine.crypto import protocol_hash, transport_binding_canonical
 from aigenora.engine.keys import load_keys, sign_raw
 from aigenora.engine.p2p import AsyncReplayChannel, create_host_node
 from aigenora.engine.rest import RestClient
-from aigenora.agent._daemon import read_log_excerpt, terminate_process, wait_for_event, write_session_meta
+from aigenora.agent._daemon import read_log_excerpt, terminate_process, wait_for_event, update_session_meta, write_session_meta
 from aigenora.proto.session import close_session, sign_session
 from aigenora.proto.engine import parse_options, run_host_async
 from aigenora.proto.loader import load_hooks
@@ -266,13 +266,24 @@ async def _network_host(args) -> int:
             except (asyncio.CancelledError, Exception):
                 pass
             renew_task = None
-        await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
+        result = await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
                              state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
                              heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
-                             heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0))
+                             heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0)) or {}
+        game_over = bool(result.get("game_over", True))
+        end_reason = result.get("reason")
         print("done")
-        _emit(event_bus, "session_ended", {"game_over": True})
-        close_session(rest_client, session_id_val)
+        # engine emits the authoritative session_ended on every terminal path: game_over=True
+        # for a completed match, game_over=False + peer_disconnected on disconnect (P1-6). Only
+        # mirror the normal game_over=True path here; never re-emit a spurious game_over=True
+        # over a disconnect, which would fake a successful match outcome (proof/score pollution).
+        if game_over:
+            _emit(event_bus, "session_ended", {"game_over": True})
+        close_session(rest_client, session_id_val, status="failed" if not game_over else "closed")
+        # daemon parent returns right after startup, so the business subprocess must persist the
+        # final session.json status itself — otherwise console/list shows a stale "running" session.
+        update_session_meta(state_base, status="aborted" if not game_over else "closed",
+                            game_over=game_over, ended_at=time.time(), end_reason=end_reason)
         return 0
     finally:
         if renew_task is not None and not renew_task.done():
