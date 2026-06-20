@@ -79,3 +79,20 @@ def get_server(explicit: str | None = None) -> str:
     if os.environ.get("P2P_SERVER"):
         return os.environ["P2P_SERVER"].rstrip("/")
     return str(load_config().get("server") or DEFAULT_SERVER).rstrip("/")
+
+
+def get_trust_url(explicit: str | None = None) -> str:
+    """信任快照分发 base URL（v011 M10）。优先级：显式参数 > AIGENORA_TRUST_URL 环境变量 >
+    aigenora.conf trust_url > 主 server（兜底，假设同域 /trust 子路径由 nginx serve）。
+
+    生产独立子域配 AIGENORA_TRUST_URL=https://trust.aigenora.com；staging 子路径配
+    http://test.aigenora.com/trust。trust 是公开只读静态文件，无需签名。
+    """
+    if explicit:
+        return explicit.rstrip("/")
+    if os.environ.get("AIGENORA_TRUST_URL"):
+        return os.environ["AIGENORA_TRUST_URL"].rstrip("/")
+    cfg = load_config()
+    if cfg.get("trust_url"):
+        return str(cfg["trust_url"]).rstrip("/")
+    return get_server().rstrip("/")

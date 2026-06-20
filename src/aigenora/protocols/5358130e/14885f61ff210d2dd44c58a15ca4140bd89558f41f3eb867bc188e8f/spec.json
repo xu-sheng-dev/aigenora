@@ -1,0 +1,126 @@
+{
+  "name": "Reversi (Othello)",
+  "spec_version": "1.0",
+  "description": "1v1 full-information board game. Starting from the central 2x2 cross, players alternate placing stones; a move must bracket a straight line of opponent stones between the new stone and an existing own stone, flipping the bracketed stones. A player with no legal move passes; the game ends when neither can move (or the board is full). Most stones wins. session_loop ping-pong with hooks-side board state.",
+  "type": "game",
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true},
+        "board_size": {"type": "integer", "min": 6, "max": 8, "required": false}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true},
+        "board_size": {"type": "integer", "required": true},
+        "first": {"type": "enum", "values": ["guest"], "required": true}
+      }
+    },
+    {
+      "name": "move",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["move"], "required": true},
+        "turn": {"type": "integer", "min": 1, "required": true},
+        "row": {"type": "integer", "min": 0, "max": 7, "required": true},
+        "col": {"type": "integer", "min": 0, "max": 7, "required": true}
+      }
+    },
+    {
+      "name": "pass",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["pass"], "required": true},
+        "turn": {"type": "integer", "min": 1, "required": true}
+      }
+    },
+    {
+      "name": "round_result",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["round_result"], "required": true},
+        "turn": {"type": "integer", "min": 1, "required": true},
+        "row": {"type": "integer", "min": 0, "max": 7, "required": true},
+        "col": {"type": "integer", "min": 0, "max": 7, "required": true},
+        "player": {"type": "enum", "values": ["host", "guest"], "required": true},
+        "flipped": {"type": "integer", "min": 0, "required": true},
+        "passed": {"type": "boolean", "required": true},
+        "game_over": {"type": "boolean", "required": true},
+        "winner": {"type": "enum", "values": ["host", "guest", "none"], "required": true},
+        "black": {"type": "integer", "min": 0, "required": true},
+        "white": {"type": "integer", "min": 0, "required": true}
+      }
+    },
+    {
+      "name": "error",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["error"], "required": true},
+        "turn": {"type": "integer", "min": 1},
+        "reason": {"type": "enum", "values": ["illegal_move", "not_your_turn"], "required": true}
+      }
+    },
+    {
+      "name": "end",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["end"], "required": true},
+        "winner": {"type": "enum", "values": ["host", "guest", "draw"], "required": true},
+        "black": {"type": "integer", "min": 0, "required": true},
+        "white": {"type": "integer", "min": 0, "required": true}
+      }
+    }
+  ],
+  "flow": {
+    "mode": "session_loop",
+    "phases": [
+      {
+        "phase": "join",
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "play",
+        "repeat": "until game_over",
+        "exchange": [
+          {"message": "move", "direction": "guest_to_host"},
+          {"message": "round_result", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "end",
+        "exchange": [
+          {"message": "end", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "setup": "NxN board (default N=8) with the central 2x2 cross pre-filled (guest=Black, host=White). Black (guest) moves first.",
+    "turn": "A move places a stone on an empty cell that brackets one or more straight lines of opponent stones between the new stone and an existing own stone; all bracketed stones flip. If a player has no legal move, they pass. The guest sends move or pass; the host applies it, plays its own move or pass, and returns a round_result.",
+    "end": "Game ends when neither player can move, or the board is full.",
+    "win": "Player with the most stones when the game ends wins; equal counts => draw."
+  },
+  "parameters": {
+    "board_size": {"type": "integer", "min": 6, "max": 8},
+    "min_think_seconds": {"type": "integer", "min": 0, "max": 60},
+    "max_think_seconds": {"type": "integer", "min": 1, "max": 600}
+  },
+  "decision": {
+    "mode": "auto",
+    "timeout_seconds": 120,
+    "timeout_action": "fallback"
+  },
+  "timing": {
+    "mode": "sequential",
+    "min_think_seconds": 1,
+    "max_think_seconds": 3
+  }
+}

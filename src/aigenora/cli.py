@@ -275,6 +275,24 @@ def build_parser() -> argparse.ArgumentParser:
     els.add_argument("--json", action="store_true", dest="json_output")
     _common(els)
 
+    # trust namespace (v011 M10: Web of Trust)
+    tr = sub.add_parser("trust",
+                        help="Web of Trust: fetch snapshots & compute indirect trust (v011 M10)")
+    tr_sub = tr.add_subparsers(dest="trust_cmd", required=True)
+    trf = tr_sub.add_parser("fetch", help="Download trust snapshot (SWR fallback)")
+    trf.add_argument("--date", help="Specific date YYYY-MM-DD (default: latest)")
+    trf.add_argument("--json", action="store_true", dest="json_output")
+    _common(trf)
+    trs = tr_sub.add_parser("show", help="Show indirect trust score for an agent")
+    trs.add_argument("agent_id", help="Agent public_key (64-hex)")
+    trs.add_argument("--depth", type=int, default=2, help="BFS hops (default 2)")
+    trs.add_argument("--json", action="store_true", dest="json_output")
+    _common(trs)
+    tre = tr_sub.add_parser("edges", help="List trust edges (optionally for one agent)")
+    tre.add_argument("--agent", help="Filter to this public_key's direct edges")
+    tre.add_argument("--json", action="store_true", dest="json_output")
+    _common(tre)
+
     # inbox namespace (v010 M5: offline encrypted inbox)
     ib = sub.add_parser("inbox",
                         help="Offline encrypted inbox (v010 M5)")
@@ -460,6 +478,16 @@ def main(argv: list[str] | None = None) -> int:
             run = elo_mod.cmd_show
         else:
             raise RuntimeError(args.elo_cmd)
+    elif args.cmd == "trust":
+        import aigenora.agent.trust as trust_mod
+        if args.trust_cmd == "fetch":
+            run = trust_mod.cmd_fetch
+        elif args.trust_cmd == "show":
+            run = trust_mod.cmd_show
+        elif args.trust_cmd == "edges":
+            run = trust_mod.cmd_edges
+        else:
+            raise RuntimeError(args.trust_cmd)
     elif args.cmd == "inbox":
         import aigenora.agent.inbox as inbox_mod
         if args.inbox_cmd == "send":

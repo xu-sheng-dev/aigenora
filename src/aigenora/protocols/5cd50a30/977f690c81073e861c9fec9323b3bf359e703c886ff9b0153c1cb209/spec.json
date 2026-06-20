@@ -1,0 +1,114 @@
+{
+  "name": "Connect Four",
+  "spec_version": "1.0",
+  "description": "1v1 full-information board game. Players alternate dropping a stone into one of N columns; the stone falls to the lowest empty cell in that column (gravity). First to line up four in a row (horizontal/vertical/diagonal) wins. session_loop ping-pong with hooks-side board state.",
+  "type": "game",
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true},
+        "cols": {"type": "integer", "min": 4, "max": 10, "required": false},
+        "rows": {"type": "integer", "min": 4, "max": 10, "required": false}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true},
+        "cols": {"type": "integer", "required": true},
+        "rows": {"type": "integer", "required": true},
+        "first": {"type": "enum", "values": ["guest"], "required": true}
+      }
+    },
+    {
+      "name": "move",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["move"], "required": true},
+        "turn": {"type": "integer", "min": 1, "required": true},
+        "col": {"type": "integer", "min": 0, "max": 9, "required": true}
+      }
+    },
+    {
+      "name": "round_result",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["round_result"], "required": true},
+        "turn": {"type": "integer", "min": 1, "required": true},
+        "col": {"type": "integer", "min": 0, "max": 9, "required": true},
+        "row": {"type": "integer", "min": 0, "max": 9, "required": true},
+        "player": {"type": "enum", "values": ["host", "guest"], "required": true},
+        "game_over": {"type": "boolean", "required": true},
+        "winner": {"type": "enum", "values": ["host", "guest", "none"], "required": true}
+      }
+    },
+    {
+      "name": "error",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["error"], "required": true},
+        "turn": {"type": "integer", "min": 1},
+        "reason": {"type": "enum", "values": ["invalid_column", "column_full", "board_full", "not_your_turn"], "required": true}
+      }
+    },
+    {
+      "name": "end",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["end"], "required": true},
+        "winner": {"type": "enum", "values": ["host", "guest", "draw"], "required": true}
+      }
+    }
+  ],
+  "flow": {
+    "mode": "session_loop",
+    "phases": [
+      {
+        "phase": "join",
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "play",
+        "repeat": "until game_over",
+        "exchange": [
+          {"message": "move", "direction": "guest_to_host"},
+          {"message": "round_result", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "end",
+        "exchange": [
+          {"message": "end", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "setup": "Empty grid (default 7 columns x 6 rows). Guest=Red (first), Host=Yellow (second).",
+    "turn": "Guest sends a move naming a column; the stone drops to the lowest empty cell in that column. Host records it, drops its own stone, and returns a round_result carrying host's cell plus a win check.",
+    "win": "First to align four stones consecutively in a row, column, or diagonal wins immediately.",
+    "draw": "Board full with no four-in-a-row => draw."
+  },
+  "parameters": {
+    "cols": {"type": "integer", "min": 4, "max": 10},
+    "rows": {"type": "integer", "min": 4, "max": 10},
+    "min_think_seconds": {"type": "integer", "min": 0, "max": 60},
+    "max_think_seconds": {"type": "integer", "min": 1, "max": 600}
+  },
+  "decision": {
+    "mode": "auto",
+    "timeout_seconds": 120,
+    "timeout_action": "fallback"
+  },
+  "timing": {
+    "mode": "sequential",
+    "min_think_seconds": 1,
+    "max_think_seconds": 3
+  }
+}

@@ -250,6 +250,65 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "gomoku-v1",
+      "name": "Gomoku (Five-in-a-Row)",
+      "description": "1v1 full-information board game. First to align five stones in a row/column/diagonal on an NxN board wins. session_loop with hooks-side board state.",
+      "type": "game",
+      "family": "gomoku",
+      "tags": ["game", "gomoku", "board"],
+      "capabilities": ["board_placement", "five_in_a_row", "session_loop"],
+      "status": "active",
+      "protocol_id": "6fdb1053bf4b3c2eb280d0f48215042ce2a330bef4d14113fdab3c4f997a0827",
+      "path": "6fdb1053/bf4b3c2eb280d0f48215042ce2a330bef4d14113fdab3c4f997a0827",
+      "parent_protocol_id": null,
+      "created_reason": "v011 M9: board-games expansion (gomoku)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {"description": "15x15 standard board", "options": {"board_size": 15}},
+        "small": {"description": "9x9 quick game", "options": {"board_size": 9}}
+      },
+      "entrypoints": {"host": "aigenora host --protocol-dir", "guest": "aigenora guest --protocol-dir", "hooks": "hooks.py"}
+    },
+    {
+      "alias": "connect4-v1",
+      "name": "Connect Four",
+      "description": "1v1 full-information board game with gravity. Drop a stone into a column (it falls to the lowest empty cell); first to align four in a row/column/diagonal wins.",
+      "type": "game",
+      "family": "connect4",
+      "tags": ["game", "connect4", "board"],
+      "capabilities": ["column_drop", "four_in_a_row", "session_loop"],
+      "status": "active",
+      "protocol_id": "5cd50a30977f690c81073e861c9fec9323b3bf359e703c886ff9b0153c1cb209",
+      "path": "5cd50a30/977f690c81073e861c9fec9323b3bf359e703c886ff9b0153c1cb209",
+      "parent_protocol_id": null,
+      "created_reason": "v011 M9: board-games expansion (connect4)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {"description": "7 columns x 6 rows", "options": {"cols": 7, "rows": 6}}
+      },
+      "entrypoints": {"host": "aigenora host --protocol-dir", "guest": "aigenora guest --protocol-dir", "hooks": "hooks.py"}
+    },
+    {
+      "alias": "reversi-v1",
+      "name": "Reversi (Othello)",
+      "description": "1v1 full-information board game. Bracket a line of opponent stones between your new stone and an existing own stone to flip them; a player with no legal move passes. Most stones when neither side can move wins.",
+      "type": "game",
+      "family": "reversi",
+      "tags": ["game", "reversi", "board"],
+      "capabilities": ["stone_flip", "pass_when_no_move", "session_loop"],
+      "status": "active",
+      "protocol_id": "5358130e14885f61ff210d2dd44c58a15ca4140bd89558f41f3eb867bc188e8f",
+      "path": "5358130e/14885f61ff210d2dd44c58a15ca4140bd89558f41f3eb867bc188e8f",
+      "parent_protocol_id": null,
+      "created_reason": "v011 M9: board-games expansion (reversi)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {"description": "8x8 standard board", "options": {"board_size": 8}},
+        "small": {"description": "6x6 quick game", "options": {"board_size": 6}}
+      },
+      "entrypoints": {"host": "aigenora host --protocol-dir", "guest": "aigenora guest --protocol-dir", "hooks": "hooks.py"}
     }
   ]
 }
