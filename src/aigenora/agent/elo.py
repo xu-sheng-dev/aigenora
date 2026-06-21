@@ -7,10 +7,13 @@ from aigenora.engine.config import get_server
 from aigenora.engine.keys import load_keys
 from aigenora.engine.rest import RestClient
 
-# v010 M5 ELO：与服务端 EloService 完全同口径（K=32，期望胜率 1/(1+10^((Rb-Ra)/400))）。
+# v010 M5 ELO；v012 批次3 改纯正向累积制（与服务端 EloService 同口径）。
 # 客户端保留纯函数便于本地推算/单测，权威值以服务端 elo_ratings 为准。
 DEFAULT_RATING = 1200
 K_FACTOR = 32
+# v012 批次3：平局双方各得固定分；输家安慰分系数 Δ=round(K×E_winner×COMFORT_FACTOR)。
+DRAW_DELTA = 8
+COMFORT_FACTOR = 0.25
 
 
 def expected_score(rating_a: int, rating_b: int) -> float:
@@ -18,10 +21,17 @@ def expected_score(rating_a: int, rating_b: int) -> float:
     return 1.0 / (1.0 + 10 ** ((rating_b - rating_a) / 400.0))
 
 
-def new_rating(rating_a: int, rating_b: int, score_a: float) -> int:
-    """对局后 A 的新 rating。score_a：胜=1.0、平=0.5、负=0.0。"""
-    expected = expected_score(rating_a, rating_b)
-    return round(rating_a + K_FACTOR * (score_a - expected))
+def winner_delta(winner_rating: int, loser_rating: int) -> int:
+    """v012 批次3：纯正向赢家得分 = round(K × (1 − E_winner))。赢弱手得少、赢强手得多。范围 0~K。"""
+    e_winner = expected_score(winner_rating, loser_rating)
+    return round(K_FACTOR * (1.0 - e_winner))
+
+
+def loser_comfort_delta(winner_rating: int, loser_rating: int) -> int:
+    """v012 批次3：输家安慰分（如实上报）= round(K × E_winner × COMFORT_FACTOR)。
+    E_winner 为赢家预期胜率（赢家越强、输家安慰越多）。范围 0~8。"""
+    e_winner = expected_score(winner_rating, loser_rating)
+    return round(K_FACTOR * e_winner * COMFORT_FACTOR)
 
 
 def cmd_show(args) -> int:

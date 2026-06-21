@@ -99,3 +99,17 @@ def close_session(client: RestClient, session_id: str, status: str = "closed",
                 event_bus.emit("session_close_failed", {"session_id": session_id, "error": msg})
             except Exception:
                 pass
+
+
+def report_result(client: RestClient, session_id: str, winner: str) -> None:
+    """v012 批次3：上报本局胜负（winner=host/guest/draw）。双方都上报且一致才结算 ELO。
+    与 close 解耦——close 只结束 session，胜负结算走 /sessions/{id}/result。失败仅 warning 不阻塞。
+    """
+    if not session_id or not winner:
+        return
+    try:
+        client.json("POST", f"/api/v1/sessions/{session_id}/result",
+                    {"winner": winner}, expected={200})
+    except Exception as e:
+        msg = str(e)[:200]
+        print(f"[aigenora] warning: failed to report result for {session_id}: {msg}", file=sys.stderr)

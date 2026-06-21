@@ -19,7 +19,7 @@ from aigenora.engine.p2p import connect_by_ticket
 from aigenora.engine.rest import RestClient
 from aigenora.proto.engine import run_guest_async
 from aigenora.proto.sdk import EventBus
-from aigenora.proto.session import SessionProof, close_session, new_session_nonce, sign_session, submit_session
+from aigenora.proto.session import SessionProof, close_session, new_session_nonce, report_result, sign_session, submit_session
 from aigenora.proto.spec_version import check_spec_version
 from aigenora.proto.validate import load_spec, validate_extra_args
 
@@ -261,7 +261,10 @@ async def _join(args) -> int:
         if event_bus and game_over:
             event_bus.emit("session_ended", {"game_over": True})
         close_session(client, session_id, status="failed" if not game_over else "closed",
-                      winner=result.get("winner") if game_over else None, event_bus=event_bus)
+                      event_bus=event_bus)
+        # v012 批次3：胜负上报走 /result（双方一致才结算 ELO），与 close 解耦
+        if game_over and result.get("winner"):
+            report_result(client, session_id, result.get("winner"))
         update_session_meta(state_base, status="aborted" if not game_over else "closed",
                             game_over=game_over, ended_at=time.time(), end_reason=end_reason)
         return 0
