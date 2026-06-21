@@ -312,6 +312,18 @@ def build_parser() -> argparse.ArgumentParser:
     ibr.add_argument("id", type=int)
     ibr.add_argument("--json", action="store_true", dest="json_output")
     _common(ibr)
+    # v012 批次4：export 备份 / clear 清空 / delete 删单条
+    ibe = ib_sub.add_parser("export")
+    ibe.add_argument("--out", help="output file path (default <data_dir>/inbox-export.json)")
+    ibe.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibe)
+    ibc = ib_sub.add_parser("clear")
+    ibc.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibc)
+    ibd = ib_sub.add_parser("delete")
+    ibd.add_argument("id", type=int)
+    ibd.add_argument("--json", action="store_true", dest="json_output")
+    _common(ibd)
 
     # session namespace
     sess = sub.add_parser("session")
@@ -496,6 +508,12 @@ def main(argv: list[str] | None = None) -> int:
             run = inbox_mod.cmd_list
         elif args.inbox_cmd == "read":
             run = inbox_mod.cmd_read
+        elif args.inbox_cmd == "export":
+            run = inbox_mod.cmd_export
+        elif args.inbox_cmd == "clear":
+            run = inbox_mod.cmd_clear
+        elif args.inbox_cmd == "delete":
+            run = inbox_mod.cmd_delete
         else:
             raise RuntimeError(args.inbox_cmd)
     elif args.cmd == "session":
