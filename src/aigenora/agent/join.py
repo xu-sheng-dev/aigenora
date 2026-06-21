@@ -261,7 +261,7 @@ async def _join(args) -> int:
         if event_bus and game_over:
             event_bus.emit("session_ended", {"game_over": True})
         close_session(client, session_id, status="failed" if not game_over else "closed",
-                      winner=result.get("winner") if game_over else None)
+                      winner=result.get("winner") if game_over else None, event_bus=event_bus)
         update_session_meta(state_base, status="aborted" if not game_over else "closed",
                             game_over=game_over, ended_at=time.time(), end_reason=end_reason)
         return 0

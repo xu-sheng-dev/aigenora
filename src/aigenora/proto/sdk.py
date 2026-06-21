@@ -637,6 +637,10 @@ class EventBus:
 
     def __init__(self, state_dir: str | Path):
         self.events_file = Path(state_dir) / "events.jsonl"
+        # events.jsonl 是引擎主循环、心跳通道、续期循环、收信 producer 等多线程/协程的共同写入点，
+        # 必须加锁否则并发追加会撕裂行（被 read_events 的 json.loads 静默丢弃，导致事件流缺事件，
+        # 进而让 daemon 启动检测、session list 状态判定出错）。与同模块 DetailLog/WhisperLog/SnapshotBus 一致。
+        self._lock = threading.Lock()
 
     def emit(self, event_type: str, data: dict | None = None, summary: str | None = None) -> None:
         entry: dict = {"ts": datetime.now(timezone.utc).isoformat(), "type": event_type}
@@ -644,8 +648,11 @@ class EventBus:
             entry["data"] = data
         if summary:
             entry["summary"] = summary
-        with open(self.events_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+        line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+        with self._lock:
+            self.events_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.events_file, "a", encoding="utf-8") as f:
+                f.write(line)
 
     def read_events(self, after_ts: str | None = None) -> list[dict]:
         if not self.events_file.exists():

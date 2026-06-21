@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -69,7 +70,9 @@ def update_session_meta(state_dir: str | Path | None, **updates: Any) -> None:
         return
     try:
         meta = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        # session.json 损坏/不可读：原为静默 return，导致终态丢失且无从排查。改为记录 warning。
+        print(f"[aigenora] warning: failed to read session.json for update: {e}", file=sys.stderr)
         return
     meta.update(updates)
     path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")

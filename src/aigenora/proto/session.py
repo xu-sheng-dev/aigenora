@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from aigenora.engine.crypto import random_nonce, session_canonical, session_id
 from aigenora.engine.keys import KeyPair, sign_raw
 from aigenora.engine.rest import RestClient
+
+if TYPE_CHECKING:
+    from aigenora.proto.sdk import EventBus
 
 
 @dataclass
@@ -58,7 +63,8 @@ def submit_session(client: RestClient, proof: SessionProof) -> str:
 
 
 def close_session(client: RestClient, session_id: str, status: str = "closed",
-                  winner: str | None = None) -> None:
+                  winner: str | None = None,
+                  event_bus: EventBus | None = None) -> None:
     """Write the session status back to the server after a match ends, and best-effort close the related invitation.
 
     The server-side updateSessionStatus transitions status==matched to closed/failed/cancelled
@@ -83,5 +89,13 @@ def close_session(client: RestClient, session_id: str, status: str = "closed",
             body,
             expected={200, 409},
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # 关键状态写回失败（网络/5xx 等；预期的 409 已被 expected 吸收不再视为失败）：不再静默吞。
+        # 写 stderr 让用户/agent 可见；若提供 event_bus 再记一条事件便于事后排查（批次1-c）。
+        msg = str(e)[:200]
+        print(f"[aigenora] warning: failed to close session {session_id}: {msg}", file=sys.stderr)
+        if event_bus is not None:
+            try:
+                event_bus.emit("session_close_failed", {"session_id": session_id, "error": msg})
+            except Exception:
+                pass

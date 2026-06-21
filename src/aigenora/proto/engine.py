@@ -529,15 +529,31 @@ def _run_free(
         while not end_event.is_set():
             try:
                 msg = channel.recv(timeout=0.5)
-            except (TimeoutError, Exception):
+            except TimeoutError:
                 continue
-            if validate:
-                _validate(spec, msg, "both")
-            if _is_control_end(msg):
-                hooks.proto_on_end()
+            except ChannelClosed:
+                # 通道已断，结束 receiver，避免对已关闭通道空转轮询（原 bare-Exception 会僵尸循环）。
                 end_event.set()
                 return
-            hooks.proto_on_message(msg)
+            except Exception as e:
+                print(f"[aigenora] free-mode receiver recv error: {e}", file=sys.stderr)
+                continue
+            try:
+                if validate:
+                    _validate(spec, msg, "both")
+                if _is_control_end(msg):
+                    hooks.proto_on_end()
+                    end_event.set()
+                    return
+                hooks.proto_on_message(msg)
+            except ValidationError as e:
+                # 对方发了违反 spec 的消息：容错跳过（继续聊），但记录便于排查，不再静默吞。
+                print(f"[aigenora] free-mode receiver dropped invalid message: {e}", file=sys.stderr)
+                continue
+            except Exception as e:
+                # hooks 内部 bug 或未知错误：记录后继续，避免 receiver 静默僵尸。
+                print(f"[aigenora] free-mode receiver hook error: {e}", file=sys.stderr)
+                continue
 
     def stdin_producer():
         while not end_event.is_set():
