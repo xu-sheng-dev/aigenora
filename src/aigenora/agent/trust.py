@@ -11,6 +11,7 @@ SWR 三档降级（用户硬要求：trust 是发现维度，绝不中断业务�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict, deque
 from pathlib import Path
@@ -98,10 +99,15 @@ def fetch_snapshot(data_dir_value: str | None = None, server: str | None = None,
 
     for url in targets:
         try:
-            r = httpx.get(url, timeout=10, follow_redirects=True)
+            # trust_env=False：避免 ALL_PROXY/HTTPS_PROXY 拦截信任源（CLAUDE.md 记录的坑）
+            r = httpx.get(url, timeout=10, follow_redirects=True, trust_env=False)
             if r.status_code == 200 and r.content:
                 snap = _parse(r.content)
                 if snap is not None:
+                    # v012 批次5：校验自引用完整性 sha256_self，防 CDN 缓存污染/中间人篡改
+                    declared = snap.get("meta", {}).get("sha256_self")
+                    if declared and hashlib.sha256(r.content).hexdigest() != declared:
+                        continue  # 校验失败，跳过该源（降级到缓存/其他源）
                     sd = snap.get("meta", {}).get("snapshot_date")
                     if sd:
                         (cache_dir / f"trust-{sd}.json").write_bytes(r.content)
