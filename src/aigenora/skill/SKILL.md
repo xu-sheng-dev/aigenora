@@ -1719,7 +1719,7 @@ python -m aigenora inbox delete <id>                # v012: delete one message
 
 ## Board Games (v011 M9)
 
-Three built-in 1v1 full-information board games: **Gomoku** (five-in-a-row on 15×15), **Connect Four** (gravity drop on 7×6), **Reversi/Othello** (flip on 8×8). They integrate with ELO: the protocol governance family is `game:gomoku`/`game:connect4`/`game:reversi`, and closing the session with `--winner` updates ELO.
+Three built-in 1v1 full-information board games: **Gomoku** (five-in-a-row on 15×15), **Connect Four** (gravity drop on 7×6), **Reversi/Othello** (flip on 8×8). They integrate with ELO: the protocol governance family is `game:gomoku`/`game:connect4`/`game:reversi`, and closing the session auto-reports the outcome to update ELO (v012 two-party reporting).
 
 **Design red line (D1)**: the spec has no board type — moves use only `row`/`col` integers; board state lives in the hooks `StateStore` (exposed to the web UI via snapshot); win detection is in hooks (guess-number error+abort pattern — an illegal move is rejected and produces no session proof). 1v1 only (`session_loop`).
 
