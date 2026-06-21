@@ -61,6 +61,23 @@ def _is_control_end(msg: Any) -> bool:
     return isinstance(msg, dict) and msg == {"action": "end"}
 
 
+def _winner_of(*candidates: Any) -> str | None:
+    """提取游戏胜者（host/guest/draw）供 close 时声明 ELO winner（v010 M5 ELO 触发修复）。
+
+    从触发 game_over 的消息里取 winner：host 侧是裁判产生的 round_result（result.response），
+    guest 侧是刚处理的 host round_result（loop 的 msg，因 guest game_over 时返回的
+    HookResult response=None 走 else 分支）。只接受 host/guest/draw；'none'/空/缺失返回 None
+    ——胜负优先透传触发 ELO；平局的协议差异（gomoku round_result.winner='none' vs
+    end.winner='draw'）暂不映射，后续如需平局计 ELO 再统一。
+    """
+    for c in candidates:
+        if isinstance(c, dict):
+            w = c.get("winner")
+            if w in ("host", "guest", "draw"):
+                return w
+    return None
+
+
 def _snapshot_init(hooks: Any, role: str, spec: dict[str, Any], state_dir: Path) -> None:
     """Engine fallback initialization for snapshot.json, so it is not empty when hooks have not written to it.
 
@@ -203,7 +220,7 @@ def _run_session_loop_sync_host(
         _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
         _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
                         "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over}
+        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over, "winner": _winner_of(ready_result.response)}
     msg = channel.send_wait(ready_result.response)
     while True:
         if validate:
@@ -222,13 +239,13 @@ def _run_session_loop_sync_host(
                 _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
                 _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
                                 "Session ended", reason="abort" if result.abort else "game_over")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
             if pace > 0:
                 time.sleep(pace)
             msg = channel.send_wait(result.response)
         else:
             _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
 
 
 def _run_session_loop_sync_guest(
@@ -287,13 +304,13 @@ def _run_session_loop_sync_guest(
                 _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
                 _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
                                 "Session ended", reason="abort" if result.abort else "game_over")
-                return {"state_dir": str(state_dir), "game_over": result.game_over}
+                return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
             if pace > 0:
                 time.sleep(pace)
             msg = channel.send_wait(result.response)
         else:
             _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"state_dir": str(state_dir), "game_over": result.game_over}
+            return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
 
 
 async def _run_session_loop_async(
@@ -371,7 +388,7 @@ async def _run_session_loop_async_host(
             _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
             _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
                             "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over}
+            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over, "winner": _winner_of(ready_result.response)}
         msg = await channel.send_wait(ready_result.response)
         while True:
             if validate:
@@ -390,13 +407,13 @@ async def _run_session_loop_async_host(
                     _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
                     _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
                                     "Session ended", reason="abort" if result.abort else "game_over")
-                    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+                    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
                 if pace > 0:
                     await asyncio.sleep(pace)
                 msg = await channel.send_wait(result.response)
             else:
                 _snapshot_phase(hooks, "game_over", "Session completed")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over}
+                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
@@ -463,13 +480,13 @@ async def _run_session_loop_async_guest(
                     _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
                     _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
                                     "Session ended", reason="abort" if result.abort else "game_over")
-                    return {"state_dir": str(state_dir), "game_over": result.game_over}
+                    return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
                 if pace > 0:
                     await asyncio.sleep(pace)
                 msg = await channel.send_wait(result.response)
             else:
                 _snapshot_phase(hooks, "game_over", "Session completed")
-                return {"state_dir": str(state_dir), "game_over": result.game_over}
+                return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 

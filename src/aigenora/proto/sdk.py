@@ -31,11 +31,35 @@ class StateStore:
         return default if value is None or value == "" else int(value)
 
 
+def _replace_with_retry(tmp: Path, target: Path, attempts: int = 6) -> None:
+    """os.replace with brief retry on Windows PermissionError.
+
+    On Windows, replacing a file that another handle is reading (e.g. the webui
+    broadcast thread reading snapshot.json concurrently with hooks writing it via
+    SnapshotBus.update) fails with PermissionError [WinError 5]. The read holds the
+    file only briefly, so a short exponential backoff retries through the read
+    window. On POSIX os.replace is atomic and lock-free, so the first attempt always
+    succeeds and the retry loop is effectively zero-cost.
+    """
+    delay = 0.05
+    last_err: Exception | None = None
+    for _ in range(attempts):
+        try:
+            tmp.replace(target)
+            return
+        except PermissionError as e:
+            last_err = e
+            time.sleep(delay)
+            delay *= 2
+    assert last_err is not None
+    raise last_err
+
+
 def _atomic_write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    _replace_with_retry(tmp, path)
 
 
 def _deep_merge(base: dict, patch: dict) -> dict:

@@ -279,7 +279,8 @@ async def _network_host(args) -> int:
         # over a disconnect, which would fake a successful match outcome (proof/score pollution).
         if game_over:
             _emit(event_bus, "session_ended", {"game_over": True})
-        close_session(rest_client, session_id_val, status="failed" if not game_over else "closed")
+        close_session(rest_client, session_id_val, status="failed" if not game_over else "closed",
+                      winner=result.get("winner") if game_over else None)
         # daemon parent returns right after startup, so the business subprocess must persist the
         # final session.json status itself — otherwise console/list shows a stale "running" session.
         update_session_meta(state_base, status="aborted" if not game_over else "closed",

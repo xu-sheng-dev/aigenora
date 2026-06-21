@@ -57,7 +57,8 @@ def submit_session(client: RestClient, proof: SessionProof) -> str:
     return returned
 
 
-def close_session(client: RestClient, session_id: str, status: str = "closed") -> None:
+def close_session(client: RestClient, session_id: str, status: str = "closed",
+                  winner: str | None = None) -> None:
     """Write the session status back to the server after a match ends, and best-effort close the related invitation.
 
     The server-side updateSessionStatus transitions status==matched to closed/failed/cancelled
@@ -65,14 +66,21 @@ def close_session(client: RestClient, session_id: str, status: str = "closed") -
     the second call hitting a 409 (already closed) is expected, swallowed via expected={200,409}.
     Any failure does not block the local match result — the session status write-back is auxiliary
     cleanup; the match outcome has already been recorded in events.jsonl.
+
+    v010 M5 ELO: winner (host/guest/draw) declared by the closer triggers server-side EloService
+    for game:* protocols. None for non-game sessions or unknown winner — best-effort, server no-ops
+    when family is not game:* or winner is absent.
     """
     if not session_id:
         return
+    body = {"status": status}
+    if winner:
+        body["winner"] = winner
     try:
         client.json(
             "POST",
             f"/api/v1/sessions/{session_id}/status",
-            {"status": status},
+            body,
             expected={200, 409},
         )
     except Exception:
