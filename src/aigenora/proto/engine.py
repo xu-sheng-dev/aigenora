@@ -72,9 +72,11 @@ def _winner_of(*candidates: Any) -> str | None:
     """
     for c in candidates:
         if isinstance(c, dict):
-            w = c.get("winner")
-            if w in ("host", "guest", "draw"):
-                return w
+            # session_loop 棋类用 "winner"；commit-reveal(RPS/coin/weak-wins)整局赢家用 "game_winner"
+            for key in ("winner", "game_winner"):
+                w = c.get(key)
+                if w in ("host", "guest", "draw"):
+                    return w
     return None
 
 
@@ -1226,7 +1228,7 @@ def _run_sr_sync_host(
             })
             _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
                             "Session ended", reason="abort" if judge_result.abort else "game_over")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over}
+            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over, "winner": _winner_of(judge_result.response)}
 
         if pace > 0:
             time.sleep(pace)
@@ -1269,6 +1271,7 @@ def _run_sr_sync_guest(
     hooks.proto_guest_handle_ready(ready_msg)
 
     pending_host_commit = None
+    result_msg: dict[str, Any] = {}
     while True:
         guest_value = hooks.proto_round_value(round_num, state)
         nonce = random_nonce()
@@ -1283,7 +1286,8 @@ def _run_sr_sync_guest(
         if _is_control_end(host_commit):
             _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
             _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"state_dir": str(state_dir), "game_over": True}
+            # result_msg 是上一轮收到的 round_result（含 game_winner），透传给 host 触发 ELO result 上报
+            return {"state_dir": str(state_dir), "game_over": True, "winner": _winner_of(result_msg)}
         if validate:
             _validate(spec, host_commit, "host_to_guest")
         _display(hooks, host_commit, "received")
@@ -1476,7 +1480,7 @@ async def _run_sr_async_host(
                 })
                 _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
                                 "Session ended", reason="abort" if judge_result.abort else "game_over")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over}
+                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over, "winner": _winner_of(judge_result.response)}
 
             if pace > 0:
                 await asyncio.sleep(pace)
@@ -1526,6 +1530,7 @@ async def _run_sr_async_guest(
         hooks.proto_guest_handle_ready(ready_msg)
 
         pending_host_commit = None
+        result_msg: dict[str, Any] = {}
         while True:
             guest_value = hooks.proto_round_value(round_num, state)
             nonce = random_nonce()
@@ -1539,7 +1544,8 @@ async def _run_sr_async_guest(
             if _is_control_end(host_commit):
                 _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
                 _snapshot_phase(hooks, "game_over", "Session completed")
-                return {"state_dir": str(state_dir), "game_over": True}
+                # result_msg 是上一轮收到的 round_result（含 game_winner），透传给 guest 触发 ELO result 上报
+                return {"state_dir": str(state_dir), "game_over": True, "winner": _winner_of(result_msg)}
             if validate:
                 _validate(spec, host_commit, "host_to_guest")
             _display(hooks, host_commit, "received")
