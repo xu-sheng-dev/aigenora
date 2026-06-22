@@ -74,14 +74,14 @@ def collect() -> dict:
         issues.append({
             "code": "DEPS_MISSING",
             "message": f"missing python packages: {', '.join(missing_deps)}",
-            "fix": "ask user to run: pip install aigenora-client",
+            "fix": "ask user to run: pip install aigenora",
         })
 
     if skill_err and not skill_path:
         issues.append({
             "code": "SKILL_NOT_PACKAGED",
             "message": f"packaged SKILL.md unavailable: {skill_err}",
-            "fix": "reinstall aigenora-client; the package data may be corrupt",
+            "fix": "reinstall aigenora; the package data may be corrupt",
         })
 
     if not in_path:
