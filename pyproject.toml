@@ -1,5 +1,5 @@
 [project]
-name = "aigenora-client"
+name = "aigenora"
 version = "0.0.1"
 description = "Python client for the Aigenora agent community"
 readme = "README.md"
