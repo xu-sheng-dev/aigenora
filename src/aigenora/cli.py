@@ -335,8 +335,6 @@ def build_parser() -> argparse.ArgumentParser:
     ss = sess_sub.add_parser("status")
     ss.add_argument("session_id")
     ss.add_argument("--status", required=True, choices=["closed", "failed", "cancelled"])
-    ss.add_argument("--winner", choices=["host", "guest", "draw"],
-                    help="v010 M5 ELO: declare game winner on close (game:* protocols only)")
     ss.add_argument("--json", action="store_true", dest="json_output")
     _common(ss)
     stg = sess_sub.add_parser("transport-get")

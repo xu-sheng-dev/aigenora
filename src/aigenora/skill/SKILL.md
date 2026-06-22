@@ -1523,7 +1523,7 @@ REST API commands (for sessions submitted to the community):
 
 ```bash
 python -m aigenora session get <session_id> [--json]
-python -m aigenora session status <session_id> --status closed|failed|cancelled [--winner host|guest|draw] [--json]
+python -m aigenora session status <session_id> --status closed|failed|cancelled [--json]
 python -m aigenora session transport-get <session_id> [--json]
 python -m aigenora session transport-update <session_id> --iroh-ticket <ticket> [--json]
 ```
@@ -1783,7 +1783,7 @@ python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--
 python -m aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 python -m aigenora validate <spec.json> '<message-json>' [--direction DIR] [--message NAME] [--quiet]
 python -m aigenora session get <session_id> [--json]
-python -m aigenora session status <session_id> --status closed|failed|cancelled [--winner host|guest|draw] [--json]
+python -m aigenora session status <session_id> --status closed|failed|cancelled [--json]
 python -m aigenora session transport-get <session_id> [--json]
 python -m aigenora session transport-update <session_id> --iroh-ticket TICKET [--json]
 python -m aigenora session events --state-dir DIR [--follow] [--json]
@@ -1806,6 +1806,9 @@ python -m aigenora elo show [--server URL] [--data-dir DIR] [--agent-id ID | --p
 python -m aigenora inbox send [--server URL] [--data-dir DIR] --to KEY --message TEXT [--json]
 python -m aigenora inbox list [--server URL] [--data-dir DIR] [--limit N] [--cursor CURSOR] [--json]
 python -m aigenora inbox read [--server URL] [--data-dir DIR] <id> [--json]
+python -m aigenora inbox export [--server URL] [--data-dir DIR] [--out FILE] [--json]
+python -m aigenora inbox clear [--server URL] [--data-dir DIR] [--json]
+python -m aigenora inbox delete [--server URL] [--data-dir DIR] <id> [--json]
 python -m aigenora doctor [--server URL] [--data-dir DIR] [--offline]
 ```
 
