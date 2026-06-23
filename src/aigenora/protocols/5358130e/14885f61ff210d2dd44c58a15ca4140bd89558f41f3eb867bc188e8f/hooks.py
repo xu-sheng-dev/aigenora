@@ -292,7 +292,23 @@ class Hooks(ProtocolHooks):
         auto = self._pick_auto(sym)
         if auto is None:
             auto = heuristic_move(self.board, self.n, sym)
-        if self.bus is None or not self.timing_enabled or auto is None:
+        if auto is None:
+            return auto
+        if self.bus is None:
+            return auto
+        # hybrid（auto 模式，默认）：非阻塞读 decide，无则 auto
+        if self.decision_mode != "manual":
+            d = self._consume_hybrid("turn", match_turn)
+            if d and "row" in d and "col" in d:
+                try:
+                    r, c = int(d["row"]), int(d["col"])
+                    if is_legal(self.board, self.n, r, c, sym):
+                        return (r, c)
+                except (TypeError, ValueError):
+                    pass
+            return auto
+        # --coach（manual）：阻塞逐手等待
+        if not self.timing_enabled:
             return auto
         now = time.monotonic()
         min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))

@@ -82,8 +82,23 @@ class Hooks(ProtocolHooks):
 
     def _pick(self, round_index: int) -> int:
         remaining = self._my_remaining()
-        if self.bus is None or not self.timing_enabled:
-            return self._bid_auto(round_index, remaining)
+        auto = self._bid_auto(round_index, remaining)
+        if self.bus is None:
+            return auto
+        # hybrid（auto 模式，默认）：非阻塞读 decide，无则 auto
+        if self.decision_mode != "manual":
+            d = self._consume_hybrid("round", round_index)
+            if d and "bid" in d:
+                try:
+                    bid = int(d["bid"])
+                    if 0 <= bid <= remaining:
+                        return bid
+                except (TypeError, ValueError):
+                    pass
+            return auto
+        # --coach（manual）：阻塞逐手等待
+        if not self.timing_enabled:
+            return auto
         now = time.monotonic()
         # options 里的 min/max_think_seconds 优先于 spec.timing 默认值（邀约级覆盖）
         min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))

@@ -139,8 +139,23 @@ class Hooks(ProtocolHooks):
         return {"action": "guess", "attempt": self.guest_attempt, "number": number}
 
     def _guess(self) -> dict:
-        if self.bus is None or not self.timing_enabled:
-            return self._guess_auto()
+        auto = self._guess_auto()
+        if self.bus is None:
+            return auto
+        # hybrid（auto 模式，默认）：非阻塞读 decide，无则 auto
+        if self.decision_mode != "manual":
+            d = self._consume_hybrid("attempt", self.guest_attempt)
+            if d and "number" in d:
+                try:
+                    number = max(self.lo, min(self.hi, int(d["number"])))
+                    self.state.write("last_guess", number)
+                    return {"action": "guess", "attempt": self.guest_attempt, "number": number}
+                except (TypeError, ValueError):
+                    pass
+            return auto
+        # --coach（manual）：阻塞逐手等待
+        if not self.timing_enabled:
+            return auto
         now = time.monotonic()
         # options 里的 min/max_think_seconds 优先于 spec.timing 默认值（邀约级覆盖）
         min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))

@@ -29,6 +29,35 @@ def _pricing_text(item) -> str:
     return f"{amount} {currency}".strip() or model
 
 
+# options 中对用户决策最关键的键（游戏局数/节奏等），按此顺序格式化为可读摘要
+_OPTIONS_DISPLAY_KEYS = (
+    "best_of", "rounds_to_win", "termination",
+    "round_delay_seconds", "min_think_seconds", "max_think_seconds",
+)
+
+
+def _options_text(item) -> str:
+    """格式化邀约 options 为可读摘要，突出局数/节奏等关键参数。
+
+    未携带 options 时返回空串，调用方据此决定是否打印该行。
+    """
+    if not isinstance(item, dict):
+        return ""
+    options = item.get("options")
+    if not isinstance(options, dict) or not options:
+        return ""
+    parts = []
+    for key in _OPTIONS_DISPLAY_KEYS:
+        if key in options:
+            parts.append(f"{key}={options[key]}")
+    # 兜底：展示剩余非敏感键（如自定义业务参数），跳过 pricing（_pricing_text 已处理）
+    for key, value in options.items():
+        if key in _OPTIONS_DISPLAY_KEYS or key == "pricing":
+            continue
+        parts.append(f"{key}={value}")
+    return ", ".join(parts)
+
+
 def _validate_tags_filter(tags_arg: str | None) -> list[str]:
     if tags_arg is None:
         return []
@@ -109,6 +138,7 @@ def run(args) -> int:
                 str(item.get("nickname", "") or ""),
                 str(item.get("agent_id", "") or ""),
                 _pricing_text(item),
+                _options_text(item),
             ]))
         return 0
     print(f"Total: {total}")
@@ -116,5 +146,8 @@ def run(args) -> int:
         print(f"{item.get('post_id')} [{item.get('type', 'chat')}] {item.get('message', '')}")
         print(f"  protocol_id: {item.get('protocol_id', '')}")
         print(f"  public_key: {item.get('public_key', '')}")
+        options_text = _options_text(item)
+        if options_text:
+            print(f"  options: {options_text}")
     return 0
 

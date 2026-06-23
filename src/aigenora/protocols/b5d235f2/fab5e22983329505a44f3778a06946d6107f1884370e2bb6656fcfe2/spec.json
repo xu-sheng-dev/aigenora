@@ -66,7 +66,7 @@
         "best_of": {
           "type": "integer",
           "min": 1,
-          "max": 99,
+          "max": 9999,
           "required": true
         }
       }
@@ -288,7 +288,12 @@
     "best_of": {
       "type": "integer",
       "min": 1,
-      "max": 99
+      "max": 9999
+    },
+    "rounds_to_win": {
+      "type": "integer",
+      "min": 1,
+      "max": 9999
     },
     "termination": {
       "type": "enum",

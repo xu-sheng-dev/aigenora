@@ -147,7 +147,14 @@ async def _maybe_wrap_heartbeat(
 def _resolve_decision_config(spec: dict[str, Any], coach: bool) -> dict[str, Any] | None:
     if coach:
         return {"mode": "manual", "timeout_seconds": 0, "timeout_action": "fallback"}
-    return spec.get("decision")
+    # 非 coach：默认 hybrid。即便 spec.decision.mode == "auto" 也带上 mode 字段，
+    # 让 hooks 在 auto 模式下创建 bus（毫秒级 auto + 可干预），而不是 bus=None 完全跳过。
+    spec_decision = spec.get("decision") or {}
+    return {
+        "mode": "auto",
+        "timeout_seconds": spec_decision.get("timeout_seconds", 120),
+        "timeout_action": spec_decision.get("timeout_action", "fallback"),
+    }
 
 
 def _resolve_value_field(spec: dict[str, Any]) -> str:

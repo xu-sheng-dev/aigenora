@@ -239,7 +239,21 @@ class Hooks(ProtocolHooks):
 
     def _pick(self, sym: str, match_turn: int) -> tuple[int, int]:
         auto = self._pick_auto(sym)
-        if self.bus is None or not self.timing_enabled:
+        if self.bus is None:
+            return auto
+        # hybrid（auto 模式，默认）：非阻塞读 decide，无则 auto
+        if self.decision_mode != "manual":
+            d = self._consume_hybrid("turn", match_turn)
+            if d and "row" in d and "col" in d:
+                try:
+                    r, c = int(d["row"]), int(d["col"])
+                    if _in(self.board_size, r, c) and self.board[r][c] == EMPTY:
+                        return (r, c)
+                except (TypeError, ValueError):
+                    pass
+            return auto
+        # --coach（manual）：阻塞逐手等待
+        if not self.timing_enabled:
             return auto
         now = time.monotonic()
         min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))

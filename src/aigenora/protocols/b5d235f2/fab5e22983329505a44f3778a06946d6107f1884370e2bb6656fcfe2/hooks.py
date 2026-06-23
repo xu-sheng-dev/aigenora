@@ -31,7 +31,10 @@ class Hooks(ProtocolHooks):
         self.termination = termination
         delay = options.get("round_delay_seconds")
         self.round_delay_seconds = int(delay) if delay is not None else 0
-        self.rounds_to_win = self.best_of // 2 + 1
+        # rounds_to_win 可独立配置（first_to_win 模式下"先胜 N 局"）；
+        # 未显式指定时兜底 best_of//2+1（过半胜），保持向后兼容
+        rtw = options.get("rounds_to_win")
+        self.rounds_to_win = int(rtw) if rtw else self.best_of // 2 + 1
         self.host_wins = 0
         self.guest_wins = 0
         self.fallback_strategy: str = args[0] if args else "random"
@@ -79,8 +82,18 @@ class Hooks(ProtocolHooks):
         return random.choice(CHOICES)
 
     def _pick(self, round_index: int) -> str:
-        if self.bus is None or not self.timing_enabled:
-            return self._pick_auto(round_index)
+        auto = self._pick_auto(round_index)
+        if self.bus is None:
+            return auto
+        # hybrid（auto 模式，默认）：非阻塞读 decide，无则 auto
+        if self.decision_mode != "manual":
+            d = self._consume_hybrid("round", round_index)
+            if d and d.get("choice") in CHOICES:
+                return d["choice"]
+            return auto
+        # --coach（manual）：阻塞逐手等待
+        if not self.timing_enabled:
+            return auto
         now = time.monotonic()
         # options 里的 min/max_think_seconds 优先于 spec.timing 默认值（邀约级覆盖）
         min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
@@ -218,7 +231,12 @@ class Hooks(ProtocolHooks):
     def proto_host_handle_join(self, msg):
         requested = int(msg.get("best_of", self.best_of))
         self.best_of = requested
-        self.rounds_to_win = requested // 2 + 1
+        # guest 可在 join 消息里带 rounds_to_win 表明期望；未带则按 host 配置或 best_of//2+1 兜底
+        guest_rtw = msg.get("rounds_to_win")
+        if guest_rtw:
+            self.rounds_to_win = int(guest_rtw)
+        elif "rounds_to_win" not in self.options:
+            self.rounds_to_win = requested // 2 + 1
         self.snapshot.update(best_of=self.best_of, rounds_to_win=self.rounds_to_win, phase="playing")
         return HookResult({
             "action": "ready",
@@ -229,7 +247,11 @@ class Hooks(ProtocolHooks):
         })
 
     def proto_guest_join_message(self):
-        return {"action": "join", "best_of": self.best_of}
+        # 携带 rounds_to_win（若已配置），让 host 知晓 guest 期望的先胜局数
+        msg = {"action": "join", "best_of": self.best_of}
+        if "rounds_to_win" in self.options:
+            msg["rounds_to_win"] = self.rounds_to_win
+        return msg
 
     def proto_guest_handle_ready(self, msg):
         self.best_of = int(msg["best_of"])
