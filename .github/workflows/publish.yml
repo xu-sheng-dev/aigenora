@@ -26,6 +26,10 @@ jobs:
       - name: Install build tool
         run: python -m pip install --upgrade build
 
+      - name: Protocol index hash check (pre-build)
+        # Block the release if any built-in protocol_id drifted from hash(spec).
+        run: python .github/scripts/check_protocol_index.py
+
       - name: Build sdist and wheel
         run: python -m build
 

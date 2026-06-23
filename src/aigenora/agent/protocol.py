@@ -52,8 +52,16 @@ def path_for(proto_id: str, data_dir: str | None = None) -> Path:
         for item in protocols:
             aliases = [item.get("id"), item.get("alias"), item.get("protocol_id")]
             if proto_id in aliases:
+                # Prefer the index's recorded `path` to locate the dir directly.
+                # This survives a stale protocol_id (dir name != spec hash) without
+                # recursing into a lookup that may fail to resolve.
+                rel = item.get("path")
+                if rel:
+                    cand = lib / rel
+                    if (cand / "spec.json").exists():
+                        return cand
                 pid = item.get("protocol_id") or item.get("hash")
-                if pid:
+                if pid and pid != proto_id:
                     return path_for(pid, data_dir)
     raise FileNotFoundError(f"protocol not found: {proto_id}")
 

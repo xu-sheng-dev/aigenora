@@ -24,7 +24,8 @@ env/
 
 # Development-only directories (not part of the open-source release)
 tests/
-scripts/
+# Root-anchored so .github/scripts/ (CI tooling) stays tracked
+/scripts/
 
 # IDE / editors
 .idea/

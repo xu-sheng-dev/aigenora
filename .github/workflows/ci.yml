@@ -28,7 +28,12 @@ jobs:
           pip install .
 
       - name: Compile check (guard against syntax errors after i18n)
-        run: python -m compileall -q aigenora protocols
+        run: python -m compileall -q src/aigenora src/aigenora/protocols
+
+      - name: Protocol index hash check
+        # Every built-in protocol_id must equal hash(spec); a stale id makes
+        # the sample unresolvable on the guest side. See .github/scripts/.
+        run: python .github/scripts/check_protocol_index.py
 
       - name: Smoke test
         run: python -m aigenora doctor --offline
