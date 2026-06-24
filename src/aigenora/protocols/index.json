@@ -371,6 +371,52 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "hero-duel-v1",
+      "name": "Hero Duel",
+      "description": "1v1 MOBA-style hero duel with declarative balance (v015). Hero numbers (HP/mana/regen/atk + 3 skills) live in options.balance, held identically by both sides; per round commit-reveal a move (normal/skill_a/skill_b/ult), damage resolves simultaneously; first to drop the foe's HP to 0 (or higher HP at max_rounds) wins.",
+      "type": "game",
+      "family": "hero-duel",
+      "tags": ["game", "hero-duel", "moba", "balance"],
+      "capabilities": ["hero_duel", "declarative_balance", "simultaneous_damage", "skill_cooldown"],
+      "status": "active",
+      "protocol_id": "df2d0709aa159798680cfcb7106d4d3b0a8eee002b5644044dc0ed0b8d06092a",
+      "path": "df2d0709/aa159798680cfcb7106d4d3b0a8eee002b5644044dc0ed0b8d06092a",
+      "parent_protocol_id": null,
+      "created_reason": "v015 M1: declarative balance + table type (MOBA hero duel sample)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "4 heroes (warrior/mage/assassin/tank), 30 round cap",
+          "options": {
+            "max_rounds": 30,
+            "balance": {
+              "warrior": {"hp": 250, "mana": 80, "mana_regen": 15, "atk": 25,
+                "skill_a": {"dmg": 50, "cost": 20, "cd": 2},
+                "skill_b": {"dmg": 70, "cost": 35, "cd": 3},
+                "ult": {"dmg": 120, "cost": 60, "cd": 5}},
+              "mage": {"hp": 150, "mana": 120, "mana_regen": 20, "atk": 12,
+                "skill_a": {"dmg": 60, "cost": 25, "cd": 2},
+                "skill_b": {"dmg": 90, "cost": 45, "cd": 3},
+                "ult": {"dmg": 180, "cost": 80, "cd": 5}},
+              "assassin": {"hp": 180, "mana": 60, "mana_regen": 12, "atk": 35,
+                "skill_a": {"dmg": 45, "cost": 15, "cd": 1},
+                "skill_b": {"dmg": 65, "cost": 30, "cd": 2},
+                "ult": {"dmg": 110, "cost": 50, "cd": 4}},
+              "tank": {"hp": 350, "mana": 70, "mana_regen": 14, "atk": 18,
+                "skill_a": {"dmg": 35, "cost": 18, "cd": 2},
+                "skill_b": {"dmg": 55, "cost": 30, "cd": 3},
+                "ult": {"dmg": 90, "cost": 55, "cd": 5}}
+            }
+          }
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
     }
   ]
 }

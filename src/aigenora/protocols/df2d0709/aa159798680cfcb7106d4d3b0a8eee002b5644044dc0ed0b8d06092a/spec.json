@@ -1,0 +1,155 @@
+{
+  "name": "Hero Duel",
+  "spec_version": "1.0",
+  "description": "1v1 MOBA-style hero duel with declarative balance (v015). Each side picks a hero whose numbers (HP/mana/regen/attack + 3 skills) live in options.balance, held identically by both sides. Per round both commit-reveal a move (normal/skill_a/skill_b/ult); damage resolves simultaneously. A skill resolves only when mana >= cost and cooldown == 0, otherwise it falls back to a normal attack. First to drop the foe's HP to 0 (or higher HP at max_rounds) wins.",
+  "type": "game",
+  "flow": {
+    "mode": "simultaneous_round",
+    "round": {
+      "value_field": "move",
+      "value_type_ref": "reveal.fields.move"
+    },
+    "phases": [
+      {
+        "phase": "join",
+        "exchange": [
+          {"message": "join", "direction": "guest_to_host"},
+          {"message": "ready", "direction": "host_to_guest"}
+        ]
+      },
+      {
+        "phase": "round",
+        "repeat": "until game_over",
+        "exchange": [
+          {"message": "commit", "direction": "host_to_guest"},
+          {"message": "commit", "direction": "guest_to_host"},
+          {"message": "reveal", "direction": "host_to_guest"},
+          {"message": "reveal", "direction": "guest_to_host"},
+          {"message": "round_result", "direction": "host_to_guest"}
+        ]
+      }
+    ]
+  },
+  "messages": [
+    {
+      "name": "join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["join"], "required": true},
+        "hero": {"type": "id", "required": true},
+        "max_rounds": {"type": "integer", "min": 1, "max": 200, "required": true}
+      }
+    },
+    {
+      "name": "ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["ready"], "required": true},
+        "host_hero": {"type": "id", "required": true},
+        "guest_hero": {"type": "id", "required": true},
+        "max_rounds": {"type": "integer", "min": 1, "max": 200, "required": true}
+      }
+    },
+    {
+      "name": "commit",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["commit"], "required": true},
+        "round": {"type": "integer", "min": 0, "required": true},
+        "hash": {"type": "hash", "required": true}
+      }
+    },
+    {
+      "name": "reveal",
+      "direction": "both",
+      "fields": {
+        "action": {"type": "enum", "values": ["reveal"], "required": true},
+        "round": {"type": "integer", "min": 0, "required": true},
+        "move": {"type": "enum", "values": ["normal", "skill_a", "skill_b", "ult"], "required": true},
+        "nonce": {"type": "nonce", "required": true}
+      }
+    },
+    {
+      "name": "round_result",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["round_result"], "required": true},
+        "round": {"type": "integer", "min": 0, "required": true},
+        "host_move": {"type": "enum", "values": ["normal", "skill_a", "skill_b", "ult"], "required": true},
+        "guest_move": {"type": "enum", "values": ["normal", "skill_a", "skill_b", "ult"], "required": true},
+        "host_hp": {"type": "integer", "min": 0, "required": true},
+        "guest_hp": {"type": "integer", "min": 0, "required": true},
+        "host_mana": {"type": "integer", "min": 0, "required": true},
+        "guest_mana": {"type": "integer", "min": 0, "required": true},
+        "host_damage_dealt": {"type": "integer", "min": 0, "required": true},
+        "guest_damage_dealt": {"type": "integer", "min": 0, "required": true},
+        "host_cd_a": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "host_cd_b": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "host_cd_ult": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "guest_cd_a": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "guest_cd_b": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "guest_cd_ult": {"type": "integer", "min": 0, "max": 99, "required": true},
+        "round_winner": {"type": "enum", "values": ["host", "guest", "draw"], "required": true},
+        "game_over": {"type": "boolean", "required": true},
+        "game_winner": {"type": "enum", "values": ["host", "guest", "draw", "none"], "required": true}
+      }
+    },
+    {
+      "name": "error",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["error"], "required": true},
+        "round": {"type": "integer", "min": 0},
+        "reason": {"type": "enum", "values": ["timeout", "invalid_move", "aborted", "commit_mismatch"], "required": true}
+      }
+    },
+    {
+      "name": "end",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["end"], "required": true}
+      }
+    }
+  ],
+  "rules": {
+    "moves": ["normal", "skill_a", "skill_b", "ult"],
+    "move_resolution": "A skill resolves only when mana >= cost and its cooldown counter is 0; otherwise it falls back to a normal attack dealing the hero's atk. Both sides resolve simultaneously each round.",
+    "win_condition": "First to reduce the foe's HP to 0 wins; if both reach 0 in the same round it is a draw; if max_rounds is reached first, higher HP wins (draw if equal).",
+    "cooldown_and_mana": "Casting a skill sets its cd counter to the skill's cd value. At end of round every cd ticks down by 1 (floor 0) and mana regenerates by mana_regen up to the mana cap. Balance is declarative data shared identically by both sides (v015 ADR-1/5)."
+  },
+  "choices": ["normal", "skill_a", "skill_b", "ult"],
+  "parameters": {
+    "balance": {
+      "type": "table",
+      "columns": {
+        "hp": {"type": "integer", "min": 1, "max": 99999},
+        "mana": {"type": "integer", "min": 0, "max": 9999},
+        "mana_regen": {"type": "integer", "min": 0, "max": 999},
+        "atk": {"type": "integer", "min": 0, "max": 9999},
+        "skill_a": {"type": "object", "fields": {
+          "dmg": {"type": "integer", "min": 0, "max": 99999},
+          "cost": {"type": "integer", "min": 0, "max": 9999},
+          "cd": {"type": "integer", "min": 0, "max": 99}
+        }},
+        "skill_b": {"type": "object", "fields": {
+          "dmg": {"type": "integer", "min": 0, "max": 99999},
+          "cost": {"type": "integer", "min": 0, "max": 9999},
+          "cd": {"type": "integer", "min": 0, "max": 99}
+        }},
+        "ult": {"type": "object", "fields": {
+          "dmg": {"type": "integer", "min": 0, "max": 99999},
+          "cost": {"type": "integer", "min": 0, "max": 9999},
+          "cd": {"type": "integer", "min": 0, "max": 99}
+        }}
+      }
+    },
+    "max_rounds": {"type": "integer", "min": 1, "max": 200},
+    "host_hero": {"type": "id"},
+    "guest_hero": {"type": "id"}
+  },
+  "decision": {
+    "mode": "auto",
+    "timeout_seconds": 120,
+    "timeout_action": "fallback"
+  }
+}

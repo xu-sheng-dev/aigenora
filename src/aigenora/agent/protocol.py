@@ -333,6 +333,8 @@ def run(args) -> int:
         shutil.copyfile(template, output_path)
         print(f"[OK] created {args.output}")
         return 0
+    if args.protocol_cmd == "discover":
+        return _cmd_discover(args)
     if args.protocol_cmd == "search":
         return _cmd_search(args)
     if args.protocol_cmd == "select":
@@ -406,6 +408,88 @@ def _cmd_search(args) -> int:
         for p in results:
             blocked = " [blocked]" if p.get("_blocked") else ""
             print(f"  {p.get('alias', '?')} ({p.get('protocol_id', '')[:16]}...) family={p.get('family', '?')} status={p.get('status', '?')}{blocked}")
+    return 0
+
+
+def _fetch_remote_page(client: RestClient, *, limit: int,
+                       cursor: str | None) -> tuple[list[dict[str, Any]], str | None]:
+    """Fetch one page of the remote protocol directory.
+
+    The server lists protocols with created_at DESC LIMIT keyset pagination (index-ordered,
+    no LIKE, no full table scan). Returns (results, next_cursor).
+    """
+    path = f"/api/v1/protocols?limit={limit}"
+    if cursor:
+        path += f"&cursor={cursor}"
+    data = client.json("GET", path, None, expected={200})
+    return data.get("results") or [], data.get("next_cursor")
+
+
+def _cmd_discover(args) -> int:
+    """Browse the remote protocol directory. Paginated: never pulls everything at once.
+
+    - Browse (no -q): default 1 page (limit items); --cursor paginates forward.
+    - Keyword (-q): pulls up to --max-pages pages (default 5) and filters client-side on
+      name+description. The DB is never asked to do a LIKE; matching is in-memory.
+    - --fetch: auto-downloads only when -q yields exactly one match.
+    """
+    kp = load_keys(args.data_dir)
+    client = RestClient(get_server(args.server), kp)
+
+    limit = min(getattr(args, "limit", None) or 20, 100)
+    query = getattr(args, "query", None)
+    cursor = getattr(args, "cursor", None)
+    # Browse defaults to 1 page; keyword defaults to scanning up to 5 pages (==100 rows).
+    max_pages = getattr(args, "max_pages", None) or (5 if query else 1)
+
+    collected: list[dict[str, Any]] = []
+    next_cursor: str | None = cursor
+    pages = 0
+    while pages < max_pages:
+        page, next_cursor = _fetch_remote_page(client, limit=limit, cursor=next_cursor)
+        collected.extend(page)
+        pages += 1
+        if not next_cursor:
+            break
+    exhausted = not next_cursor  # next_cursor None => reached the end
+
+    # Client-side keyword filter (no DB query)
+    if query:
+        ql = query.lower()
+        results = [p for p in collected
+                   if ql in (p.get("name") or "").lower()
+                   or ql in (p.get("description") or "").lower()]
+    else:
+        results = collected
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+        return 0
+    if not results:
+        print(f"no protocols {'matching ' + repr(query) if query else 'on this page'}")
+    else:
+        for p in results:
+            print(f"  {(p.get('name') or '?')[:20]:<20} {p.get('protocol_id', '')[:16]}...  {(p.get('description') or '')[:50]}")
+        print(f"({len(results)} protocol{'s' if len(results) != 1 else ''}" + (f" matching '{query}'" if query else "") + ")")
+
+    # Range hint so the user knows whether they have seen everything
+    if query and not exhausted:
+        print(f"(searched {pages} page{'s' if pages != 1 else ''} = {pages * limit} most recent; older not searched. use --max-pages N to extend)")
+    elif not query and next_cursor:
+        print(f"(more available: aigenora protocol discover --cursor {next_cursor} ...)")
+
+    # --fetch: only auto-download on a unique keyword match
+    if getattr(args, "fetch", False):
+        if not query:
+            print("[--fetch] needs -q to pin a unique protocol; skipping")
+        elif len(results) == 1:
+            pid = results[0].get("protocol_id")
+            print(f"[1 match] fetching {pid[:16]}...")
+            out, created = fetch_protocol(client, pid, args.data_dir,
+                                          accept_ui=getattr(args, "accept_ui", False))
+            print(f"[fetch] {'hooks skeleton generated' if created else 'already present'}: {out / 'hooks.py'}")
+        else:
+            print(f"[{len(results)} matches] not auto-fetching; narrow -q or run: aigenora protocol fetch <id>")
     return 0
 
 

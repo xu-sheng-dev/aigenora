@@ -165,6 +165,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true", dest="json_output")
     _common(sp)
 
+    dp = proto_sub.add_parser("discover",
+            help="Browse the remote server's protocol directory; -q filters client-side (no DB load)")
+    dp.add_argument("-q", "--query", help="client-side keyword matched against name+description")
+    dp.add_argument("--limit", type=int, default=20, help="page size (max 100)")
+    dp.add_argument("--max-pages", dest="max_pages", type=int,
+                    help="max pages to fetch (default: 1 for browse, 5 with -q)")
+    dp.add_argument("--cursor", help="pagination cursor from a previous run's next_cursor")
+    dp.add_argument("--fetch", action="store_true",
+                    help="auto-fetch when exactly one match (requires -q)")
+    dp.add_argument("--accept-ui", dest="accept_ui", action="store_true")
+    dp.add_argument("--json", action="store_true", dest="json_output")
+    _common(dp)
+
     sl = proto_sub.add_parser("select")
     sl.add_argument("--protocol-id")
     sl.add_argument("--alias")

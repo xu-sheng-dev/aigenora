@@ -156,8 +156,85 @@ def validate_options(spec: dict[str, Any], options: dict[str, Any]) -> None:
         elif ptype == "enum":
             if not isinstance(value, str) or value not in schema.get("values", []):
                 errors.append(f"{key}: invalid enum")
+        elif ptype == "table":
+            _validate_table(value, schema, key, errors)
     if errors:
         raise ValidationError("; ".join(errors))
+
+
+def _validate_table(value: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
+    """Validate a ``table`` parameter (v015): a constrained nested numeric table.
+
+    A balance table is declarative data (not code); its structure is pinned by the
+    ``schema.columns`` field-tree whitelist. Leaf nodes are integer/boolean/enum
+    (with optional min/max/values); interior nodes use ``object`` + ``fields``
+    recursion. Extra fields, missing fields, wrong types, and out-of-range values
+    are appended to ``errors``. See v015 ADR-2/5.
+    """
+    columns = schema.get("columns")
+    if not isinstance(columns, dict) or not columns:
+        errors.append(f"{path}: table schema requires a non-empty 'columns' field-tree")
+        return
+    if not isinstance(value, dict):
+        errors.append(f"{path}: expected a keyed table object")
+        return
+    # Each keyed row is validated against the shared columns field-tree.
+    for row_key, row_val in value.items():
+        _validate_table_fields(row_val, columns, f"{path}.{row_key}", errors)
+
+
+def _validate_table_fields(value: Any, fields: dict[str, Any], path: str, errors: list[str]) -> None:
+    """Validate an object/table-row against a field-tree.
+
+    Shared by table rows (against ``columns``) and ``object`` nodes (against their
+    ``fields``). Table fields default to required — a balance table declares every
+    value completely; set ``required: false`` to allow omission (differs from message
+    fields, which default to optional, because a balance table emphasizes
+    completeness). Unknown keys are rejected (whitelist).
+    """
+    if not isinstance(value, dict):
+        errors.append(f"{path}: expected object")
+        return
+    for k in value:
+        if k not in fields:
+            errors.append(f"{path}: unknown field {k!r}")
+    for k, fs in fields.items():
+        required = fs.get("required", True) if isinstance(fs, dict) else True
+        if k not in value:
+            if required:
+                errors.append(f"{path}: missing field {k!r}")
+            continue
+        _validate_table_node(value[k], fs, f"{path}.{k}", errors)
+
+
+def _validate_table_node(value: Any, node_schema: dict[str, Any], path: str, errors: list[str]) -> None:
+    """Validate a single field value against its leaf/``object`` node schema."""
+    if not isinstance(node_schema, dict):
+        errors.append(f"{path}: invalid node schema")
+        return
+    ntype = node_schema.get("type")
+    if ntype == "object":
+        fields = node_schema.get("fields")
+        if not isinstance(fields, dict):
+            errors.append(f"{path}: object node requires a 'fields' field-tree")
+            return
+        _validate_table_fields(value, fields, path, errors)
+    elif ntype == "integer":
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"{path}: expected integer")
+        else:
+            if "min" in node_schema and value < node_schema["min"]:
+                errors.append(f"{path}: below min {node_schema['min']}")
+            if "max" in node_schema and value > node_schema["max"]:
+                errors.append(f"{path}: above max {node_schema['max']}")
+    elif ntype == "boolean":
+        if not isinstance(value, bool):
+            errors.append(f"{path}: expected boolean")
+    elif ntype == "enum":
+        if not isinstance(value, str) or value not in node_schema.get("values", []):
+            errors.append(f"{path}: invalid enum")
+    else:
+        errors.append(f"{path}: unsupported node type {ntype!r}")
 
 
 # flow.mode set implemented by the engine at the P0 stage (excluding placeholders other than the session_loop default).

@@ -80,6 +80,7 @@ python -m aigenora protocol path <alias_or_protocol_id> [--data-dir DIR]
 python -m aigenora protocol create --template TEMPLATE --output OUTPUT
 python -m aigenora protocol register [--server URL] [--data-dir DIR] <spec.json>
 python -m aigenora protocol fetch [--server URL] [--data-dir DIR] <protocol_id>
+python -m aigenora protocol discover [-q KEYWORD] [--limit N] [--max-pages N] [--cursor TOKEN] [--fetch] [--accept-ui] [--server URL] [--data-dir DIR] [--json]
 python -m aigenora protocol test <protocol-dir> [--state-base DIR] [--options JSON]
 python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
 python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]

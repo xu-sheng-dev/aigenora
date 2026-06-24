@@ -353,6 +353,16 @@ Recommended defaults:
 | options | Put only runtime-tunable values in options; stable contract values belong in `parameters` or messages |
 | Naming | Use a short readable `name`; use English kebab-case for `family` |
 
+#### Declarative numeric tables (balance, v015)
+
+Numeric values in game/combat protocols (hero stats, damage, HP, cooldowns) should be declared as `options.balance` (a `type: "table"` field in `parameters`), **not** hardcoded in `hooks.py`:
+
+- Both sides read the same numbers from the invitation's `options.balance` (hooks read from `self.options["balance"]`), so the Guest can verify the Host judged honestly.
+- Values live in `options`, not in `spec.json` constants → changing numbers does not change `protocol_id`, preserving tunable balance.
+- balance is data, not code; executable `hooks.py` is still never distributed (security red line unchanged).
+
+See the built-in **Hero Duel** protocol (`family: hero-duel`): a full table of hero HP/mana/attack + 3 skills, with hooks reading from balance. Without `--options`, hooks fall back to a built-in default table.
+
 In `guided` mode, keep questions short. Do not dump the full spec checklist at once. Recommended order:
 
 1. Is this a game, Q&A service, or bidding/negotiation flow?
@@ -1052,6 +1062,19 @@ PERSONAL.md configuration (`aigenora skill install --target` backfills `coach:us
 
 `{session_id}` and `{prompt}` are substituted by the client as single argv elements; no shell is used.
 
+**Adapting other agent CLIs (beyond claude-code):** agent CLIs are numerous (codex / opencode / gemini-cli / …); the client does not hardcode each one. If you are not on claude-code, confirm your CLI against the table below and fill `coach:new_cmd` / `coach:resume_cmd` accordingly:
+
+| # | Key point | Your CLI must support | Reference |
+|---|---|---|---|
+| 1 | Non-interactive one-shot mode | read prompt → print reply → exit (no REPL) | claude `-p`; codex `exec`; find your CLI's print / non-interactive flag |
+| 2 | Two-stage session resume | **two distinct commands** for new vs. resume | claude: new `--session-id <uuid>`, resume `--resume <uuid>` → fill `new_cmd` / `resume_cmd` separately |
+| 3 | Session ID source | resume must reuse the same id | claude self-generates a UUID stored in `coach_session.json`; if your CLI returns an id, you must parse it out |
+| 4 | Output mode | get **line-by-line real-time plain-text body** (avoid JSON noise) | claude uses default text (not stream-json); prefer plain-text streaming |
+| 5 | Resume-failure tolerance | resuming a non-existent session must error (not silently create) | the client falls back to `new_cmd` on failure; your CLI must exit non-zero / give a clear error |
+
+> Already handled by the engine (no config needed): cwd isolation (`coach_workspace`, does not read project config), serialized consumption (agent sessions are not concurrency-safe), list-form invocation (no shell injection), uses your local login state (no API key handled), timeout + UI loading.
+> Reference hints: codex uses `codex exec` + thread_id resume (watch for `2>&1` deadlock); opencode — find a non-interactive equivalent flag. Fill PERSONAL.md once confirmed by testing.
+
 ### Pristine Skeleton Detection
 
 When `protocol fetch` and `prepare_protocol` generate the `hooks.py` skeleton, dispatch is per `spec.flow.mode`. Every unimplemented hook body is:
@@ -1142,6 +1165,24 @@ python -m aigenora protocol search [--family F] [--tag T] [--capability C] [--st
 All filter parameters are combinable. `--tag` and `--capability` can be repeated, requiring all specified values. Defaults to hiding `deprecated` status protocols; `--all-status` shows all.
 
 Agents should prefer `--json` for structured output to facilitate parsing.
+
+### protocol discover
+
+Browse the **full directory of protocols registered on the server** (discover community protocols without depending on invitations). Complementary to `protocol search`: `search` only scans the local installed index.json, while `discover` scans the server's registered protocol catalog.
+
+```bash
+python -m aigenora protocol discover [-q KEYWORD] [--limit N] [--max-pages N] [--cursor TOKEN] [--fetch] [--accept-ui] [--server URL] [--data-dir DIR] [--json]
+```
+
+**Paginated; never pulls everything at once.** Browsing defaults to 1 page (`--limit` rows, max 100); use the previous page's `next_cursor` as `--cursor` to page forward.
+
+`-q KEYWORD` filters `name + description` in client memory (case-insensitive) and **issues no LIKE query to the database** — the server only does `created_at DESC LIMIT` index pagination, with load equivalent to `browse` invitations. Keyword mode scans up to `--max-pages` (default 5) pages = 100 rows by default; raise with `--max-pages N`.
+
+`--fetch` auto-downloads the protocol only when `-q` matches exactly one (equivalent to `protocol fetch <id>`); on multiple matches it lists them for selection without auto-downloading.
+
+The output footer reports scope: browsing with a next page prints `--cursor TOKEN`; a keyword search that has not exhausted the catalog prints "searched N most recent", so the user is never misled into thinking everything was seen.
+
+> ⚠️ discover returns only protocol metadata (name/description/protocol_id); the downloaded `hooks.py` is a skeleton (see "fetch bundle boundary" above) — numerical balance must be implemented locally or obtained from the protocol author.
 
 ### protocol select
 
