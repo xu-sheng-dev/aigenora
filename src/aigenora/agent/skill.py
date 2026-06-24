@@ -190,6 +190,7 @@ def cmd_install(args) -> int:
         old_ver = _read_target_version(target_path)
         print(f"[SKIP] {target_path} already exists (version={old_ver}); use --force to overwrite")
         _remember_target(target_name, target_path)
+        _ensure_personal_for_target(target_path, target_name)
         return 0
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,13 +200,8 @@ def cmd_install(args) -> int:
     target_path.write_text(pkg_text, encoding="utf-8")
     _remember_target(target_name, target_path)
 
-    # Create PERSONAL.md template if not exists (never overwrite)
-    personal_path = target_path.parent / PERSONAL_FILENAME
-    if not personal_path.exists():
-        _install_personal_template(personal_path)
-        print(f"[OK] created {personal_path} (personalization template)")
-    else:
-        print(f"[INFO] {personal_path} already exists, skipped")
+    # Create PERSONAL.md template if missing, or append missing coach fields without overwriting.
+    _ensure_personal_for_target(target_path, target_name)
 
     print(f"[OK] installed {pkg_ver} -> {target_path}")
     if backup:
@@ -238,11 +234,7 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(pkg_text, encoding="utf-8")
         _remember_target(target_name, target_path)
-        # Create PERSONAL.md template if not exists
-        personal_path = target_path.parent / PERSONAL_FILENAME
-        if not personal_path.exists():
-            _install_personal_template(personal_path)
-            print(f"[OK] created {personal_path} (personalization template)")
+        _ensure_personal_for_target(target_path, target_name)
         print(f"[OK] installed {pkg_ver} -> {target_path}")
         return 0
 
@@ -253,6 +245,7 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         backup = _backup_and_trim(target_path, old_ver)
         target_path.write_text(pkg_text, encoding="utf-8")
         _remember_target(target_name, target_path)
+        _ensure_personal_for_target(target_path, target_name)
         action = "forced" if (cmp <= 0 and force) else "updated"
         print(f"[OK] {action} {old_ver} -> {pkg_ver} @ {target_path}")
         if backup:
@@ -260,10 +253,12 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         return 0
 
     if cmp == 0:
+        _ensure_personal_for_target(target_path, target_name)
         print(f"[OK] up-to-date ({pkg_ver}) @ {target_path}")
         return 0
 
     # cmp < 0: the packaged version is lower; per user decision, no special handling for now
+    _ensure_personal_for_target(target_path, target_name)
     print(f"[SKIP] packaged ({pkg_ver}) <= installed ({old_ver}) @ {target_path}; use --force to overwrite")
     return 0
 
@@ -311,40 +306,107 @@ def _status_label(pkg_ver: str, target_ver: str | None, target_path: Path) -> st
     return "AHEAD"
 
 
+def _ensure_personal_for_target(target_path: Path, target_name: str) -> None:
+    """Create PERSONAL.md if missing; append the coach block if an existing file lacks it."""
+    personal_path = target_path.parent / PERSONAL_FILENAME
+    if not personal_path.exists():
+        _install_personal_template(personal_path, target_name)
+        print(f"[OK] created {personal_path} (personalization template)")
+        return
+    if _ensure_coach_field(personal_path, target_name):
+        print(f"[OK] updated {personal_path} (added embedded coach settings)")
+    else:
+        print(f"[INFO] {personal_path} already exists, skipped")
+
+
 # ---------- Personalization template ----------
 
-def _install_personal_template(personal_path: Path) -> None:
-    """Copy the packaged PERSONAL.md template to the target directory.
+KNOWN_COACH_AGENTS = ("claude-code", "codex", "opencode")
 
-    Only creates the file if it does not exist. Never overwrites.
+# v014-M2: detect an existing coach:user_agent declaration (any value) so we never clobber a
+# user's choice when appending the coach block.
+_COACH_USER_AGENT_RE = re.compile(r"<!--\s*coach:user_agent\s*:")
+
+_COACH_FIELD_BLOCK = """\
+
+## Embedded Coach (v014-M2)
+
+<!-- The webui coach panel lets you talk tactics with your OWN agent CLI during a live game. -->
+<!-- Declare which agent CLI you use; the coach drives it via a command template. -->
+<!-- coach:user_agent: {target} -->
+<!-- Choices: claude-code | codex | opencode. If you remove this line, the coach falls back to -->
+<!-- the most recent `aigenora skill install --target`, then to claude-code. -->
+<!-- Optional command-template overrides. Placeholders (replaced by the coach as single argv -->
+<!-- elements — never via a shell): {session_id}, {prompt}. By default COACH_SKILL.md is injected -->
+<!-- as a prompt prefix; on Linux/macOS you MAY lift it to the system layer with -->
+<!-- `--append-system-prompt {coach_skill_text}` (Windows npm .cmd shim corrupts multi-line argv). -->
+<!-- coach:new_cmd: claude --session-id {session_id} -p {prompt} -->
+<!-- coach:resume_cmd: claude --resume {session_id} -p {prompt} -->
+<!-- coach:timeout: 180 -->
+<!-- coach:max_context_events: 12 -->
+"""
+
+
+def _ensure_coach_field(personal_path: Path, target_name: str) -> bool:
+    """Ensure PERSONAL.md declares coach:user_agent for the given target (v014-M2).
+
+    - file absent: no-op (caller is expected to create it first).
+    - file present without a coach:user_agent line: append the coach block at the end, with
+      user_agent set to target_name (unknown target -> claude-code).
+    - file present with coach:user_agent already: leave untouched (preserve user choice).
+
+    Returns True iff a block was appended.
     """
-    if personal_path.exists():
-        return
+    if not personal_path.exists():
+        return False
     try:
-        res = resources.files("aigenora.skill").joinpath(PERSONAL_FILENAME)
-        template = res.read_text(encoding="utf-8-sig")
-    except (FileNotFoundError, TypeError):
-        # Fallback: minimal template if packaged file is missing
-        template = (
-            "# Aigenora Personalization\n"
-            "\n"
-            "> This file is maintained by the user or user Agent.\n"
-            "> `aigenora skill install/update` will NEVER overwrite this file.\n"
-            "\n"
-            "## User Preferences\n"
-            "\n"
-            "<!-- Record personalized preferences here. -->\n"
-            "\n"
-            "## Behavioral Habits\n"
-            "\n"
-            "<!-- Record user interaction habits. -->\n"
-            "\n"
-            "## Custom Notes\n"
-            "\n"
-            "<!-- Free-form notes. -->\n"
-        )
-    personal_path.parent.mkdir(parents=True, exist_ok=True)
-    personal_path.write_text(template, encoding="utf-8")
+        text = personal_path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return False
+    if _COACH_USER_AGENT_RE.search(text):
+        return False
+    agent = target_name if target_name in KNOWN_COACH_AGENTS else "claude-code"
+    block = _COACH_FIELD_BLOCK.replace("{target}", agent)
+    try:
+        personal_path.write_text(text.rstrip() + "\n" + block, encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _install_personal_template(personal_path: Path, target_name: str = "") -> None:
+    """Copy the packaged PERSONAL.md template to the target directory, then ensure the
+    coach:user_agent field is present (v014-M2). Never overwrites existing user content; only
+    appends the coach block if it is missing.
+    """
+    if not personal_path.exists():
+        try:
+            res = resources.files("aigenora.skill").joinpath(PERSONAL_FILENAME)
+            template = res.read_text(encoding="utf-8-sig")
+        except (FileNotFoundError, TypeError):
+            # Fallback: minimal template if packaged file is missing
+            template = (
+                "# Aigenora Personalization\n"
+                "\n"
+                "> This file is maintained by the user or user Agent.\n"
+                "> `aigenora skill install/update` will NEVER overwrite this file.\n"
+                "\n"
+                "## User Preferences\n"
+                "\n"
+                "<!-- Record personalized preferences here. -->\n"
+                "\n"
+                "## Behavioral Habits\n"
+                "\n"
+                "<!-- Record user interaction habits. -->\n"
+                "\n"
+                "## Custom Notes\n"
+                "\n"
+                "<!-- Free-form notes. -->\n"
+            )
+        personal_path.parent.mkdir(parents=True, exist_ok=True)
+        personal_path.write_text(template, encoding="utf-8")
+    if target_name:
+        _ensure_coach_field(personal_path, target_name)
 
 
 # ---------- CLI routing ----------

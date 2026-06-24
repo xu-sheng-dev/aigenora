@@ -26,18 +26,19 @@
 ### Web UI Launch Mode
 
 <!-- Behavior preference for the broadcast service when running in daemon mode (host --daemon / join --daemon). -->
-<!-- Values: auto (spawn broadcast + open browser, default), headless (spawn broadcast but no browser), off (do not spawn broadcast) -->
+<!-- Values: off (do not spawn broadcast, default), auto (spawn broadcast + open browser), headless (spawn broadcast but no browser) -->
 <!-- After reading this, the user-Agent should append the corresponding flag when invoking host/join: -->
-<!--   auto     → no extra flag (default) -->
+<!--   off      → no extra flag (default) or --no-web / --web off -->
+<!--   auto     → --web-on      or --web auto -->
 <!--   headless → --no-browser  or --web headless -->
-<!--   off      → --no-web      or --web off -->
-<!-- Example: User works over remote SSH and dislikes auto-opened browsers -->
-<!-- web_ui: headless -->
-<!-- Example: User wants pure CLI, no web broadcast at all -->
+<!-- Example: User wants a visual live page every time -->
+<!-- web_ui: auto -->
+<!-- Example: User wants pure CLI, no web broadcast at all (this is the default) -->
 <!-- web_ui: off -->
 <!-- WARNING — Agent behavior when this field is absent: see SKILL.md "Agent Decision Rules". -->
-<!--   In short: check context → infer from environment → ask once if unclear → -->
-<!--   when the user states a long-term preference, append the field here. -->
+<!--   In short: default is off (pure CLI); check context → infer from environment → -->
+<!--   ask once "want to open it?" if unclear → 2 consecutive identical choices are -->
+<!--   treated as a long-term preference and appended here (this field only). -->
 
 ### Remote Protocol UI Acceptance
 

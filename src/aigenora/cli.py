@@ -9,16 +9,19 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _add_web_flags(p: argparse.ArgumentParser) -> None:
-    """Add the --web / --no-web / --no-browser mutually exclusive group for host/join.
+    """Add the mutually exclusive web-flags group for host/join.
 
-    Three modes: auto (default, start relay subprocess + open browser), headless (start relay subprocess but do not open browser), off (do not start relay subprocess).
+    Three modes: auto (start relay subprocess + open browser), headless (start relay subprocess but do not open browser), off (do not start relay subprocess).
+    Default is off (pure CLI). --web-on is a convenience alias for --web auto;
     --no-web is equivalent to --web off; --no-browser is equivalent to --web headless.
     """
     g = p.add_mutually_exclusive_group()
+    g.add_argument("--web-on", action="store_true",
+                   help="Start the web relay subprocess and open the browser (convenience alias for --web auto; the common entry when you want a live broadcast)")
     g.add_argument("--web", choices=["auto", "headless", "off"],
-                   help="Web UI mode: auto=start relay subprocess + open browser, headless=start relay subprocess without opening browser, off=do not start relay subprocess")
+                   help="Web UI mode: auto=start relay subprocess + open browser, headless=start relay subprocess without opening browser, off=do not start relay subprocess. Default is off (pure CLI); use --web-on for auto")
     g.add_argument("--no-web", action="store_true",
-                   help="Equivalent to --web off: do not start the web relay subprocess")
+                   help="Equivalent to --web off: do not start the web relay subprocess (this is now the default)")
     g.add_argument("--no-browser", action="store_true",
                    help="Equivalent to --web headless: start the relay subprocess but do not auto-open the browser")
 

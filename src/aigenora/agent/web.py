@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from aigenora.proto.decide_gateway import submit_decision
+from aigenora.agent.coach import CoachWorker
 from aigenora.proto.sdk import DecisionBus, DetailLog, EventBus, SnapshotBus, StrategyStore, WhisperLog
 
 
@@ -236,6 +237,43 @@ _INDEX_HTML = """<!doctype html>
                  box-shadow: 0 2px 8px #0004; }
   .peer-banner.visible { display: block; }
   .peer-banner.resumed { background: #27ae60; }
+  /* v014-M2: embedded coach panel (mirrors whisper popover, anchored bottom-left) */
+  .coach-wrap { position: fixed; left: 20px; bottom: 20px; z-index: 1000; }
+  .coach-fab { width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
+               font-size: 22px; background: #6c5ce7; color: #fff; box-shadow: 0 4px 12px #0004;
+               display: flex; align-items: center; justify-content: center; }
+  .coach-fab:hover { transform: translateY(-1px); box-shadow: 0 6px 16px #0005; }
+  .coach-popover { position: fixed; left: 20px; bottom: 80px; width: 420px; max-height: 70vh;
+                   display: none; flex-direction: column; background: var(--whisper-bg, #fff);
+                   color: inherit; border-radius: 10px; box-shadow: 0 8px 28px #0006;
+                   overflow: hidden; z-index: 1001; }
+  @media (prefers-color-scheme: dark) { .coach-popover { background: #222; } }
+  .coach-popover.open { display: flex; }
+  .coach-popover header { padding: 10px 14px 6px; border-bottom: 1px solid #8883; }
+  .coach-popover header h3 { margin: 0 0 4px; font-size: 13px; }
+  .coach-popover header .warn { color: #888; font-size: 11px; margin: 0; line-height: 1.4; }
+  .coach-popover .chat { flex: 1; overflow-y: auto; padding: 10px 14px;
+                         display: flex; flex-direction: column; gap: 8px; }
+  .coach-popover .chat .empty { color: #888; font-size: 12px; text-align: center; padding: 16px 0; }
+  .coach-popover .chat .msg { display: flex; flex-direction: column; max-width: 85%; }
+  .coach-popover .chat .msg.user { align-self: flex-end; align-items: flex-end; }
+  .coach-popover .chat .msg.agent { align-self: flex-start; align-items: flex-start; }
+  .coach-popover .chat .msg.system { align-self: center; align-items: center; max-width: 100%; }
+  .coach-popover .chat .bubble { padding: 6px 10px; border-radius: 10px; font-size: 12px;
+                                  white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .coach-popover .chat .msg.user .bubble { background: #6c5ce7; color: #fff; }
+  .coach-popover .chat .msg.agent .bubble { background: #8882; color: inherit; }
+  .coach-popover .chat .msg.agent.err .bubble { background: #c0392b55; }
+  .coach-popover .chat .msg.system .bubble { background: transparent; color: #888; font-size: 11px; }
+  .coach-popover .chat .msg .adopt { margin-top: 4px; padding: 2px 8px; font-size: 10px;
+                                      cursor: pointer; border: 1px solid #8885; background: transparent;
+                                      border-radius: 4px; color: inherit; align-self: flex-start; }
+  .coach-popover .chat .msg .meta { font-size: 10px; color: #999; margin: 2px 4px 0; }
+  .coach-popover .input-row { padding: 8px 12px 12px; border-top: 1px solid #8883;
+                              display: flex; gap: 6px; align-items: flex-end; }
+  .coach-popover .input-row textarea { min-height: 36px; max-height: 120px; resize: none;
+                                       flex: 1; padding: 8px; }
+  .coach-popover .input-row button { padding: 8px 14px; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -267,6 +305,24 @@ _INDEX_HTML = """<!doctype html>
   <div class="input-row">
     <textarea id="whisper" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
     <button id="whisper-btn">Send</button>
+  </div>
+</div>
+
+<div class="coach-wrap">
+  <button class="coach-fab" id="coach-toggle" title="Tactical coach: analyze the live game with your agent CLI">🎓</button>
+</div>
+<div class="coach-popover" id="coach-popover">
+  <header>
+    <h3>Tactical Coach</h3>
+    <p class="warn" id="coach-warn">Analyzes the live game via your own agent CLI. It advises only — it does not play for you.</p>
+  </header>
+  <div class="chat" id="coach-chat">
+    <div class="empty">Ask the coach about the current situation.</div>
+  </div>
+  <div class="input-row">
+    <textarea id="coach-input" placeholder="Ask the coach... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+    <button id="coach-send">Send</button>
+    <button id="coach-reset" title="Clear the conversation and start fresh">Reset</button>
   </div>
 </div>
 
@@ -560,6 +616,75 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeWhisperPopover();
 });
+
+// ---------- v014-M2: embedded coach ----------
+const coachState = [];            // dialog entries: {role, text, ts, turn_id?, pending?}
+const coachPending = {};          // turn_id -> accumulated chunk text
+function escapeAttr(s) { return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderCoachList() {
+  const box = $("#coach-chat");
+  if (coachState.length === 0) {
+    box.innerHTML = '<div class="empty">Ask the coach about the current situation.</div>';
+    return;
+  }
+  box.innerHTML = coachState.map(c => {
+    const cls = c.role === "user" ? "user" : (c.role === "error" ? "agent err" : (c.role === "system" ? "system" : "agent"));
+    const who = c.role === "user" ? "Me" : (c.role === "error" ? "Error" : (c.role === "system" ? "" : "Coach"));
+    const body = (c.pending && !c.text) ? "…" : (c.text || "");
+    const adopt = (c.role === "coach" && c.text && !c.pending)
+      ? `<button class="adopt" data-text="${escapeAttr(c.text)}">Adopt as hint</button>` : "";
+    const meta = who ? `<div class="meta"><span>${who}</span><span>·</span><span>${fmtTime(c.ts)}</span></div>` : "";
+    return `<div class="msg ${cls}"><div class="bubble">${escapeHtml(body)}</div>${meta}${adopt}</div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+function coachLastBubble(tid) {
+  for (let i = coachState.length - 1; i >= 0; i--)
+    if (coachState[i].turn_id === tid && coachState[i].role !== "user") return coachState[i];
+  return null;
+}
+function handleCoachEvent(event, payload) {
+  const tid = payload && payload.turn_id;
+  if (event === "coach_history") { coachState.push(payload); renderCoachList(); return; }
+  if (event === "coach_reset") { coachState.length = 0; renderCoachList(); return; }
+  if (event === "coach_context_reset") { coachState.push({role:"system", text:"— coach session reset (previous context was lost) —", ts:payload.ts}); renderCoachList(); return; }
+  if (event === "coach_turn_start") { coachPending[tid] = ""; coachState.push({role:"coach", text:"", ts:payload.ts, turn_id:tid, pending:true}); renderCoachList(); return; }
+  if (event === "coach_chunk") { if (tid in coachPending) coachPending[tid] += payload.text; const b = coachLastBubble(tid); if (b) { b.text = coachPending[tid] || ""; renderCoachList(); } return; }
+  if (event === "coach_turn_done") { const b = coachLastBubble(tid); if (b) { b.text = payload.text; b.pending = false; b.ts = payload.ts; } delete coachPending[tid]; renderCoachList(); return; }
+  if (event === "coach_turn_error") { const b = coachLastBubble(tid); if (b) { b.role = "error"; b.text = payload.error; b.pending = false; } else coachState.push({role:"error", text:payload.error, ts:payload.ts, turn_id:tid}); delete coachPending[tid]; renderCoachList(); return; }
+}
+const coachEs = new EventSource("/api/coach/stream");
+["coach_history","coach_turn_start","coach_chunk","coach_turn_done","coach_turn_error","coach_reset","coach_context_reset"].forEach(ev =>
+  coachEs.addEventListener(ev, e => { try { handleCoachEvent(ev, JSON.parse(e.data)); } catch(_){} }));
+coachEs.onerror = () => { /* browser auto-reconnects */ };
+async function sendCoach() {
+  const ta = $("#coach-input"); const text = ta.value.trim(); if (!text) return;
+  ta.disabled = true; $("#coach-send").disabled = true;
+  try {
+    const r = await fetch("/api/coach/send", { method: "POST", body: JSON.stringify({ text }) });
+    const d = await r.json();
+    if (r.ok && d.turn_id) {
+      ta.value = "";
+      coachState.push({ role: "user", text, ts: new Date().toISOString(), turn_id: d.turn_id });
+      renderCoachList();
+    } else { toast("Coach send failed " + r.status, false); }
+  } finally { ta.disabled = false; $("#coach-send").disabled = false; ta.focus(); }
+}
+$("#coach-send").addEventListener("click", sendCoach);
+$("#coach-input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendCoach(); } });
+$("#coach-reset").addEventListener("click", async () => { if (!confirm("Reset the coach conversation? Clears all history.")) return; await fetch("/api/coach/reset", { method: "POST" }); });
+$("#coach-chat").addEventListener("click", async e => {
+  const btn = e.target.closest("button.adopt"); if (!btn) return;
+  const text = btn.getAttribute("data-text");
+  const r = await fetch("/api/whisper", { method: "POST", body: JSON.stringify({ text, role: "user" }) });
+  toast(r.ok ? "Adopted as tactical hint" : "Adopt failed " + r.status, r.ok);
+});
+function openCoachPopover() { $("#coach-popover").classList.add("open"); $("#coach-input").focus(); const c = $("#coach-chat"); c.scrollTop = c.scrollHeight; }
+function closeCoachPopover() { $("#coach-popover").classList.remove("open"); }
+$("#coach-toggle").addEventListener("click", e => { e.stopPropagation(); const p = $("#coach-popover"); if (p.classList.contains("open")) closeCoachPopover(); else openCoachPopover(); });
+document.addEventListener("click", e => { const p = $("#coach-popover"); if (!p.classList.contains("open")) return; if (p.contains(e.target)) return; if ($("#coach-toggle").contains(e.target)) return; closeCoachPopover(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeCoachPopover(); });
+fetch("/api/coach/config").then(r => r.json()).then(c => { if (c && c.user_agent) $("#coach-warn").textContent = `Coach backend: ${c.user_agent}. Analyzes the live game; it advises only — it does not play for you.`; }).catch(() => {});
 
 function appendEvent(kind, payload) {
   const el = document.createElement("div");
@@ -991,7 +1116,7 @@ class _Broadcaster:
 # ---------------------------------------------------------------------------
 # HTTP Handler
 
-def _make_handler(root_dir: Path, bc: _Broadcaster, ui_origin: str | None = None):
+def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" = None, ui_origin: str | None = None):
     """Build the HTTP handler. root_dir is the original directory passed by the user/CLI (may be a daemon parent).
     Each request re-runs resolve_state_dir to avoid being frozen on the parent before a child is generated.
 
@@ -1106,6 +1231,12 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, ui_origin: str | None = None
                     return self._serve_assets(path[len("/assets/"):])
                 if path == "/sse/stream":
                     return self._serve_sse()
+                if path == "/api/coach/config":
+                    return self._send_json(200, coach.config_view() if coach else {"enabled": False})
+                if path == "/api/coach/dialog":
+                    return self._send_json(200, coach.dialog_history() if coach else [])
+                if path == "/api/coach/stream":
+                    return self._serve_coach_sse()
                 return self._send_text(404, "not found")
             except Exception as exc:
                 return self._send_json(500, {"error": str(exc)})
@@ -1214,6 +1345,23 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, ui_origin: str | None = None
                     inbox.parent.mkdir(parents=True, exist_ok=True)
                     with open(inbox, "a", encoding="utf-8") as f:
                         f.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    return self._send_json(200, {"ok": True})
+                if path == "/api/coach/send":
+                    if coach is None:
+                        return self._send_json(503, {"error": "coach not available"})
+                    if not isinstance(body, dict) or "text" not in body:
+                        return self._send_json(400, {"error": "expected {\"text\": str}"})
+                    ctext = str(body.get("text", "")).strip()
+                    if not ctext:
+                        return self._send_json(400, {"error": "text must not be empty"})
+                    if len(ctext) > 4000:
+                        return self._send_json(400, {"error": "text exceeds 4000 chars"})
+                    turn_id = coach.send(ctext)
+                    return self._send_json(200, {"ok": True, "turn_id": turn_id})
+                if path == "/api/coach/reset":
+                    if coach is None:
+                        return self._send_json(503, {"error": "coach not available"})
+                    coach.reset()
                     return self._send_json(200, {"ok": True})
                 return self._send_text(404, "not found")
             except _BadRequest as exc:
@@ -1362,6 +1510,41 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, ui_origin: str | None = None
             finally:
                 bc.unsubscribe(q)
 
+        def _serve_coach_sse(self):
+            # v014-M2: independent SSE for coach events (NOT merged into /sse/stream).
+            if coach is None:
+                return self._send_json(503, {"error": "coach not available"})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            q = coach.streamer.subscribe()
+            heartbeat_at = time.monotonic() + 15.0
+            try:
+                while True:
+                    if q:
+                        event, data = q.pop(0)
+                        try:
+                            self.wfile.write(f"event: {event}\n".encode("utf-8"))
+                            self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+                            self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            break
+                    else:
+                        now = time.monotonic()
+                        if now >= heartbeat_at:
+                            try:
+                                self.wfile.write(b": keep-alive\n\n")
+                                self.wfile.flush()
+                            except (BrokenPipeError, ConnectionResetError):
+                                break
+                            heartbeat_at = now + 15.0
+                        time.sleep(0.1)
+            finally:
+                coach.streamer.unsubscribe(q)
+
     return Handler
 
 
@@ -1468,6 +1651,13 @@ def serve(root_dir: Path, port: int = 0, open_browser: bool = True) -> None:
     bc = _Broadcaster(root_dir)
     bc.start()
 
+    # v014-M2: embedded coach lives in THIS web subprocess (same process as the HTTP handler, so
+    # /api/coach/stream can push streamer chunks in real time). workspace = root_dir/coach_workspace
+    # (daemon parent dir, stable across parent->child game switches). personal_md is auto-resolved
+    # from ~/.aigenora/skill_targets.json inside CoachWorker.
+    coach = CoachWorker(state_dir=root_dir, data_dir=root_dir)
+    coach.start()
+
     # v006 P4: first bind a temporary socket to obtain main_port (without holding the listener),
     # then (if needed) start the ui server, and finally build the main listener with main_port + ui_origin.
     # This way the "listening on" line appears immediately and spawn_broadcast's 5s timeout does not trigger.
@@ -1494,7 +1684,7 @@ def serve(root_dir: Path, port: int = 0, open_browser: bool = True) -> None:
             ui_httpd = None
 
     httpd = ThreadingHTTPServer(("127.0.0.1", actual_port),
-                                 _make_handler(root_dir, bc, ui_origin=ui_origin))
+                                 _make_handler(root_dir, bc, coach=coach, ui_origin=ui_origin))
 
     print(f"[aigenora session web] root_dir={root_dir}", flush=True)
     print(f"[aigenora session web] effective state_dir={bc.state_dir}", flush=True)
@@ -1513,6 +1703,8 @@ def serve(root_dir: Path, port: int = 0, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         print("\n[aigenora session web] stopped")
     finally:
+        coach.stop()
+        coach.wait_stopped(timeout=2.0)
         bc.stop()
         httpd.server_close()
         if ui_httpd is not None:

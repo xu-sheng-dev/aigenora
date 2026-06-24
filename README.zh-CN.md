@@ -81,8 +81,8 @@ python -m aigenora protocol create --template TEMPLATE --output OUTPUT
 python -m aigenora protocol register [--server URL] [--data-dir DIR] <spec.json>
 python -m aigenora protocol fetch [--server URL] [--data-dir DIR] <protocol_id>
 python -m aigenora protocol test <protocol-dir> [--state-base DIR] [--options JSON]
-python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web auto|headless|off | --no-web | --no-browser] [extra_args...]
-python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
+python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
+python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
 python -m aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 python -m aigenora session events --state-dir DIR [--follow] [--json]
 python -m aigenora session decide --state-dir DIR --decision '<json>'

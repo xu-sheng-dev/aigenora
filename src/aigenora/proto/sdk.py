@@ -358,6 +358,190 @@ class WhisperLog:
         return whispers
 
 
+class CoachDialog:
+    """Append-only coach dialog log (webui embedded LLM coach conversation).
+
+    File: <state_dir>/coach_dialog.jsonl
+    One JSON per line: {id, ts, role, text, turn_id?, session_id?, error?}
+      - role: "user" | "coach" | "system" | "error"
+      - id: uuid4().hex[:12]
+
+    Persisted so the webui can rebuild dialog history after refresh / daemon restart.
+    v014-M2: the coach is a daemon-level cross-game session pool (NOT one-session-per-game),
+    so this log persists across games; only an explicit "reset coach" (clear()) truncates it.
+    """
+
+    VALID_ROLES = ("user", "coach", "system", "error")
+    _ID_LEN = 12
+
+    def __init__(self, state_dir: str | Path):
+        self.path = Path(state_dir) / "coach_dialog.jsonl"
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _new_id() -> str:
+        return uuid.uuid4().hex[:CoachDialog._ID_LEN]
+
+    def append(
+        self,
+        role: str,
+        text: str,
+        *,
+        turn_id: str | None = None,
+        session_id: str | None = None,
+        error: str | None = None,
+    ) -> dict:
+        if role not in self.VALID_ROLES:
+            raise ValueError(f"role must be one of {self.VALID_ROLES}, got {role!r}")
+        entry: dict[str, Any] = {
+            "id": self._new_id(),
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "role": role,
+            "text": text,
+        }
+        if turn_id is not None:
+            entry["turn_id"] = turn_id
+        if session_id is not None:
+            entry["session_id"] = session_id
+        if error is not None:
+            entry["error"] = error
+        line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        return entry
+
+    def read_all(self) -> list[dict]:
+        if not self.path.exists():
+            return []
+        items: list[dict] = []
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                items.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return items
+
+    def clear(self) -> None:
+        """Truncate the dialog log (explicit 'reset coach' action only)."""
+        with self._lock:
+            try:
+                self.path.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+
+
+class CoachInbox:
+    """Append-only durable queue for embedded coach turns.
+
+    File: <state_dir>/coach_inbox.jsonl
+    Event records:
+      - enqueue: {type, ts, turn_id, text, generation}
+      - done: {type, ts, turn_id}
+      - reset: {type, ts, generation}
+
+    The worker replays unfinished enqueue records on startup. A reset advances the generation;
+    older pending records are ignored so stale turns cannot reappear after the user clears the
+    coach conversation.
+    """
+
+    def __init__(self, state_dir: str | Path):
+        self.path = Path(state_dir) / "coach_inbox.jsonl"
+        self._lock = threading.Lock()
+
+    def _append(self, entry: dict[str, Any]) -> dict[str, Any]:
+        entry.setdefault("ts", datetime.now(timezone.utc).isoformat())
+        line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        return entry
+
+    def read_all(self) -> list[dict]:
+        if not self.path.exists():
+            return []
+        items: list[dict] = []
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                items.append(item)
+        return items
+
+    def current_generation(self) -> int:
+        gen = 0
+        for item in self.read_all():
+            if item.get("type") != "reset":
+                continue
+            try:
+                gen = max(gen, int(item.get("generation", 0)))
+            except (TypeError, ValueError):
+                continue
+        return gen
+
+    def append(self, turn_id: str, text: str, generation: int) -> dict:
+        return self._append({
+            "type": "enqueue",
+            "turn_id": turn_id,
+            "text": text,
+            "generation": int(generation),
+        })
+
+    def mark_done(self, turn_id: str) -> dict:
+        return self._append({"type": "done", "turn_id": turn_id})
+
+    def reset(self, generation: int) -> dict:
+        return self._append({"type": "reset", "generation": int(generation)})
+
+    def pending(self) -> list[dict]:
+        items = self.read_all()
+        reset_generation = 0
+        done: set[str] = set()
+        enqueued: list[dict] = []
+        for item in items:
+            typ = item.get("type")
+            if typ == "reset":
+                try:
+                    reset_generation = max(reset_generation, int(item.get("generation", 0)))
+                except (TypeError, ValueError):
+                    continue
+            elif typ == "done":
+                tid = item.get("turn_id")
+                if isinstance(tid, str):
+                    done.add(tid)
+            elif typ == "enqueue":
+                tid = item.get("turn_id")
+                text = item.get("text")
+                if isinstance(tid, str) and isinstance(text, str):
+                    enqueued.append(item)
+
+        pending: list[dict] = []
+        for item in enqueued:
+            tid = item.get("turn_id")
+            try:
+                gen = int(item.get("generation", 0))
+            except (TypeError, ValueError):
+                gen = 0
+            if tid in done or gen < reset_generation:
+                continue
+            pending.append({
+                "turn_id": tid,
+                "text": item.get("text", ""),
+                "generation": gen,
+            })
+        return pending
+
+
 class StrategyStore:
     """Strategy file between the human user and the local Agent.
 
@@ -677,6 +861,8 @@ __all__ = [
     "SnapshotBus",
     "DetailLog",
     "WhisperLog",
+    "CoachDialog",
+    "CoachInbox",
     "DecisionBus",
     "DecisionTimeoutError",
     "EventBus",
