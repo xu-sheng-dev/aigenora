@@ -108,36 +108,28 @@ class Hooks(ProtocolHooks):
     def _cd(self, side: str) -> dict:
         return self.host_cd if side == "host" else self.guest_cd
 
-    def _resolve(self, side: str, move: str) -> tuple[str, int, int, str | None]:
-        """结算一方动作，返回 (生效动作, 伤害, 蓝耗, 释放的技能键|None)。
+    # ---- 裁决核心：纯计算（单一真相源，host 裁决与 guest 影子裁决共用）----
+    @staticmethod
+    def _resolve_move(hero: dict, mana: int, cd: dict, move: str) -> tuple[str, int, int, str | None]:
+        """纯函数：结算一方动作，返回 (生效动作, 伤害, 蓝耗, 释放的技能键|None)。
 
         技能需 ``mana >= cost`` 且 ``cd == 0`` 才生效，否则退化为普攻（atk）。
-        这是裁决的核心确定性来源：Host 与 Guest 用同份 balance 重算结果一致。
+        这是裁决的核心确定性来源：不依赖 self 战斗状态，Host 与 Guest 用同份 balance
+        重算结果一致（v015-M2 影子裁决的前提）。
         """
-        hero = self._hero(side)
-        mana = self._mana(side)
-        cd = self._cd(side)
         if move in SKILL_KEYS:
             sk = hero[move]
             if mana >= int(sk["cost"]) and cd[move] == 0:
                 return move, int(sk["dmg"]), int(sk["cost"]), move
         return "normal", int(hero["atk"]), 0, None
 
-    def _end_round_tick(self) -> None:
-        """回合末：所有 cd -1（floor 0），mana 回复 mana_regen（上限为 mana cap）。"""
-        for cd in (self.host_cd, self.guest_cd):
-            for k in cd:
-                cd[k] = max(0, cd[k] - 1)
-        self.host_mana = min(int(self._hero("host")["mana"]),
-                             self.host_mana + int(self._hero("host")["mana_regen"]))
-        self.guest_mana = min(int(self._hero("guest")["mana"]),
-                              self.guest_mana + int(self._hero("guest")["mana_regen"]))
-
-    def _game_winner(self, over: bool) -> str:
+    @staticmethod
+    def _game_winner_of(over: bool, host_hp: int, guest_hp: int) -> str:
+        """纯函数：判定整局胜负（不依赖 self 战斗状态）。"""
         if not over:
             return "none"
-        host_dead = self.host_hp <= 0
-        guest_dead = self.guest_hp <= 0
+        host_dead = host_hp <= 0
+        guest_dead = guest_hp <= 0
         if host_dead and guest_dead:
             return "draw"
         if host_dead:
@@ -145,11 +137,97 @@ class Hooks(ProtocolHooks):
         if guest_dead:
             return "host"
         # 走到这说明 max_rounds 到：按剩余 HP 高者
-        if self.host_hp > self.guest_hp:
+        if host_hp > guest_hp:
             return "host"
-        if self.guest_hp > self.host_hp:
+        if guest_hp > host_hp:
             return "guest"
         return "draw"
+
+    def _snapshot_state(self) -> dict:
+        """抓取当前战斗状态快照（裁决前的输入状态）。"""
+        return {
+            "host_hp": self.host_hp,
+            "guest_hp": self.guest_hp,
+            "host_mana": self.host_mana,
+            "guest_mana": self.guest_mana,
+            "host_cd": dict(self.host_cd),
+            "guest_cd": dict(self.guest_cd),
+        }
+
+    def _compute_round(self, round_index: int, host_move: str, guest_move: str, st: dict) -> dict:
+        """纯计算本回合 round_result（v015-M2 单一真相源）。
+
+        给定状态快照 ``st``（上一轮结束后的 hp/mana/cd）+ 双方动作，返回完整 round_result dict：
+        同时结算双方伤害、扣蓝、技能冷却、回合末 cd tick + 回蓝、本轮胜负与 game_over/game_winner。
+
+        **只读** ``self.heroes`` / ``self.host_hero`` / ``self.guest_hero`` / ``self.max_rounds``，
+        不修改 ``st``、不碰 ``self`` 战斗状态、不写 details/snapshot。
+
+        ``proto_round_judge``（Host 裁决：apply 到 self + record）与 ``proto_round_judge_pure``
+        （Guest 影子重算：只读返回）共用本方法，保证双方裁决逻辑完全一致、无副作用污染。
+        """
+        h_hero = self.heroes[self.host_hero]
+        g_hero = self.heroes[self.guest_hero]
+        host_hp = int(st["host_hp"])
+        guest_hp = int(st["guest_hp"])
+        host_mana = int(st["host_mana"])
+        guest_mana = int(st["guest_mana"])
+        host_cd = {"skill_a": int(st["host_cd"]["skill_a"]),
+                   "skill_b": int(st["host_cd"]["skill_b"]),
+                   "ult": int(st["host_cd"]["ult"])}
+        guest_cd = {"skill_a": int(st["guest_cd"]["skill_a"]),
+                    "skill_b": int(st["guest_cd"]["skill_b"]),
+                    "ult": int(st["guest_cd"]["ult"])}
+
+        # 同时结算双方动作（simultaneous，不分先后）
+        h_eff, h_dmg, h_cost, h_sk = self._resolve_move(h_hero, host_mana, host_cd, host_move)
+        g_eff, g_dmg, g_cost, g_sk = self._resolve_move(g_hero, guest_mana, guest_cd, guest_move)
+        # 双方互换伤害（同时扣血）
+        guest_hp = max(0, guest_hp - h_dmg)
+        host_hp = max(0, host_hp - g_dmg)
+        # 扣蓝；释放的技能进入冷却
+        host_mana -= h_cost
+        guest_mana -= g_cost
+        if h_sk:
+            host_cd[h_sk] = int(h_hero[h_sk]["cd"])
+        if g_sk:
+            guest_cd[g_sk] = int(g_hero[g_sk]["cd"])
+        # 回合末 cd tick（floor 0）+ 回蓝（上限为 mana cap）
+        for cd in (host_cd, guest_cd):
+            for k in cd:
+                cd[k] = max(0, cd[k] - 1)
+        host_mana = min(int(h_hero["mana"]), host_mana + int(h_hero["mana_regen"]))
+        guest_mana = min(int(g_hero["mana"]), guest_mana + int(g_hero["mana_regen"]))
+        # 本轮胜负（伤害高者；等伤为平）
+        if h_dmg > g_dmg:
+            winner = "host"
+        elif g_dmg > h_dmg:
+            winner = "guest"
+        else:
+            winner = "draw"
+        over = host_hp <= 0 or guest_hp <= 0 or (round_index + 1) >= self.max_rounds
+        game_winner = self._game_winner_of(over, host_hp, guest_hp)
+        return {
+            "action": "round_result",
+            "round": round_index,
+            "host_move": h_eff,
+            "guest_move": g_eff,
+            "host_hp": host_hp,
+            "guest_hp": guest_hp,
+            "host_mana": host_mana,
+            "guest_mana": guest_mana,
+            "host_damage_dealt": h_dmg,
+            "guest_damage_dealt": g_dmg,
+            "host_cd_a": host_cd["skill_a"],
+            "host_cd_b": host_cd["skill_b"],
+            "host_cd_ult": host_cd["ult"],
+            "guest_cd_a": guest_cd["skill_a"],
+            "guest_cd_b": guest_cd["skill_b"],
+            "guest_cd_ult": guest_cd["ult"],
+            "round_winner": winner,
+            "game_over": over,
+            "game_winner": game_winner,
+        }
 
     # ---- 动作策略 ----
     def _pick_auto(self, round_index: int) -> str:
@@ -212,53 +290,28 @@ class Hooks(ProtocolHooks):
         return self._pick(round_index)
 
     def proto_round_judge(self, round_index: int, host_move: str, guest_move: str, state: dict) -> HookResult:
-        # 同时结算双方动作（simultaneous，不分先后）
-        h_eff, h_dmg, h_cost, h_sk = self._resolve("host", host_move)
-        g_eff, g_dmg, g_cost, g_sk = self._resolve("guest", guest_move)
-        # 双方互换伤害（同时扣血）
-        self.guest_hp = max(0, self.guest_hp - h_dmg)
-        self.host_hp = max(0, self.host_hp - g_dmg)
-        # 扣蓝；释放的技能进入冷却
-        self.host_mana -= h_cost
-        self.guest_mana -= g_cost
-        if h_sk:
-            self.host_cd[h_sk] = int(self._hero("host")[h_sk]["cd"])
-        if g_sk:
-            self.guest_cd[g_sk] = int(self._hero("guest")[g_sk]["cd"])
-        # 回合末 cd tick + 回蓝
-        self._end_round_tick()
-        # 本轮胜负（伤害高者；等伤为平）
-        if h_dmg > g_dmg:
-            winner = "host"
-        elif g_dmg > h_dmg:
-            winner = "guest"
-        else:
-            winner = "draw"
-        over = self.host_hp <= 0 or self.guest_hp <= 0 or (round_index + 1) >= self.max_rounds
-        game_winner = self._game_winner(over)
-        resp = {
-            "action": "round_result",
-            "round": round_index,
-            "host_move": h_eff,
-            "guest_move": g_eff,
-            "host_hp": self.host_hp,
-            "guest_hp": self.guest_hp,
-            "host_mana": self.host_mana,
-            "guest_mana": self.guest_mana,
-            "host_damage_dealt": h_dmg,
-            "guest_damage_dealt": g_dmg,
-            "host_cd_a": self.host_cd["skill_a"],
-            "host_cd_b": self.host_cd["skill_b"],
-            "host_cd_ult": self.host_cd["ult"],
-            "guest_cd_a": self.guest_cd["skill_a"],
-            "guest_cd_b": self.guest_cd["skill_b"],
-            "guest_cd_ult": self.guest_cd["ult"],
-            "round_winner": winner,
-            "game_over": over,
-            "game_winner": game_winner,
-        }
-        self._record_round(round_index, h_eff, g_eff, h_dmg, g_dmg, winner, over, game_winner)
-        return HookResult(resp, game_over=over)
+        # 纯计算本回合（单一真相源 _compute_round），再把结果 apply 到 self 战斗状态 + 记录。
+        # apply 必须在重算之后：_compute_round 只读输入状态，写回其产出保证 self 与 resp 一致。
+        resp = self._compute_round(round_index, host_move, guest_move, self._snapshot_state())
+        self.host_hp = resp["host_hp"]
+        self.guest_hp = resp["guest_hp"]
+        self.host_mana = resp["host_mana"]
+        self.guest_mana = resp["guest_mana"]
+        self.host_cd = {"skill_a": resp["host_cd_a"], "skill_b": resp["host_cd_b"], "ult": resp["host_cd_ult"]}
+        self.guest_cd = {"skill_a": resp["guest_cd_a"], "skill_b": resp["guest_cd_b"], "ult": resp["guest_cd_ult"]}
+        self._record_round(round_index, resp["host_move"], resp["guest_move"],
+                           resp["host_damage_dealt"], resp["guest_damage_dealt"],
+                           resp["round_winner"], resp["game_over"], resp["game_winner"])
+        return HookResult(resp, game_over=resp["game_over"])
+
+    def proto_round_judge_pure(self, round_index: int, host_move: str, guest_move: str, state: dict) -> dict:
+        """影子裁决（v015-M2）：用当前 self 战斗状态（= 上一轮结束后状态）纯重算本回合 round_result。
+
+        与 proto_round_judge 共用 _compute_round（裁决单一真相源），但**不修改** self 战斗状态、
+        **不写** details/snapshot。供 Guest 收到 Host round_result 后逐字段 diff，验证 Host 是否诚实裁决。
+        self.heroes 已在 proto_init 从 options.balance 读取（与 Host 同份 balance），故重算结果可信。
+        """
+        return self._compute_round(round_index, host_move, guest_move, self._snapshot_state())
 
     def _record_round(self, round_index: int, host_move: str, guest_move: str,
                       h_dmg: int, g_dmg: int, winner: str, over: bool, game_winner: str) -> None:

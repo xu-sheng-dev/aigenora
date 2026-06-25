@@ -58,15 +58,23 @@ TRACKER_PATH = Path.home() / ".aigenora" / "skill_targets.json"
 # re-created ("already in use"), so new/resume are two distinct templates.
 DEFAULT_CMDS: dict[str, dict[str, str]] = {
     "claude-code": {
-        # COACH_SKILL.md is injected as a prompt prefix by default (see CoachWorker._build_prompt).
-        # On Linux/macOS (where `claude` is a real executable, not a .cmd shim), users MAY instead
-        # lift it into the system-prompt layer with `--append-system-prompt {coach_skill_text}` for a
-        # stronger role-lock; but on Windows the npm `.cmd` shim corrupts multi-line argv (loses
-        # subsequent -p prompt), so the prompt-prefix default is the safe cross-platform choice.
-        "new_cmd": "claude --session-id {session_id} -p {prompt}",
-        "resume_cmd": "claude --resume {session_id} -p {prompt}",
+        # COACH_SKILL.md is injected via --system-prompt-file so it becomes the session system
+        # prompt and FULLY REPLACES the user's global ~/.claude/CLAUDE.md. Without this, claude
+        # auto-loads the global CLAUDE.md (self-evolution / CodeGraph / MCP persona), whose
+        # system-prompt priority dominates any role-lock and makes the coach reply as a generic
+        # assistant (verified 2026-06-25 half-open test). The prompt itself is fed via STDIN, not
+        # as a -p {prompt} argv element: the Windows npm .cmd shim corrupts multi-line argv and
+        # would drop the situation/user-question text; -p with no argument reads the prompt from
+        # stdin. Auth is unaffected (unlike --bare, which forces ANTHROPIC_API_KEY and breaks
+        # OAuth / GLM-provider login). See SKILL.md "Embedded Coach" for background.
+        "new_cmd": "claude --session-id {session_id} --system-prompt-file {coach_skill_file} -p",
+        "resume_cmd": "claude --resume {session_id} --system-prompt-file {coach_skill_file} -p",
     },
-    # 2b/2c: codex / opencode templates to be validated empirically before use.
+    # 2b/2c: codex / opencode. Like claude, these CLIs read the user's GLOBAL instruction/config
+    # file (~/.codex, opencode global config), which pollutes the coach role the same way. There is
+    # no single cross-agent isolation flag, so these are UNISOLATED baselines: override
+    # new_cmd/resume_cmd in PERSONAL.md with your agent's "custom system-prompt / disable global
+    # config" flag. See SKILL.md "Embedded Coach" -> per-agent isolation guidance.
     "codex": {
         "new_cmd": "codex exec {prompt}",
         "resume_cmd": "codex exec --resume {session_id} {prompt}",
@@ -222,12 +230,15 @@ def build_cmd_list(
     session_id: str,
     prompt: str,
     coach_skill_text: str | None = None,
+    coach_skill_file: str | None = None,
 ) -> list[str]:
     """Turn a PERSONAL.md command template into a list-form argv.
 
-    {session_id}, {prompt}, {coach_skill_text} are substituted AFTER shlex.split, as individual
-    argv elements, so the prompt and skill text (which may contain shell metacharacters /
-    newlines) are never re-interpreted by a shell. This is the injection guard (ADR-5 security).
+    {session_id}, {prompt}, {coach_skill_text}, {coach_skill_file} are substituted AFTER
+    shlex.split, as individual argv elements, so the prompt and skill text (which may contain
+    shell metacharacters / newlines) are never re-interpreted by a shell. This is the injection
+    guard (ADR-5 security). {coach_skill_file} is preferred over {coach_skill_text} on Windows,
+    where the npm .cmd shim corrupts multi-line argv (a file path is a single safe element).
     """
     tokens = shlex.split(template, posix=True)
     out: list[str] = []
@@ -238,10 +249,14 @@ def build_cmd_list(
             out.append(prompt)
         elif tok == "{coach_skill_text}" and coach_skill_text is not None:
             out.append(coach_skill_text)
+        elif tok == "{coach_skill_file}" and coach_skill_file is not None:
+            out.append(coach_skill_file)
         else:
             repl = tok.replace("{session_id}", session_id).replace("{prompt}", prompt)
             if coach_skill_text is not None:
                 repl = repl.replace("{coach_skill_text}", coach_skill_text)
+            if coach_skill_file is not None:
+                repl = repl.replace("{coach_skill_file}", coach_skill_file)
             out.append(repl)
     return out
 
@@ -356,6 +371,16 @@ class CoachWorker:
 
     def config_view(self) -> dict[str, Any]:
         return self._config.to_dict()
+
+    @property
+    def coach_skill_path(self) -> Path:
+        """Absolute path of the slimmed COACH_SKILL.md inside the workspace.
+
+        Injected into the agent CLI via --system-prompt-file (claude-code default) /
+        --append-system-prompt, or as a prompt-prefix fallback for agents without a
+        system-prompt equivalent.
+        """
+        return self.workspace / COACH_SKILL_FILENAME
 
     def _load_coach_skill(self) -> str:
         """Ensure the slimmed COACH_SKILL.md exists in the workspace and return its text.
@@ -486,11 +511,14 @@ class CoachWorker:
 
     def _build_prompt(self, user_text: str) -> str:
         parts: list[str] = []
-        # If the command template already injects COACH_SKILL into the system-prompt layer
-        # ({coach_skill_text} placeholder, e.g. claude-code's --append-system-prompt), don't
-        # duplicate it as a prompt prefix. Otherwise (e.g. codex/opencode without a system-prompt
-        # equivalent) fall back to a prompt prefix so the role-lock still reaches the model.
-        uses_system_inject = "{coach_skill_text}" in self._config.new_cmd
+        # If the command template injects COACH_SKILL into the system-prompt layer
+        # ({coach_skill_text} via --append-system-prompt, or {coach_skill_file} via
+        # --system-prompt-file as claude-code does by default), don't duplicate it as a prompt
+        # prefix. Otherwise (e.g. codex/opencode without a system-prompt equivalent) fall back to
+        # a prompt prefix so the role-lock still reaches the model (NOTE: a prompt prefix is weaker
+        # than a true system prompt and may be dominated by the agent's global config — see
+        # SKILL.md "Embedded Coach").
+        uses_system_inject = "{coach_skill_text}" in self._config.new_cmd or "{coach_skill_file}" in self._config.new_cmd
         if self._coach_skill_text and not uses_system_inject:
             parts.append(self._coach_skill_text.strip())
         eff = self._effective_state_dir()
@@ -529,9 +557,10 @@ class CoachWorker:
             session_id=sid,
             prompt=prompt,
             coach_skill_text=self._coach_skill_text or None,
+            coach_skill_file=str(self.coach_skill_path),
         )
 
-        rc, err = self._run_streaming(turn_id, generation, cmd)
+        rc, err = self._run_streaming(turn_id, generation, cmd, prompt=prompt, template=template)
         if rc == 0:
             self.inbox.mark_done(turn_id)
             return  # _run_streaming already recorded the coach reply + coach_turn_done
@@ -547,12 +576,13 @@ class CoachWorker:
                 session_id=new_sid,
                 prompt=prompt,
                 coach_skill_text=self._coach_skill_text or None,
+                coach_skill_file=str(self.coach_skill_path),
             )
             self.streamer.publish(
                 "coach_context_reset",
                 {"turn_id": turn_id, "reason": "session_lost", "ts": time.time()},
             )
-            rc2, err2 = self._run_streaming(turn_id, generation, cmd2)
+            rc2, err2 = self._run_streaming(turn_id, generation, cmd2, prompt=prompt, template=self._config.new_cmd)
             if rc2 != 0:
                 if not (rc2 == 130 and not self._is_current_generation(generation)):
                     self._fail(turn_id, err2 or "coach subprocess failed", generation=generation)
@@ -563,17 +593,30 @@ class CoachWorker:
         self._fail(turn_id, err or f"coach subprocess exited with code {rc}", generation=generation)
         self.inbox.mark_done(turn_id)
 
-    def _run_streaming(self, turn_id: str, generation: int, cmd: list[str]) -> tuple[int, str]:
+    def _run_streaming(
+        self,
+        turn_id: str,
+        generation: int,
+        cmd: list[str],
+        *,
+        prompt: str | None = None,
+        template: str = "",
+    ) -> tuple[int, str]:
         """Popen the coach CLI, stream stdout line-by-line, record the reply.
 
         Returns (returncode, stderr_text). On success the coach reply is appended to the dialog
         and coach_turn_done is published. On failure the caller decides (retry-as-new or fail).
+
+        If `template` has no {prompt} placeholder, the prompt is fed via STDIN instead of argv
+        (claude-code on Windows: the .cmd shim corrupts multi-line argv and would drop the
+        situation/user-question text; -p with no arg reads the prompt from stdin).
         """
         start = time.monotonic()
         timeout = max(5.0, float(self._config.timeout))
+        uses_stdin_prompt = bool(prompt) and "{prompt}" not in template
         # Resolve the binary: Windows .cmd/.bat shims (npm CLIs) cannot be run by CreateProcess
-        # directly and CreateProcess ignores PATHEXT, so wrap with `cmd /c <full_path>`. The
-        # prompt stays a separate argv element -> list2cmdline quoting preserves injection safety.
+        # directly and CreateProcess ignores PATHEXT, so wrap with `cmd /c <full_path>`. When the
+        # prompt is an argv element, list2cmdline quoting preserves injection safety.
         resolved = _resolve_bin(cmd[0])
         if resolved is None:
             return (127, "binary not found")
@@ -582,6 +625,7 @@ class CoachWorker:
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(self.workspace),
+                stdin=subprocess.PIPE if uses_stdin_prompt else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -593,6 +637,13 @@ class CoachWorker:
             return (127, "binary not found")
         except OSError as exc:
             return (1, str(exc))
+        # Feed the prompt via stdin (EOF on close) when the template has no {prompt} placeholder.
+        if uses_stdin_prompt and proc.stdin is not None:
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
         with self._proc_lock:
             self._current_proc = proc
 

@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "1v1 MOBA-style hero duel with declarative balance (v015). Each side picks a hero whose numbers (HP/mana/regen/attack + 3 skills) live in options.balance, held identically by both sides. Per round both commit-reveal a move (normal/skill_a/skill_b/ult); damage resolves simultaneously. A skill resolves only when mana >= cost and cooldown == 0, otherwise it falls back to a normal attack. First to drop the foe's HP to 0 (or higher HP at max_rounds) wins.",
   "type": "game",
+  "shadow_judge": true,
   "flow": {
     "mode": "simultaneous_round",
     "round": {

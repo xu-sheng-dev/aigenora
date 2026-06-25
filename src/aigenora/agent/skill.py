@@ -337,11 +337,17 @@ _COACH_FIELD_BLOCK = """\
 <!-- Choices: claude-code | codex | opencode. If you remove this line, the coach falls back to -->
 <!-- the most recent `aigenora skill install --target`, then to claude-code. -->
 <!-- Optional command-template overrides. Placeholders (replaced by the coach as single argv -->
-<!-- elements — never via a shell): {session_id}, {prompt}. By default COACH_SKILL.md is injected -->
-<!-- as a prompt prefix; on Linux/macOS you MAY lift it to the system layer with -->
-<!-- `--append-system-prompt {coach_skill_text}` (Windows npm .cmd shim corrupts multi-line argv). -->
-<!-- coach:new_cmd: claude --session-id {session_id} -p {prompt} -->
-<!-- coach:resume_cmd: claude --resume {session_id} -p {prompt} -->
+<!-- elements — never via a shell): {session_id}, {coach_skill_file}. When the template has no -->
+<!-- {prompt} placeholder the prompt is fed via STDIN (claude-code default; avoids the Windows .cmd -->
+<!-- shim corrupting multi-line argv). -->
+<!-- IMPORTANT: your agent CLI loads its GLOBAL instruction file (~/.claude/CLAUDE.md for -->
+<!-- claude-code, ~/.codex for codex, opencode global config, ...) whose persona can overpower -->
+<!-- the coach role and make it ignore the injected game situation. The claude-code default below -->
+<!-- isolates it via --system-prompt-file (COACH_SKILL.md becomes the session system prompt, fully -->
+<!-- replacing the global file). For codex/opencode, override new_cmd/resume_cmd with your agent's -->
+<!-- "custom system-prompt / disable global config" flag — see SKILL.md "Embedded Coach". -->
+<!-- coach:new_cmd: claude --session-id {session_id} --system-prompt-file {coach_skill_file} -p -->
+<!-- coach:resume_cmd: claude --resume {session_id} --system-prompt-file {coach_skill_file} -p -->
 <!-- coach:timeout: 180 -->
 <!-- coach:max_context_events: 12 -->
 """

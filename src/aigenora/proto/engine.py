@@ -80,6 +80,39 @@ def _winner_of(*candidates: Any) -> str | None:
     return None
 
 
+# v015-M2: Guest 影子裁决 diff 白名单——只比对 Host 裁决产出的输出字段，
+# 不含输入（host_move/guest_move/round/action）和机器字段（hash/nonce）。
+# 漏字段→作弊漏检，多字段→误报，故显式列举。
+_SHADOW_JUDGE_FIELDS = (
+    "host_hp", "guest_hp", "host_mana", "guest_mana",
+    "host_damage_dealt", "guest_damage_dealt",
+    "host_cd_a", "host_cd_b", "host_cd_ult",
+    "guest_cd_a", "guest_cd_b", "guest_cd_ult",
+    "round_winner", "game_over", "game_winner",
+)
+
+
+def _shadow_judge(spec: dict[str, Any], hooks: Any) -> bool:
+    """v015-M2: 影子裁决是否启用——spec 声明 shadow_judge:true 且 hooks 实现 proto_round_judge_pure。
+
+    opt-in：缺任一条件则 Guest 不验证（旧协议 / 单边升级 → 退化但不阻断）。
+    """
+    if not spec.get("shadow_judge"):
+        return False
+    return callable(getattr(hooks, "proto_round_judge_pure", None))
+
+
+def _diff_round_result(expected: dict, actual: dict) -> list[dict]:
+    """逐字段比对 Host 裁决产出的输出字段，返回不一致字段列表（空=一致）。"""
+    mismatches: list[dict] = []
+    for f in _SHADOW_JUDGE_FIELDS:
+        ev = expected.get(f)
+        av = actual.get(f)
+        if ev != av:
+            mismatches.append({"field": f, "expected": ev, "actual": av})
+    return mismatches
+
+
 def _snapshot_init(hooks: Any, role: str, spec: dict[str, Any], state_dir: Path) -> None:
     """Engine fallback initialization for snapshot.json, so it is not empty when hooks have not written to it.
 
@@ -1341,6 +1374,18 @@ def _run_sr_sync_guest(
             _validate(spec, result_msg, "host_to_guest")
         _display(hooks, result_msg, "received")
         _emit(event_bus, "protocol_message", {"direction": "received", "msg": result_msg})
+        # v015-M2 影子裁决（opt-in）：用本地同份 balance + 裁决规则重算本回合，逐字段 diff Host 的 round_result。
+        # 必须在 proto_guest_handle 之前（后者会把状态同步成 Host 声称的值，污染重算输入）。
+        # 不一致则视同 commit_mismatch 中止 + 记录 balance_mismatch_detected，让 Host 作弊可证伪。
+        if _shadow_judge(spec, hooks):
+            expected = hooks.proto_round_judge_pure(round_num, host_value, guest_value, state)
+            mismatches = _diff_round_result(expected, result_msg)
+            if mismatches:
+                _emit(event_bus, "balance_mismatch_detected", {
+                    "round": round_num, "role": "host", "mismatches": mismatches,
+                })
+                _snapshot_phase(hooks, "aborted", "Balance mismatch detected (shadow judge)", round=round_num)
+                return {"state_dir": str(state_dir), "game_over": False}
         hooks.proto_guest_handle(result_msg)
 
         round_num += 1
@@ -1594,6 +1639,18 @@ async def _run_sr_async_guest(
                 _validate(spec, result_msg, "host_to_guest")
             _display(hooks, result_msg, "received")
             _emit(event_bus, "protocol_message", {"direction": "received", "msg": result_msg})
+            # v015-M2 影子裁决（opt-in）：用本地同份 balance + 裁决规则重算本回合，逐字段 diff Host 的 round_result。
+            # 必须在 proto_guest_handle 之前（后者会把状态同步成 Host 声称的值，污染重算输入）。
+            # 不一致则视同 commit_mismatch 中止 + 记录 balance_mismatch_detected，让 Host 作弊可证伪。
+            if _shadow_judge(spec, hooks):
+                expected = hooks.proto_round_judge_pure(round_num, host_value, guest_value, state)
+                mismatches = _diff_round_result(expected, result_msg)
+                if mismatches:
+                    _emit(event_bus, "balance_mismatch_detected", {
+                        "round": round_num, "role": "host", "mismatches": mismatches,
+                    })
+                    _snapshot_phase(hooks, "aborted", "Balance mismatch detected (shadow judge)", round=round_num)
+                    return {"state_dir": str(state_dir), "game_over": False}
             hooks.proto_guest_handle(result_msg)
 
             round_num += 1

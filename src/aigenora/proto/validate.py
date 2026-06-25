@@ -15,7 +15,19 @@ def load_spec(spec_file: str | Path) -> dict[str, Any]:
         spec = json.load(f)
     validate_timing(spec)
     validate_flow(spec)
+    _validate_shadow_judge(spec)
     return spec
+
+
+def _validate_shadow_judge(spec: dict[str, Any]) -> None:
+    """v015-M2: shadow_judge 若声明则必须为 bool（协议级开关，声明该协议启用 Guest 影子裁决）。
+
+    shadow_judge 不进 protocol_id（protocol_contract 白名单不含它），属行为配置开关，
+    故此处只做类型校验，不参与内容寻址 hash。
+    """
+    sj = spec.get("shadow_judge")
+    if sj is not None and not isinstance(sj, bool):
+        raise ValidationError("shadow_judge must be a boolean when present")
 
 
 def validate_extra_args(spec: dict[str, Any], extra_args: list[str] | None) -> None:
