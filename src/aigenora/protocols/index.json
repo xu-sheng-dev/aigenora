@@ -442,6 +442,29 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "briscola-v1",
+      "name": "Briscola",
+      "description": "Trick-taking card game over the mental_poker engine (v016 M2). Cheat-detectable fair dealing: hidden cards are never sent in cleartext (each drawn card is privately recovered via oblivious transfer) and a post-game opening + witness audit catches dealt-card peeking and forged keys. NOT for high-stakes use. Simplified (ADR-8/9): deterministic trump suit (same every game, no indicator card); fixed leader/follower (host leads, guest follows); symmetric refills.",
+      "type": "game",
+      "family": "briscola",
+      "tags": ["game", "cards", "briscola", "trick-taking"],
+      "capabilities": ["turn-based", "mental-poker", "trick-taking", "cheat-detectable"],
+      "status": "active",
+      "protocol_id": "e81a3c0d3e9d168009439a0303b250942f9e3fdba28524f7bb9344d97dc83a28",
+      "path": "e81a3c0d/3e9d168009439a0303b250942f9e3fdba28524f7bb9344d97dc83a28",
+      "parent_protocol_id": null,
+      "created_reason": "v016 M2: mental_poker trick-taking card game (Briscola)",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {"description": "40-card deck, 3-card hands, 120-point game", "options": {}}
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
     }
   ]
 }

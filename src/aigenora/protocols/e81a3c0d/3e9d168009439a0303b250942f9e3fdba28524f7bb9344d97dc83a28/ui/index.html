@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Briscola — Aigenora</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; }
+    h1 { font-size: 1.25rem; margin: 0 0 4px; }
+    .muted { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
+    .panel { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .row { display: flex; gap: 24px; }
+    .stat { font-variant-numeric: tabular-nums; }
+    .stat b { font-size: 1.1rem; }
+    ul { margin: 6px 0; padding-left: 20px; }
+    li { margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <h1>Briscola</h1>
+  <div class="muted">v016 M2 — mental_poker trick-taking card game (cheat-detectable, not high-stakes).</div>
+
+  <div class="panel">
+    <div class="row">
+      <div class="stat">My hand: <b id="my-hand">—</b></div>
+      <div class="stat">Opponent hand: <b id="opp-hand">—</b></div>
+      <div class="stat">Stock: <b id="stock">—</b></div>
+      <div class="stat">Trump: <b id="trump">—</b></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div>Host points: <b id="host-pts">0</b> · Guest points: <b id="guest-pts">0</b></div>
+    <p class="muted" style="margin-top:8px">Host leads each trick, guest follows. Higher card of the led suit wins, unless trumped; trump beats any non-trump. First to 61 of 120 points wins.</p>
+  </div>
+
+  <div class="panel">
+    <div class="muted">Event log</div>
+    <ul id="log"></ul>
+  </div>
+
+  <!-- The runtime injects the session event stream; this panel is a static scaffold.
+       Full live wiring (snapshot + events.jsonl) lands in M3 alongside the docs sync. -->
+  <script>
+    // Placeholder: real binding hooks into the host's snapshot/events bus in M3.
+  </script>
+</body>
+</html>

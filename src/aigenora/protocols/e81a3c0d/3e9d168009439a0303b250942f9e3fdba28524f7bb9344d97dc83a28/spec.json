@@ -1,0 +1,73 @@
+{
+  "name": "Briscola",
+  "spec_version": "1.0",
+  "description": "v016 M2: Briscola trick-taking card game over the mental_poker engine. Cheat-detectable fair dealing (post-game opening + witness audit), NOT for high-stakes use. Simplified (ADR-8/9): trump suit (briscola) is deterministically derived (same every game, no indicator card); fixed leader/follower (host always leads, guest always follows — the follower has a slight information advantage); post-trick refills are symmetric (host first). Hidden cards are never sent in cleartext; each drawn card is privately recovered via oblivious transfer.",
+  "type": "game",
+  "family": "briscola",
+  "tags": ["game", "cards", "briscola", "trick-taking"],
+  "capabilities": ["turn-based", "mental-poker", "cheat-detectable"],
+  "flow": {"mode": "mental_poker"},
+  "messages": [
+    {"name": "join", "direction": "guest_to_host",
+     "fields": {"action": {"type": "enum", "values": ["join"], "required": true}}},
+    {"name": "ready", "direction": "host_to_guest",
+     "fields": {"action": {"type": "enum", "values": ["ready"], "required": true}}},
+    {"name": "mp_setup_a", "direction": "host_to_guest", "fields": {
+      "action": {"type": "enum", "values": ["mp_setup_a"], "required": true},
+      "rsa_pub": {"type": "ot_blob", "required": true},
+      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 40, "max_items": 40, "required": true},
+      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 40, "max_items": 40, "required": true}
+    }},
+    {"name": "mp_setup_b", "direction": "guest_to_host", "fields": {
+      "action": {"type": "enum", "values": ["mp_setup_b"], "required": true},
+      "rsa_pub": {"type": "ot_blob", "required": true},
+      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 40, "max_items": 40, "required": true},
+      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 40, "max_items": 40, "required": true}
+    }},
+    {"name": "mp_ot_request", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_ot_request"], "required": true},
+      "id": {"type": "id", "required": true},
+      "z": {"type": "ot_blob", "required": true}
+    }},
+    {"name": "mp_ot_response", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_ot_response"], "required": true},
+      "id": {"type": "id", "required": true},
+      "y": {"type": "ot_blob", "required": true}
+    }},
+    {"name": "mp_play", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_play"], "required": true},
+      "id_b": {"type": "id", "required": true},
+      "k_inner": {"type": "key", "required": true},
+      "k_outer": {"type": "key", "required": true},
+      "rank": {"type": "integer", "min": 0, "max": 9, "required": true},
+      "suit": {"type": "integer", "min": 0, "max": 3, "required": true}
+    }},
+    {"name": "mp_pass", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_pass"], "required": true}
+    }},
+    {"name": "mp_opening", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_opening"], "required": true},
+      "openings": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 1, "max_items": 256, "required": true}
+    }},
+    {"name": "mp_witness", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_witness"], "required": true},
+      "witnesses": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 0, "max_items": 256, "required": true}
+    }},
+    {"name": "mp_terminal_receipt", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["mp_terminal_receipt"], "required": true},
+      "transcript_hash": {"type": "hash", "required": true},
+      "signature": {"type": "signature", "required": true},
+      "audit_status": {"type": "enum", "values": ["passed", "failed", "refused"], "required": true},
+      "public_key": {"type": "hash", "required": true}
+    }},
+    {"name": "error", "direction": "both", "fields": {
+      "action": {"type": "enum", "values": ["error"], "required": true},
+      "reason": {"type": "text", "max_length": 200}
+    }}
+  ],
+  "parameters": {
+    "min_think_seconds": {"type": "integer", "min": 0, "max": 300, "default": 0},
+    "max_think_seconds": {"type": "integer", "min": 1, "max": 600, "default": 120}
+  },
+  "decision": {"mode": "auto"}
+}
