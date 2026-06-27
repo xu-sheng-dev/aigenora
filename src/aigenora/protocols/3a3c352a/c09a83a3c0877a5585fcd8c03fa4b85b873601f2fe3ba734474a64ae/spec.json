@@ -1,11 +1,11 @@
 {
-  "name": "Briscola",
+  "name": "Crazy Eights",
   "spec_version": "1.0",
-  "description": "v016 M2: Briscola trick-taking card game over the mental_poker engine. Cheat-detectable fair dealing (post-game opening + witness audit), NOT for high-stakes use. Simplified (ADR-8/9): trump suit (briscola) is deterministically derived (same every game, no indicator card); fixed leader/follower (host always leads, guest always follows — the follower has a slight information advantage); post-trick refills are symmetric (host first). Hidden cards are never sent in cleartext; each drawn card is privately recovered via oblivious transfer.",
+  "description": "v016 M2: Crazy Eights shedding card game over the mental_poker engine. Cheat-detectable fair dealing (post-game opening + witness audit), NOT for high-stakes use. Simplified: no starting discard (first play unconstrained) and drawing ends the turn. Hidden cards are never sent in cleartext; each drawn card is privately recovered via oblivious transfer.",
   "type": "game",
-  "family": "briscola",
-  "tags": ["game", "cards", "briscola", "trick-taking"],
-  "capabilities": ["turn-based", "mental-poker", "cheat-detectable"],
+  "family": "crazy-eights",
+  "tags": ["game", "cards", "crazy-eights", "shedding"],
+  "capabilities": ["turn-based", "mental-poker"],
   "flow": {"mode": "mental_poker"},
   "messages": [
     {"name": "join", "direction": "guest_to_host",
@@ -15,14 +15,14 @@
     {"name": "mp_setup_a", "direction": "host_to_guest", "fields": {
       "action": {"type": "enum", "values": ["mp_setup_a"], "required": true},
       "rsa_pub": {"type": "ot_blob", "required": true},
-      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 40, "max_items": 40, "required": true},
-      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 40, "max_items": 40, "required": true}
+      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 52, "max_items": 52, "required": true},
+      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 52, "max_items": 52, "required": true}
     }},
     {"name": "mp_setup_b", "direction": "guest_to_host", "fields": {
       "action": {"type": "enum", "values": ["mp_setup_b"], "required": true},
       "rsa_pub": {"type": "ot_blob", "required": true},
-      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 40, "max_items": 40, "required": true},
-      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 40, "max_items": 40, "required": true}
+      "blobs": {"type": "array", "items": {"type": "ciphertext"}, "min_items": 52, "max_items": 52, "required": true},
+      "sealed_keys": {"type": "array", "items": {"type": "ot_blob"}, "min_items": 52, "max_items": 52, "required": true}
     }},
     {"name": "mp_ot_request", "direction": "both", "fields": {
       "action": {"type": "enum", "values": ["mp_ot_request"], "required": true},
@@ -39,8 +39,9 @@
       "id_b": {"type": "id", "required": true},
       "k_inner": {"type": "key", "required": true},
       "k_outer": {"type": "key", "required": true},
-      "rank": {"type": "integer", "min": 0, "max": 9, "required": true},
-      "suit": {"type": "integer", "min": 0, "max": 3, "required": true}
+      "rank": {"type": "integer", "min": 0, "max": 12, "required": true},
+      "suit": {"type": "integer", "min": 0, "max": 3, "required": true},
+      "call_suit": {"type": "integer", "min": 0, "max": 3}
     }},
     {"name": "mp_pass", "direction": "both", "fields": {
       "action": {"type": "enum", "values": ["mp_pass"], "required": true}
@@ -62,10 +63,11 @@
     }},
     {"name": "error", "direction": "both", "fields": {
       "action": {"type": "enum", "values": ["error"], "required": true},
-      "reason": {"type": "text", "max_length": 200}
+      "reason": {"type": "enum", "values": ["play_rejected", "rule_rejected"], "required": true}
     }}
   ],
   "parameters": {
+    "hand_size": {"type": "integer", "min": 3, "max": 7, "default": 5},
     "min_think_seconds": {"type": "integer", "min": 0, "max": 300, "default": 0},
     "max_think_seconds": {"type": "integer", "min": 1, "max": 600, "default": 120}
   },

@@ -1039,13 +1039,13 @@ def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
                 vr = s.verify_peer_play(msg)
                 if not vr.ok:
                     _emit(s.bus, "play_rejected", {"who": s.peer, "reason": vr.reason})
-                    abort = {"action": "error", "reason": f"play_rejected:{vr.reason}"}
+                    abort = {"action": "error", "reason": "play_rejected"}
                     channel.send(abort)
                     raise ValueError(f"peer play rejected: {vr.reason}")
                 rule_vr = hooks.proto_mp_validate_play(s.state, s.peer, msg)
                 if not rule_vr.ok:
                     _emit(s.bus, "play_rejected", {"who": s.peer, "reason": rule_vr.reason})
-                    abort = {"action": "error", "reason": f"rule_rejected:{rule_vr.reason}"}
+                    abort = {"action": "error", "reason": "rule_rejected"}
                     if validate:
                         _validate(spec, abort, "both")
                     channel.send(abort)
@@ -1379,13 +1379,13 @@ async def _mp_play_loop_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineC
                 vr = s.verify_peer_play(msg)
                 if not vr.ok:
                     _emit(s.bus, "play_rejected", {"who": s.peer, "reason": vr.reason})
-                    abort = {"action": "error", "reason": f"play_rejected:{vr.reason}"}
+                    abort = {"action": "error", "reason": "play_rejected"}
                     await channel.send(abort)
                     raise ValueError(f"peer play rejected: {vr.reason}")
                 rule_vr = hooks.proto_mp_validate_play(s.state, s.peer, msg)
                 if not rule_vr.ok:
                     _emit(s.bus, "play_rejected", {"who": s.peer, "reason": rule_vr.reason})
-                    abort = {"action": "error", "reason": f"rule_rejected:{rule_vr.reason}"}
+                    abort = {"action": "error", "reason": "rule_rejected"}
                     if validate:
                         _validate(spec, abort, "both")
                     await channel.send(abort)
