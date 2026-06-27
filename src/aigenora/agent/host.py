@@ -269,7 +269,9 @@ async def _network_host(args) -> int:
         result = await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
                              state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
                              heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
-                             heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0)) or {}
+                             heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
+                             session_id=session_id_val, keypair=kp,
+                             peer_public_key=guest_public_key) or {}
         game_over = bool(result.get("game_over", True))
         end_reason = result.get("reason")
         print("done")
@@ -282,7 +284,8 @@ async def _network_host(args) -> int:
         close_session(rest_client, session_id_val, status="failed" if not game_over else "closed",
                       event_bus=event_bus)
         # v012 批次3：胜负上报走 /result（双方一致才结算 ELO），与 close 解耦
-        if game_over and result.get("winner"):
+        # v016: mental_poker 协议仅在 audit_passed=True 且 receipt 双签通过后才上报
+        if game_over and result.get("winner") and result.get("audit_passed", True):
             report_result(rest_client, session_id_val, result.get("winner"))
         # daemon parent returns right after startup, so the business subprocess must persist the
         # final session.json status itself — otherwise console/list shows a stale "running" session.

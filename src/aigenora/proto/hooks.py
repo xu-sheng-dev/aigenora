@@ -123,6 +123,67 @@ class ProtocolHooks(ABC):
         """
         raise NotImplementedError("proto_round_judge must be overridden for simultaneous_round")
 
+    # -- mental_poker hooks (v016) --
+    # Engine-owned control plane: all mp_* wire messages are sent by _run_mental_poker_*.
+    # Hooks only supply business material + per-turn intent. Private views (hand, deck
+    # state) are injected by the engine via the shared ``state`` dict (no proto_ctx).
+
+    def proto_mp_deck_universe(self) -> list[tuple[int, int]]:
+        """mental_poker: return the full deck as a list of (rank_index, suit_index).
+
+        The engine encodes each card (aead_deck.encode_card) and seals the inner layer
+        to build blob_A. Only the Host role is asked (Host is the inner encryptor).
+        """
+        raise NotImplementedError("proto_mp_deck_universe must be overridden for mental_poker")
+
+    def proto_mp_initial_deal(self, state: dict) -> dict:
+        """mental_poker: return the initial deal plan, e.g. {"host": 5, "guest": 5}.
+
+        The engine runs one OT per dealt card. ``state`` carries the engine-injected
+        read-only view (_mp_role / _mp_deck_view).
+        """
+        raise NotImplementedError("proto_mp_initial_deal must be overridden for mental_poker")
+
+    def proto_mp_choose_action(self, state: dict) -> dict:
+        """mental_poker: choose this turn's action.
+
+        Return one of:
+          {"kind": "play", "id_b": "<id-B of a card in hand>"}
+          {"kind": "draw"}
+          {"kind": "pass"}
+        ``state`` carries the engine-injected private view, including ``_mp_hand``
+        (set of id-B in hand) and ``_mp_hand_cards`` (id-B -> (rank, suit), filled
+        after each disclosure). The engine validates the play via mental_poker.validate_play.
+        """
+        raise NotImplementedError("proto_mp_choose_action must be overridden for mental_poker")
+
+    def proto_mp_check_winner(self, state: dict) -> str | None:
+        """mental_poker: return "host" / "guest" if the game has a winner, else None.
+
+        Called by the engine after each turn; the engine ends the play loop and moves
+        to the audit phase once a winner is returned. When both sides stall
+        (``state["_mp_stalled"]`` is True — consecutive passes), return the winner by
+        the game's tie-break rule (e.g. fewer cards in hand).
+        """
+        raise NotImplementedError("proto_mp_check_winner must be overridden for mental_poker")
+
+    def proto_mp_validate_play(self, state: dict, who: str, play_msg: dict[str, Any]):
+        """mental_poker: validate a peer's play against game rules (M2 双向校验).
+
+        Called by the engine AFTER cryptographic verification (keys/blob/card face)
+        passes and BEFORE ``apply_play``. ``who`` is the player who played ("host"/
+        "guest"), ``play_msg`` is the verified ``mp_play`` dict (id_b/rank/suit/
+        k_inner/k_outer, plus optional ``call_suit``).
+
+        Return ``mental_poker.ValidationResult(False, reason)`` to reject (the engine
+        sends an ``error`` and aborts); return ``ValidationResult(True)`` to accept.
+        Default accepts everything (M1 test protocols have no rules); real games
+        override to enforce ``can_play`` / ``call_suit`` rules.
+        """
+        from . import mental_poker
+
+        return mental_poker.ValidationResult(True)
+
     # -- v004: timing helpers --
 
     @property

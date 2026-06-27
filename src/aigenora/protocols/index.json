@@ -417,6 +417,31 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "crazy-eights-v1",
+      "name": "Crazy Eights",
+      "description": "Shedding card game over the mental_poker engine (v016 M2). Cheat-detectable fair dealing: hidden cards are never sent in cleartext (each drawn card is privately recovered via oblivious transfer) and a post-game opening + witness audit catches dealt-card peeking and forged keys. NOT for high-stakes use. Simplified: no starting discard (first play unconstrained) and drawing ends the turn.",
+      "type": "game",
+      "family": "crazy-eights",
+      "tags": ["game", "cards", "crazy-eights", "shedding"],
+      "capabilities": ["turn-based", "mental-poker", "draw", "cheat-detectable"],
+      "status": "active",
+      "protocol_id": "ee950a6558722f763495de03faacb90abf12f6cc60649f84dd72524edfb865dc",
+      "path": "ee950a65/58722f763495de03faacb90abf12f6cc60649f84dd72524edfb865dc",
+      "parent_protocol_id": null,
+      "created_reason": "v016 M2: mental_poker shedding card game (Crazy Eights)",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {"description": "3-card hand, fast", "options": {"hand_size": 3}},
+        "standard": {"description": "5-card hand", "options": {"hand_size": 5}},
+        "long": {"description": "7-card hand", "options": {"hand_size": 7}}
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
     }
   ]
 }

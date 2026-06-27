@@ -1661,12 +1661,27 @@ async def _run_sr_async_guest(
         return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
 
+# v016: mental_poker engine lives in .mp_engine (keeps this file focused); lazy import
+# avoids a circular dependency, since mp_engine imports the helpers defined above.
+def _run_mental_poker_sync_entry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from .mp_engine import run_mental_poker_sync
+
+    return run_mental_poker_sync(*args, **kwargs)
+
+
+async def _run_mental_poker_async_entry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from .mp_engine import run_mental_poker_async
+
+    return await run_mental_poker_async(*args, **kwargs)
+
+
 # Engine registry
 ENGINES_SYNC: dict[str, Callable[..., dict[str, Any]]] = {
     "session_loop": _run_session_loop_sync,
     "free": _run_free,
     "request_response": _run_request_response_sync,
     "simultaneous_round": _run_simultaneous_round_sync,
+    "mental_poker": _run_mental_poker_sync_entry,
 }
 
 ENGINES_ASYNC: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
@@ -1674,6 +1689,7 @@ ENGINES_ASYNC: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
     "free": _run_free_async,
     "request_response": _run_request_response_async,
     "simultaneous_round": _run_simultaneous_round_async,
+    "mental_poker": _run_mental_poker_async_entry,
 }
 
 
@@ -1697,6 +1713,9 @@ def _dispatch_sync(
     event_bus: EventBus | None,
     coach: bool,
     pace: float,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     proto_dir = Path(protocol_dir)
     spec = load_spec(proto_dir / "spec.json")
@@ -1706,9 +1725,14 @@ def _dispatch_sync(
     engine = ENGINES_SYNC.get(mode)
     if engine is None:
         raise ValidationError(f"flow.mode {mode!r} has no sync engine implementation")
+    # v016: mental_poker engine needs session_id (OT build_context binding) + keypair
+    # (terminal receipt dual-sign); other engines do not declare these kwargs.
+    extra: dict[str, Any] = {}
+    if mode == "mental_poker":
+        extra = {"session_id": session_id, "keypair": keypair, "peer_public_key": peer_public_key}
     return engine(
         spec, proto_dir, channel, opts, args, state_base, validate, role,
-        event_bus=event_bus, coach=coach, pace=pace,
+        event_bus=event_bus, coach=coach, pace=pace, **extra,
     )
 
 
@@ -1725,6 +1749,9 @@ async def _dispatch_async(
     pace: float,
     heartbeat_interval: float,
     heartbeat_timeout: float,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     proto_dir = Path(protocol_dir)
     spec = load_spec(proto_dir / "spec.json")
@@ -1734,10 +1761,16 @@ async def _dispatch_async(
     engine = ENGINES_ASYNC.get(mode)
     if engine is None:
         raise ValidationError(f"flow.mode {mode!r} has no async engine implementation")
+    # v016: mental_poker engine needs session_id (OT build_context binding) + keypair
+    # (terminal receipt dual-sign); other engines do not declare these kwargs.
+    extra: dict[str, Any] = {}
+    if mode == "mental_poker":
+        extra = {"session_id": session_id, "keypair": keypair, "peer_public_key": peer_public_key}
     return await engine(
         spec, proto_dir, channel, opts, args, state_base, validate, role,
         event_bus=event_bus, coach=coach, pace=pace,
         heartbeat_interval=heartbeat_interval, heartbeat_timeout=heartbeat_timeout,
+        **extra,
     )
 
 
@@ -1751,10 +1784,13 @@ def run_host(
     event_bus: EventBus | None = None,
     coach: bool = False,
     pace: float = 0,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     return _dispatch_sync(
         "host", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace,
+        event_bus, coach, pace, session_id, keypair, peer_public_key,
     )
 
 
@@ -1768,10 +1804,13 @@ def run_guest(
     event_bus: EventBus | None = None,
     coach: bool = False,
     pace: float = 0,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     return _dispatch_sync(
         "guest", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace,
+        event_bus, coach, pace, session_id, keypair, peer_public_key,
     )
 
 
@@ -1787,10 +1826,13 @@ async def run_host_async(
     pace: float = 0,
     heartbeat_interval: float = 0,
     heartbeat_timeout: float = 0,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     return await _dispatch_async(
         "host", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace, heartbeat_interval, heartbeat_timeout,
+        event_bus, coach, pace, heartbeat_interval, heartbeat_timeout, session_id, keypair, peer_public_key,
     )
 
 
@@ -1806,10 +1848,13 @@ async def run_guest_async(
     pace: float = 0,
     heartbeat_interval: float = 0,
     heartbeat_timeout: float = 0,
+    session_id: str | None = None,
+    keypair: Any = None,
+    peer_public_key: str | None = None,
 ) -> dict[str, Any]:
     return await _dispatch_async(
         "guest", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace, heartbeat_interval, heartbeat_timeout,
+        event_bus, coach, pace, heartbeat_interval, heartbeat_timeout, session_id, keypair, peer_public_key,
     )
 
 
