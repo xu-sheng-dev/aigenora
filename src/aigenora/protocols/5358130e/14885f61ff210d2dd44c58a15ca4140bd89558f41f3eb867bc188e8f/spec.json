@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "1v1 full-information board game. Starting from the central 2x2 cross, players alternate placing stones; a move must bracket a straight line of opponent stones between the new stone and an existing own stone, flipping the bracketed stones. A player with no legal move passes; the game ends when neither can move (or the board is full). Most stones wins. session_loop ping-pong with hooks-side board state.",
   "type": "game",
+  "family": "reversi",
   "messages": [
     {
       "name": "join",

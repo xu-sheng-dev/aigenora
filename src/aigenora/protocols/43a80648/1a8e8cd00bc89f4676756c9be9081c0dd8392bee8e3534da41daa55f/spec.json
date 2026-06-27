@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "Best-of-N Rock-Paper-Scissors with engine-managed SHA256 commit-reveal fairness (simultaneous_round mode)",
   "type": "game",
+  "family": "rps",
   "flow": {
     "mode": "simultaneous_round",
     "round": {

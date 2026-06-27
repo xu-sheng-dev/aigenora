@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "Best-of-N Coin Flip with engine-managed SHA256 commit-reveal fairness (simultaneous_round mode)",
   "type": "game",
+  "family": "coin-flip",
   "flow": {
     "mode": "simultaneous_round",
     "round": {

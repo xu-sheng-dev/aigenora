@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "Weak Wins All - Each player starts with total_points. Each round both bid points; the lower bidder wins the sum as score. Highest score after total_rounds wins. Engine-managed SHA256 commit-reveal fairness (simultaneous_round mode).",
   "type": "game",
+  "family": "weak-wins-all",
   "flow": {
     "mode": "simultaneous_round",
     "round": {

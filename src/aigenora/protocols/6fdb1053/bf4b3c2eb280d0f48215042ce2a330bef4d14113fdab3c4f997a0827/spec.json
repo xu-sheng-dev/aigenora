@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "1v1 full-information board game. Players alternate placing stones on an NxN board; first to line up five in a row (horizontal/vertical/diagonal) wins. session_loop ping-pong with hooks-side board state.",
   "type": "game",
+  "family": "gomoku",
   "messages": [
     {
       "name": "join",

@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "Host picks a secret number, guest guesses with higher/lower hints",
   "type": "game",
+  "family": "guess-number",
   "messages": [
     {
       "name": "join",

@@ -3,6 +3,7 @@
   "spec_version": "1.0",
   "description": "1v1 full-information board game. Players alternate dropping a stone into one of N columns; the stone falls to the lowest empty cell in that column (gravity). First to line up four in a row (horizontal/vertical/diagonal) wins. session_loop ping-pong with hooks-side board state.",
   "type": "game",
+  "family": "connect4",
   "messages": [
     {
       "name": "join",
