@@ -47,6 +47,22 @@ from aigenora.proto.sdk import CoachDialog, CoachInbox, EventBus, SnapshotBus
 
 DEFAULT_TIMEOUT = 180             # seconds per coach turn
 DEFAULT_MAX_CONTEXT_EVENTS = 12   # how many recent events to inject into the prompt
+
+# Decision-window bookkeeping events that the engine emits at high frequency every round
+# (commit→reveal→round_result triggers a fresh window each turn). They carry no tactical
+# information for the coach -- the actual opponent moves live in `protocol_message` events
+# (msg.type=reveal / round_result). Before v014.x the prompt-injected tail was pure-time,
+# so a busy decision-window cycle could push every reveal / round_result / peer_joined out
+# of the window and leave the coach blind to what the opponent just played. We drop them
+# from `summarize_events` so combat events survive the tail.
+#   Background: project-v014-coach-snapshot-events-truncation.
+_COACH_NOISE_EVENT_TYPES = frozenset({
+    "local_decision_window_started",
+    "local_decision_updated",
+    "local_decision_fallback",
+    "local_decision_finalized",
+    "local_decision_ready",
+})
 DEFAULT_USER_AGENT = "claude-code"
 PERSONAL_FILENAME = "PERSONAL.md"
 COACH_SKILL_FILENAME = "COACH_SKILL.md"
@@ -202,14 +218,26 @@ def summarize_snapshot(state_dir: str | Path) -> str:
 
 
 def summarize_events(state_dir: str | Path, max_events: int) -> str:
-    """Tail of recent events (one per line) for prompt injection."""
+    """Tail of recent events (one per line) for prompt injection.
+
+    Filters out high-frequency decision-window bookkeeping (`local_decision_*`) before
+    taking the tail so combat events (peer_joined / protocol_message reveal+round_result /
+    game_over / session_ended) survive even during busy decision cycles. See
+    `_COACH_NOISE_EVENT_TYPES` for the rationale.
+    """
     try:
         events = EventBus(state_dir).read_events()
     except Exception:
         return ""
     if not events:
         return ""
-    tail = events[-max_events:] if max_events > 0 else events
+    filtered = [
+        e for e in events
+        if isinstance(e, dict) and e.get("type") not in _COACH_NOISE_EVENT_TYPES
+    ]
+    if not filtered:
+        return ""
+    tail = filtered[-max_events:] if max_events > 0 else filtered
     lines: list[str] = []
     for e in tail:
         if not isinstance(e, dict):

@@ -28,7 +28,10 @@ for anything else, briefly decline and redirect to tactical analysis of the inje
 Each turn your prompt contains:
 
 - **Current situation**: a compact one-line snapshot (phase / role / round / score / last event).
-- **Recent events**: the tail of the event stream (the most recent handful).
+- **Recent events**: the tail of the event stream (the most recent handful, filtered to
+  combat events -- peer_joined / protocol_message reveal+round_result / game_over /
+  session_ended / whisper -- high-frequency local-decision bookkeeping is dropped so the
+  opponent's actual plays survive the window).
 - **User question**: the human's actual question.
 
 If the situation or events are empty, the session may be starting up — say so and ask what the
