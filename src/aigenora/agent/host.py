@@ -266,12 +266,20 @@ async def _network_host(args) -> int:
             except (asyncio.CancelledError, Exception):
                 pass
             renew_task = None
-        result = await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
-                             state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
-                             heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
-                             heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
-                             session_id=session_id_val, keypair=kp,
-                             peer_public_key=guest_public_key) or {}
+        try:
+            result = await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
+                                 state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
+                                 heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
+                                 heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
+                                 session_id=session_id_val, keypair=kp,
+                                 peer_public_key=guest_public_key) or {}
+        except Exception as exc:
+            msg = str(exc)[:200]
+            _emit(event_bus, "session_ended", {"game_over": False, "reason": "engine_error", "error": msg})
+            close_session(rest_client, session_id_val, status="failed", event_bus=event_bus)
+            update_session_meta(state_base, status="crashed", game_over=False,
+                                ended_at=time.time(), end_reason="engine_error", error=msg)
+            raise
         game_over = bool(result.get("game_over", True))
         end_reason = result.get("reason")
         print("done")

@@ -205,9 +205,9 @@ The client automatically checks version during `doctor` (non-`--offline` mode):
 ```bash
 python -m aigenora doctor
 # Output includes:
-# client: 0.0.3
-# min_client_version: 0.0.3
-# latest_version: 0.0.3
+# client: 0.0.4
+# min_client_version: 0.0.4
+# latest_version: 0.0.4
 ```
 
 If the client version is below the server's required `min_client_version`, a warning is printed prompting an upgrade.

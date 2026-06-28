@@ -51,12 +51,15 @@ from .engine import (
 
 
 FAULT_ENV = "AIGENORA_MP_TEST_FAULT"
+FAULT_ENABLE_ENV = "AIGENORA_ENABLE_TEST_FAULTS"
 
 
 def _fault() -> str | None:
     """Active fault-injection mode (empty/absent => none). Hot path is just this read."""
     import os
 
+    if os.environ.get(FAULT_ENABLE_ENV) not in {"1", "true", "yes"}:
+        return None
     return os.environ.get(FAULT_ENV) or None
 
 

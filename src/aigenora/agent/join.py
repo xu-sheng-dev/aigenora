@@ -10,7 +10,7 @@ from typing import Any
 
 from aigenora.agent.protocol import prepare_protocol
 from aigenora.agent.skeleton import assert_hooks_implemented
-from aigenora.agent._daemon import read_log_excerpt, wait_for_event, update_session_meta, write_session_meta
+from aigenora.agent._daemon import read_log_excerpt, terminate_process, wait_for_event, update_session_meta, write_session_meta
 from aigenora.engine.config import get_server
 from aigenora.engine.crypto import session_canonical, transport_binding_canonical
 from aigenora.engine.keys import load_keys
@@ -132,6 +132,23 @@ def _run_daemon(args) -> int:
                 result["error_excerpt"] = excerpt
             print(json.dumps(result, ensure_ascii=False))
             return 1
+        excerpt = read_log_excerpt(state_dir)
+        session_meta["status"] = "startup_timeout"
+        session_meta["startup_error"] = "timeout waiting for peer_joined"
+        if excerpt:
+            session_meta["last_error_excerpt"] = excerpt
+        write_session_meta(state_dir, session_meta)
+        terminate_process(proc)
+        result = {
+            "status": "error",
+            "reason": "timeout waiting for peer_joined",
+            "post_id": args.post_id,
+            "state_dir": state_dir_str,
+        }
+        if excerpt:
+            result["error_excerpt"] = excerpt
+        print(json.dumps(result, ensure_ascii=False))
+        return 1
 
     # Based on web_mode, decide whether to start the relay subprocess and whether to open a browser
     from aigenora.agent._web_mode import resolve_web_mode
@@ -248,12 +265,21 @@ async def _join(args) -> int:
                 "session_id": session_id,
                 "protocol_dir": str(proto_dir),
             })
-        result = await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
-                              state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
-                              heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
-                              heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
-                              session_id=session_id, keypair=kp,
-                              peer_public_key=host_public_key) or {}
+        try:
+            result = await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
+                                  state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
+                                  heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
+                                  heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
+                                  session_id=session_id, keypair=kp,
+                                  peer_public_key=host_public_key) or {}
+        except Exception as exc:
+            msg = str(exc)[:200]
+            if event_bus:
+                event_bus.emit("session_ended", {"game_over": False, "reason": "engine_error", "error": msg})
+            close_session(client, session_id, status="failed", event_bus=event_bus)
+            update_session_meta(state_base, status="crashed", game_over=False,
+                                ended_at=time.time(), end_reason="engine_error", error=msg)
+            raise
         game_over = bool(result.get("game_over", True))
         end_reason = result.get("reason")
         print("done")

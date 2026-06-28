@@ -730,17 +730,35 @@ async def _run_free_async(
     inbox_path = state_dir / "inbox.jsonl"
     input_q: asyncio.Queue = asyncio.Queue()
     end_event = asyncio.Event()
+    terminal_result: dict[str, Any] | None = None
 
     async def receiver():
+        nonlocal terminal_result
         while not end_event.is_set():
-            msg = await channel.recv()
-            if validate:
-                _validate(spec, msg, "both")
-            if _is_control_end(msg):
-                hooks.proto_on_end()
+            try:
+                msg = await channel.recv()
+            except ChannelClosed:
+                terminal_result = _handle_peer_disconnect(
+                    hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
                 end_event.set()
                 return
-            hooks.proto_on_message(msg)
+            except Exception as e:
+                print(f"[aigenora] free-mode receiver recv error: {e}", file=sys.stderr)
+                continue
+            try:
+                if validate:
+                    _validate(spec, msg, "both")
+                if _is_control_end(msg):
+                    hooks.proto_on_end()
+                    end_event.set()
+                    return
+                hooks.proto_on_message(msg)
+            except ValidationError as e:
+                print(f"[aigenora] free-mode receiver dropped invalid message: {e}", file=sys.stderr)
+                continue
+            except Exception as e:
+                print(f"[aigenora] free-mode receiver hook error: {e}", file=sys.stderr)
+                continue
 
     async def stdin_producer():
         while not end_event.is_set():
@@ -820,6 +838,8 @@ async def _run_free_async(
     for t in tasks:
         if not t.done():
             t.cancel()
+    if terminal_result is not None:
+        return terminal_result
     _snapshot_phase(hooks, "game_over", "Free mode session ended")
     return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
 

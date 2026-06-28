@@ -50,6 +50,11 @@ def keygen(dir_value: str | None = None, force: bool = False) -> KeyPair:
     kp = KeyPair(public_key=pub_bytes.hex(), private_key=priv_bytes.hex())
     with path.open("w", encoding="utf-8") as f:
         json.dump({"public_key": kp.public_key, "private_key": kp.private_key}, f, separators=(",", ":"))
+    # 收紧私钥文件权限：POSIX 上设为 0600 防止其他用户读取根信任私钥；Windows 上 chmod 是 noop，依赖文件系统 ACL。
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return kp
 
 
