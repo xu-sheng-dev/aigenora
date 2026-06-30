@@ -28,6 +28,9 @@ TARGET_PRESETS: dict[str, str] = {
 }
 
 PERSONAL_FILENAME = "PERSONAL.md"
+# v018: companion appendix files shipped next to SKILL.md and installed together,
+# so the main SKILL.md stays thin; the agent loads appendices on demand via the index.
+APPENDIX_FILES = ("HOOKS.md", "PROTOCOL-DEV.md", "UI-DEV.md", "REFERENCE.md", "ADVANCED.md", "GAMES.md")
 
 BACKUP_KEEP = 3
 TRACKER_PATH = Path.home() / ".aigenora" / "skill_targets.json"
@@ -190,7 +193,7 @@ def cmd_install(args) -> int:
         old_ver = _read_target_version(target_path)
         print(f"[SKIP] {target_path} already exists (version={old_ver}); use --force to overwrite")
         _remember_target(target_name, target_path)
-        _ensure_personal_for_target(target_path, target_name)
+        _ensure_personal_and_appendices(target_path, target_name)
         return 0
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +204,7 @@ def cmd_install(args) -> int:
     _remember_target(target_name, target_path)
 
     # Create PERSONAL.md template if missing, or append missing coach fields without overwriting.
-    _ensure_personal_for_target(target_path, target_name)
+    _ensure_personal_and_appendices(target_path, target_name)
 
     print(f"[OK] installed {pkg_ver} -> {target_path}")
     if backup:
@@ -234,7 +237,7 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(pkg_text, encoding="utf-8")
         _remember_target(target_name, target_path)
-        _ensure_personal_for_target(target_path, target_name)
+        _ensure_personal_and_appendices(target_path, target_name)
         print(f"[OK] installed {pkg_ver} -> {target_path}")
         return 0
 
@@ -245,7 +248,7 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         backup = _backup_and_trim(target_path, old_ver)
         target_path.write_text(pkg_text, encoding="utf-8")
         _remember_target(target_name, target_path)
-        _ensure_personal_for_target(target_path, target_name)
+        _ensure_personal_and_appendices(target_path, target_name)
         action = "forced" if (cmp <= 0 and force) else "updated"
         print(f"[OK] {action} {old_ver} -> {pkg_ver} @ {target_path}")
         if backup:
@@ -253,12 +256,12 @@ def _update_one(target_path: Path, target_name: str, pkg_text: str, pkg_ver: str
         return 0
 
     if cmp == 0:
-        _ensure_personal_for_target(target_path, target_name)
+        _ensure_personal_and_appendices(target_path, target_name)
         print(f"[OK] up-to-date ({pkg_ver}) @ {target_path}")
         return 0
 
     # cmp < 0: the packaged version is lower; per user decision, no special handling for now
-    _ensure_personal_for_target(target_path, target_name)
+    _ensure_personal_and_appendices(target_path, target_name)
     print(f"[SKIP] packaged ({pkg_ver}) <= installed ({old_ver}) @ {target_path}; use --force to overwrite")
     return 0
 
@@ -282,6 +285,8 @@ def cmd_check(args) -> int:
             print(f"  [{status}] {entry.get('target','custom'):12s} {old_ver or '-':>10s}  {tp}")
             if status in ("OUTDATED", "MISSING"):
                 rc = 1
+            if status in ("OK", "AHEAD"):
+                rc |= _print_appendix_check(tp, indent="    ")
         return rc
 
     target_name, target_path = _resolve_target(args)
@@ -290,7 +295,9 @@ def cmd_check(args) -> int:
     print(f"packaged: {pkg_ver}")
     print(f"target ({target_name}): {old_ver or '-'} @ {target_path}")
     print(f"status: {status}")
-    return 0 if status in ("OK", "AHEAD") else 1
+    if status not in ("OK", "AHEAD"):
+        return 1
+    return _print_appendix_check(target_path, indent="")
 
 
 def _status_label(pkg_ver: str, target_ver: str | None, target_path: Path) -> str:
@@ -304,6 +311,68 @@ def _status_label(pkg_ver: str, target_ver: str | None, target_path: Path) -> st
     if cmp == 0:
         return "OK"
     return "AHEAD"
+
+
+def _install_appendices(skill_dir: Path) -> list[str]:
+    """Install/overwrite companion appendix files next to SKILL.md (v018).
+
+    Appendices are product docs (not user-personalized), always overwritten to match the
+    installed package. Silently skips names missing in the package (older versions).
+    """
+    installed = []
+    for name in APPENDIX_FILES:
+        try:
+            text = resources.files("aigenora.skill").joinpath(name).read_text(encoding="utf-8-sig")
+        except (FileNotFoundError, OSError):
+            continue
+        try:
+            (skill_dir / name).write_text(text, encoding="utf-8")
+            installed.append(name)
+        except OSError:
+            pass
+    return installed
+
+
+def _appendix_problems(skill_dir: Path) -> tuple[list[str], list[str]]:
+    """Return (missing, outdated) companion appendix names for an installed skill dir."""
+    missing = []
+    outdated = []
+    for name in APPENDIX_FILES:
+        try:
+            packaged = resources.files("aigenora.skill").joinpath(name).read_text(encoding="utf-8-sig")
+        except (FileNotFoundError, OSError):
+            continue
+        target = skill_dir / name
+        if not target.is_file():
+            missing.append(name)
+            continue
+        try:
+            current = target.read_text(encoding="utf-8-sig")
+        except OSError:
+            missing.append(name)
+            continue
+        if current != packaged:
+            outdated.append(name)
+    return missing, outdated
+
+
+def _print_appendix_check(target_path: Path, indent: str = "") -> int:
+    missing, outdated = _appendix_problems(target_path.parent)
+    if not missing and not outdated:
+        return 0
+    parts = []
+    if missing:
+        parts.append("missing=" + ",".join(missing))
+    if outdated:
+        parts.append("outdated=" + ",".join(outdated))
+    print(f"{indent}appendices: {'; '.join(parts)}")
+    return 1
+
+
+def _ensure_personal_and_appendices(target_path: Path, target_name: str) -> None:
+    """Ensure PERSONAL.md + v018 appendix files are present next to SKILL.md."""
+    _ensure_personal_for_target(target_path=target_path, target_name=target_name)
+    _install_appendices(target_path.parent)
 
 
 def _ensure_personal_for_target(target_path: Path, target_name: str) -> None:
