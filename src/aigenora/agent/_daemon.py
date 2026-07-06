@@ -59,7 +59,7 @@ def update_session_meta(state_dir: str | Path | None, **updates: Any) -> None:
     The daemon parent process (host._run_daemon / join._run_daemon) writes the initial
     session.json and returns right after startup, so it never observes how the business
     subprocess ends. The business subprocess therefore calls this on its terminal path to
-    record the final status (closed/aborted), ended_at, game_over and end_reason — otherwise
+    record the final status (closed/aborted), ended_at, completed and end_reason — otherwise
     console/list keeps showing a stale "running" session for a process that already exited.
     Best-effort: a missing/unreadable session.json or a None state_dir is a silent no-op.
     """

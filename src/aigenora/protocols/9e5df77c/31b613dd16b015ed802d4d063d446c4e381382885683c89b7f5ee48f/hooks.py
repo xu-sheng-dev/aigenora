@@ -16,9 +16,16 @@ from aigenora.proto.sdk import StateStore
 
 SIDES = ["heads", "tails"]
 SIDE_LABEL = {"heads": "Heads", "tails": "Tails"}
+# v015 whisper 桥：heads/tails 的中英别名
+CHOICE_KEYWORDS = {
+    "heads": ["heads", "head", "正面", "正", "h"],
+    "tails": ["tails", "tail", "反面", "反", "t"],
+}
 
 
 class Hooks(ProtocolHooks):
+    CHOICE_KEYWORDS = CHOICE_KEYWORDS
+
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -43,12 +50,29 @@ class Hooks(ProtocolHooks):
             if mode == "fixed":
                 fixed = strat.get("fixed")
                 if fixed in SIDES:
+                    self._emit_strategy_applied(round_index, strat, fixed)
                     return fixed
             elif mode == "seq":
                 seq = [x for x in strat.get("sequence", []) if x in SIDES]
                 if seq:
-                    return seq[round_index % len(seq)]
-        return random.choice(SIDES)
+                    pick = seq[round_index % len(seq)]
+                    self._emit_strategy_applied(round_index, strat, pick)
+                    return pick
+            if mode == "random":
+                override = self._resolve_whisper_override("round", round_index)
+                if override and override[0] in SIDES:
+                    self._emit_strategy_applied(round_index, override[1], override[0])
+                    return override[0]
+            result = random.choice(SIDES)
+            self._emit_strategy_applied(round_index, strat, result)
+            return result
+        override = self._resolve_whisper_override("round", round_index)
+        if override and override[0] in SIDES:
+            self._emit_strategy_applied(round_index, override[1], override[0])
+            return override[0]
+        result = random.choice(SIDES)
+        self._emit_strategy_applied(round_index, None, result)
+        return result
 
     def _pick(self, round_index: int) -> str:
         auto = self._pick_auto(round_index)
@@ -111,7 +135,7 @@ class Hooks(ProtocolHooks):
             "game_winner": game_winner,
         }
         self._record_round(round_index, host_value, guest_value, winner, over, game_winner)
-        return HookResult(resp, game_over=over)
+        return HookResult(resp, completed=over)
 
     def _record_round(self, round_index: int, host_choice: str, guest_choice: str,
                       winner: str, over: bool, game_winner: str) -> None:

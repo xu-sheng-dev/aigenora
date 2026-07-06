@@ -142,11 +142,11 @@ def _handle_peer_disconnect(hooks: Any, event_bus: EventBus | None, **result_ext
     """Clean termination when the peer channel closes mid-session (v009 P1-6).
 
     Emits session_ended(peer_disconnected), marks the snapshot aborted, and returns a
-    game_over=False result so no session proof is produced and no score is polluted.
+    completed=False result so no session proof is produced and no score is polluted.
     """
-    _emit(event_bus, "session_ended", {"game_over": False, "reason": "peer_disconnected"})
+    _emit(event_bus, "session_ended", {"completed": False, "reason": "peer_disconnected"})
     _snapshot_phase(hooks, "aborted", "Peer disconnected", reason="peer_disconnected")
-    return {"game_over": False, "reason": "peer_disconnected", **result_extra}
+    return {"completed": False, "reason": "peer_disconnected", **result_extra}
 
 
 async def _maybe_wrap_heartbeat(
@@ -257,12 +257,12 @@ def _run_session_loop_sync_host(
         _validate(spec, ready_result.response, "host_to_guest")
     _display(hooks, ready_result.response, "sent")
     _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
-    if ready_result.game_over or ready_result.abort:
+    if ready_result.completed or ready_result.abort:
         channel.send(ready_result.response)
-        _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
+        _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if ready_result.abort else "completed"})
         _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
-                        "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over, "winner": _winner_of(ready_result.response)}
+                        "Session ended during handshake", reason="abort" if ready_result.abort else "completed")
+        return {"metadata": metadata, "state_dir": str(state_dir), "completed": ready_result.completed, "outcome": _winner_of(ready_result.response)}
     msg = channel.send_wait(ready_result.response)
     while True:
         if validate:
@@ -276,18 +276,18 @@ def _run_session_loop_sync_host(
             _display(hooks, result.response, "sent")
             _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
                   summary=hooks.proto_display(result.response, "sent"))
-            if result.game_over or result.abort:
+            if result.completed or result.abort:
                 channel.send(result.response)
-                _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if result.abort else "completed"})
                 _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                "Session ended", reason="abort" if result.abort else "game_over")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
+                                "Session ended", reason="abort" if result.abort else "completed")
+                return {"metadata": metadata, "state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response)}
             if pace > 0:
                 time.sleep(pace)
             msg = channel.send_wait(result.response)
         else:
             _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response)}
 
 
 def _run_session_loop_sync_guest(
@@ -323,7 +323,7 @@ def _run_session_loop_sync_guest(
     first = hooks.proto_guest_first_action()
     if not first:
         _snapshot_phase(hooks, "game_over", "Guest ended after handshake")
-        return {"state_dir": str(state_dir), "game_over": False}
+        return {"state_dir": str(state_dir), "completed": False}
     if validate:
         _validate(spec, first, "guest_to_host")
     _display(hooks, first, "sent")
@@ -341,18 +341,18 @@ def _run_session_loop_sync_guest(
             _display(hooks, result.response, "sent")
             _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
                   summary=hooks.proto_display(result.response, "sent"))
-            if result.game_over or result.abort:
+            if result.completed or result.abort:
                 channel.send(result.response)
-                _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if result.abort else "completed"})
                 _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                "Session ended", reason="abort" if result.abort else "game_over")
-                return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
+                                "Session ended", reason="abort" if result.abort else "completed")
+                return {"state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response, msg)}
             if pace > 0:
                 time.sleep(pace)
             msg = channel.send_wait(result.response)
         else:
             _snapshot_phase(hooks, "game_over", "Session completed")
-            return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
+            return {"state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response, msg)}
 
 
 async def _run_session_loop_async(
@@ -425,12 +425,12 @@ async def _run_session_loop_async_host(
             _validate(spec, ready_result.response, "host_to_guest")
         _display(hooks, ready_result.response, "sent")
         _emit(event_bus, "protocol_message", {"direction": "sent", "msg": ready_result.response})
-        if ready_result.game_over or ready_result.abort:
+        if ready_result.completed or ready_result.abort:
             await channel.send(ready_result.response)
-            _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if ready_result.abort else "game_over"})
+            _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if ready_result.abort else "completed"})
             _snapshot_phase(hooks, "aborted" if ready_result.abort else "game_over",
-                            "Session ended during handshake", reason="abort" if ready_result.abort else "game_over")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": ready_result.game_over, "winner": _winner_of(ready_result.response)}
+                            "Session ended during handshake", reason="abort" if ready_result.abort else "completed")
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": ready_result.completed, "outcome": _winner_of(ready_result.response)}
         msg = await channel.send_wait(ready_result.response)
         while True:
             if validate:
@@ -444,18 +444,18 @@ async def _run_session_loop_async_host(
                 _display(hooks, result.response, "sent")
                 _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
                       summary=hooks.proto_display(result.response, "sent"))
-                if result.game_over or result.abort:
+                if result.completed or result.abort:
                     await channel.send(result.response)
-                    _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                    _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if result.abort else "completed"})
                     _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                    "Session ended", reason="abort" if result.abort else "game_over")
-                    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
+                                    "Session ended", reason="abort" if result.abort else "completed")
+                    return {"metadata": metadata, "state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response)}
                 if pace > 0:
                     await asyncio.sleep(pace)
                 msg = await channel.send_wait(result.response)
             else:
                 _snapshot_phase(hooks, "game_over", "Session completed")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response)}
+                return {"metadata": metadata, "state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response)}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
@@ -499,7 +499,7 @@ async def _run_session_loop_async_guest(
         first = hooks.proto_guest_first_action()
         if not first:
             _snapshot_phase(hooks, "game_over", "Guest ended after handshake")
-            return {"state_dir": str(state_dir), "game_over": False}
+            return {"state_dir": str(state_dir), "completed": False}
         if validate:
             _validate(spec, first, "guest_to_host")
         _display(hooks, first, "sent")
@@ -517,18 +517,18 @@ async def _run_session_loop_async_guest(
                 _display(hooks, result.response, "sent")
                 _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response},
                       summary=hooks.proto_display(result.response, "sent"))
-                if result.game_over or result.abort:
+                if result.completed or result.abort:
                     await channel.send(result.response)
-                    _emit(event_bus, "session_ended", {"game_over": True, "reason": "abort" if result.abort else "game_over"})
+                    _emit(event_bus, "session_ended", {"completed": True, "reason": "abort" if result.abort else "completed"})
                     _snapshot_phase(hooks, "aborted" if result.abort else "game_over",
-                                    "Session ended", reason="abort" if result.abort else "game_over")
-                    return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
+                                    "Session ended", reason="abort" if result.abort else "completed")
+                    return {"state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response, msg)}
                 if pace > 0:
                     await asyncio.sleep(pace)
                 msg = await channel.send_wait(result.response)
             else:
                 _snapshot_phase(hooks, "game_over", "Session completed")
-                return {"state_dir": str(state_dir), "game_over": result.game_over, "winner": _winner_of(result.response, msg)}
+                return {"state_dir": str(state_dir), "completed": result.completed, "outcome": _winner_of(result.response, msg)}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
@@ -671,6 +671,10 @@ def _run_free(
         if validate:
             _validate(spec, ready_msg, "host_to_guest")
 
+    # Handshake done: switch from the engine default "waiting_peer" to the chatting phase
+    # the hooks intended (proto_init set phase="chatting" but _snapshot_init overwrote it).
+    _snapshot_phase(hooks, "chatting", "Chat ready")
+
     t_recv = threading.Thread(target=receiver, daemon=True)
     t_send = threading.Thread(target=sender, daemon=True)
     t_stdin = threading.Thread(target=stdin_producer, daemon=True)
@@ -681,8 +685,8 @@ def _run_free(
     t_inbox.start()
     t_recv.join()
     t_send.join()
-    _snapshot_phase(hooks, "game_over", "Free mode session ended")
-    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+    _snapshot_phase(hooks, "ended", "Free mode session ended")
+    return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
 
 
 async def _run_free_async(
@@ -725,6 +729,9 @@ async def _run_free_async(
         ready_msg = await channel.recv()
         if validate:
             _validate(spec, ready_msg, "host_to_guest")
+
+    # Handshake done: switch from "waiting_peer" to "chatting" (see sync counterpart).
+    _snapshot_phase(hooks, "chatting", "Chat ready")
 
     loop = asyncio.get_event_loop()
     inbox_path = state_dir / "inbox.jsonl"
@@ -840,8 +847,8 @@ async def _run_free_async(
             t.cancel()
     if terminal_result is not None:
         return terminal_result
-    _snapshot_phase(hooks, "game_over", "Free mode session ended")
-    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+    _snapshot_phase(hooks, "ended", "Free mode session ended")
+    return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
 
 
 def _run_request_response_sync(
@@ -916,19 +923,19 @@ def _run_rr_sync_host(
     # Host handles request and returns response
     result = _as_result(hooks.proto_host_handle(request_msg))
     if result.response is None:
-        _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+        _emit(event_bus, "session_ended", {"completed": False, "reason": "abort"})
         _snapshot_phase(hooks, "aborted", "Host did not return response")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+        return {"metadata": metadata, "state_dir": str(state_dir), "completed": False}
     if validate:
         _validate(spec, result.response, "host_to_guest")
     _display(hooks, result.response, "sent")
     _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response})
     channel.send(result.response)
 
-    # Forced end, regardless of game_over returned by hooks
-    _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+    # Forced end, regardless of the completed flag returned by hooks
+    _emit(event_bus, "session_ended", {"completed": True, "reason": "request_response_complete"})
     _snapshot_phase(hooks, "game_over", "Request-response completed")
-    return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+    return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
 
 
 def _run_rr_sync_guest(
@@ -967,9 +974,9 @@ def _run_rr_sync_guest(
     # Guest sends request
     request = hooks.proto_guest_first_action()
     if not request:
-        _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+        _emit(event_bus, "session_ended", {"completed": False, "reason": "abort"})
         _snapshot_phase(hooks, "aborted", "Guest did not send request")
-        return {"state_dir": str(state_dir), "game_over": False}
+        return {"state_dir": str(state_dir), "completed": False}
     if validate:
         _validate(spec, request, "guest_to_host")
     _display(hooks, request, "sent")
@@ -986,9 +993,9 @@ def _run_rr_sync_guest(
     hooks.proto_guest_handle(response_msg)
 
     # Forced end
-    _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+    _emit(event_bus, "session_ended", {"completed": True, "reason": "request_response_complete"})
     _snapshot_phase(hooks, "game_over", "Request-response completed")
-    return {"state_dir": str(state_dir), "game_over": True}
+    return {"state_dir": str(state_dir), "completed": True}
 
 
 async def _run_request_response_async(
@@ -1073,18 +1080,18 @@ async def _run_rr_async_host(
         # Host handles request -> response
         result = _as_result(hooks.proto_host_handle(request_msg))
         if result.response is None:
-            _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+            _emit(event_bus, "session_ended", {"completed": False, "reason": "abort"})
             _snapshot_phase(hooks, "aborted", "Host did not return response")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": False}
         if validate:
             _validate(spec, result.response, "host_to_guest")
         _display(hooks, result.response, "sent")
         _emit(event_bus, "protocol_message", {"direction": "sent", "msg": result.response})
         await channel.send(result.response)
 
-        _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+        _emit(event_bus, "session_ended", {"completed": True, "reason": "request_response_complete"})
         _snapshot_phase(hooks, "game_over", "Request-response completed")
-        return {"metadata": metadata, "state_dir": str(state_dir), "game_over": True}
+        return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, metadata=metadata, state_dir=str(state_dir))
 
@@ -1131,9 +1138,9 @@ async def _run_rr_async_guest(
         # Guest sends request
         request = hooks.proto_guest_first_action()
         if not request:
-            _emit(event_bus, "session_ended", {"game_over": False, "reason": "abort"})
+            _emit(event_bus, "session_ended", {"completed": False, "reason": "abort"})
             _snapshot_phase(hooks, "aborted", "Guest did not send request")
-            return {"state_dir": str(state_dir), "game_over": False}
+            return {"state_dir": str(state_dir), "completed": False}
         if validate:
             _validate(spec, request, "guest_to_host")
         _display(hooks, request, "sent")
@@ -1147,9 +1154,9 @@ async def _run_rr_async_guest(
         _emit(event_bus, "protocol_message", {"direction": "received", "msg": response_msg})
         hooks.proto_guest_handle(response_msg)
 
-        _emit(event_bus, "session_ended", {"game_over": True, "reason": "request_response_complete"})
+        _emit(event_bus, "session_ended", {"completed": True, "reason": "request_response_complete"})
         _snapshot_phase(hooks, "game_over", "Request-response completed")
-        return {"state_dir": str(state_dir), "game_over": True}
+        return {"state_dir": str(state_dir), "completed": True}
     except ChannelClosed:
         return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
@@ -1266,7 +1273,7 @@ def _run_sr_sync_host(
             _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
             abort_msg = {"action": "error", "round": round_num, "reason": "commit_mismatch"}
             channel.send(abort_msg)
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": False}
 
         # 7. Judge
         judge_result = _as_result(hooks.proto_round_judge(round_num, host_value, guest_value, state))
@@ -1278,17 +1285,17 @@ def _run_sr_sync_host(
             channel.send(judge_result.response)
 
         round_num += 1
-        if judge_result.game_over or judge_result.abort:
-            # After Host game_over, send an end signal so Guest exits
+        if judge_result.completed or judge_result.abort:
+            # After Host signals completion (completed=True), send an end signal so Guest exits
             end_msg = {"action": "end"}
             channel.send(end_msg)
             _emit(event_bus, "session_ended", {
-                "game_over": True,
-                "reason": "abort" if judge_result.abort else "game_over",
+                "completed": True,
+                "reason": "abort" if judge_result.abort else "completed",
             })
             _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
-                            "Session ended", reason="abort" if judge_result.abort else "game_over")
-            return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over, "winner": _winner_of(judge_result.response)}
+                            "Session ended", reason="abort" if judge_result.abort else "completed")
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": judge_result.completed, "outcome": _winner_of(judge_result.response)}
 
         if pace > 0:
             time.sleep(pace)
@@ -1344,10 +1351,10 @@ def _run_sr_sync_guest(
         else:
             host_commit = channel.recv()
         if _is_control_end(host_commit):
-            _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
+            _emit(event_bus, "session_ended", {"completed": True, "reason": "completed"})
             _snapshot_phase(hooks, "game_over", "Session completed")
             # result_msg 是上一轮收到的 round_result（含 game_winner），透传给 host 触发 ELO result 上报
-            return {"state_dir": str(state_dir), "game_over": True, "winner": _winner_of(result_msg)}
+            return {"state_dir": str(state_dir), "completed": True, "outcome": _winner_of(result_msg)}
         if validate:
             _validate(spec, host_commit, "host_to_guest")
         _display(hooks, host_commit, "received")
@@ -1379,7 +1386,7 @@ def _run_sr_sync_guest(
                 "expected": expected_hash, "actual": host_hash,
             })
             _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
-            return {"state_dir": str(state_dir), "game_over": False}
+            return {"state_dir": str(state_dir), "completed": False}
 
         # Send Guest reveal
         reveal_msg = {"action": "reveal", "round": round_num, _value_field: guest_value, "nonce": nonce}
@@ -1405,7 +1412,7 @@ def _run_sr_sync_guest(
                     "round": round_num, "role": "host", "mismatches": mismatches,
                 })
                 _snapshot_phase(hooks, "aborted", "Balance mismatch detected (shadow judge)", round=round_num)
-                return {"state_dir": str(state_dir), "game_over": False}
+                return {"state_dir": str(state_dir), "completed": False}
         hooks.proto_guest_handle(result_msg)
 
         round_num += 1
@@ -1531,7 +1538,7 @@ async def _run_sr_async_host(
                 _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
                 abort_msg = {"action": "error", "round": round_num, "reason": "commit_mismatch"}
                 await channel.send(abort_msg)
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": False}
+                return {"metadata": metadata, "state_dir": str(state_dir), "completed": False}
 
             judge_result = _as_result(hooks.proto_round_judge(round_num, host_value, guest_value, state))
             if judge_result.response:
@@ -1542,17 +1549,17 @@ async def _run_sr_async_host(
                 await channel.send(judge_result.response)
 
             round_num += 1
-            if judge_result.game_over or judge_result.abort:
-                # After Host game_over, send an end signal so Guest exits
+            if judge_result.completed or judge_result.abort:
+                # After Host signals completion (completed=True), send an end signal so Guest exits
                 end_msg = {"action": "end"}
                 await channel.send(end_msg)
                 _emit(event_bus, "session_ended", {
-                    "game_over": True,
-                    "reason": "abort" if judge_result.abort else "game_over",
+                    "completed": True,
+                    "reason": "abort" if judge_result.abort else "completed",
                 })
                 _snapshot_phase(hooks, "aborted" if judge_result.abort else "game_over",
-                                "Session ended", reason="abort" if judge_result.abort else "game_over")
-                return {"metadata": metadata, "state_dir": str(state_dir), "game_over": judge_result.game_over, "winner": _winner_of(judge_result.response)}
+                                "Session ended", reason="abort" if judge_result.abort else "completed")
+                return {"metadata": metadata, "state_dir": str(state_dir), "completed": judge_result.completed, "outcome": _winner_of(judge_result.response)}
 
             if pace > 0:
                 await asyncio.sleep(pace)
@@ -1614,10 +1621,10 @@ async def _run_sr_async_guest(
             else:
                 host_commit = await channel.recv()
             if _is_control_end(host_commit):
-                _emit(event_bus, "session_ended", {"game_over": True, "reason": "game_over"})
+                _emit(event_bus, "session_ended", {"completed": True, "reason": "completed"})
                 _snapshot_phase(hooks, "game_over", "Session completed")
                 # result_msg 是上一轮收到的 round_result（含 game_winner），透传给 guest 触发 ELO result 上报
-                return {"state_dir": str(state_dir), "game_over": True, "winner": _winner_of(result_msg)}
+                return {"state_dir": str(state_dir), "completed": True, "outcome": _winner_of(result_msg)}
             if validate:
                 _validate(spec, host_commit, "host_to_guest")
             _display(hooks, host_commit, "received")
@@ -1646,7 +1653,7 @@ async def _run_sr_async_guest(
                     "expected": expected_hash, "actual": host_hash,
                 })
                 _snapshot_phase(hooks, "aborted", "Commit mismatch detected", round=round_num)
-                return {"state_dir": str(state_dir), "game_over": False}
+                return {"state_dir": str(state_dir), "completed": False}
 
             reveal_msg = {"action": "reveal", "round": round_num, _value_field: guest_value, "nonce": nonce}
             if validate:
@@ -1670,7 +1677,7 @@ async def _run_sr_async_guest(
                         "round": round_num, "role": "host", "mismatches": mismatches,
                     })
                     _snapshot_phase(hooks, "aborted", "Balance mismatch detected (shadow judge)", round=round_num)
-                    return {"state_dir": str(state_dir), "game_over": False}
+                    return {"state_dir": str(state_dir), "completed": False}
             hooks.proto_guest_handle(result_msg)
 
             round_num += 1

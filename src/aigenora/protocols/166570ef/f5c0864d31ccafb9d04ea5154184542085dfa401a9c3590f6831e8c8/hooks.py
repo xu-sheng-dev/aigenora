@@ -52,10 +52,10 @@ class Hooks(ProtocolHooks):
         self.attempts += 1
         if number == self.secret:
             self._record_attempt(attempt, number, "hit", over=True, winner="guest")
-            return HookResult({"action": "game_over", "winner": "guest", "secret_number": self.secret, "total_attempts": self.attempts}, game_over=True)
+            return HookResult({"action": "game_over", "winner": "guest", "secret_number": self.secret, "total_attempts": self.attempts}, completed=True)
         if self.attempts >= self.max_attempts:
             self._record_attempt(attempt, number, "exhausted", over=True, winner="host")
-            return HookResult({"action": "game_over", "winner": "host", "secret_number": self.secret, "total_attempts": self.attempts}, game_over=True)
+            return HookResult({"action": "game_over", "winner": "host", "secret_number": self.secret, "total_attempts": self.attempts}, completed=True)
         result = "higher" if number < self.secret else "lower"
         self._record_attempt(attempt, number, result, over=False, winner="none")
         return HookResult({"action": "hint", "attempt": attempt, "result": result, "attempts_used": self.attempts})
@@ -238,5 +238,5 @@ class Hooks(ProtocolHooks):
                 total_attempts=total,
                 summary=f"Game over: {winner} wins, answer {secret}, {total} attempts",
             )
-            return HookResult(game_over=True)
+            return HookResult(completed=True)
         return HookResult({"action": "error", "reason": "unexpected_action"}, abort=True)

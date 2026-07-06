@@ -275,30 +275,30 @@ async def _network_host(args) -> int:
                                  peer_public_key=guest_public_key) or {}
         except Exception as exc:
             msg = str(exc)[:200]
-            _emit(event_bus, "session_ended", {"game_over": False, "reason": "engine_error", "error": msg})
+            _emit(event_bus, "session_ended", {"completed": False, "reason": "engine_error", "error": msg})
             close_session(rest_client, session_id_val, status="failed", event_bus=event_bus)
-            update_session_meta(state_base, status="crashed", game_over=False,
+            update_session_meta(state_base, status="crashed", completed=False,
                                 ended_at=time.time(), end_reason="engine_error", error=msg)
             raise
-        game_over = bool(result.get("game_over", True))
+        completed = bool(result.get("completed", True))
         end_reason = result.get("reason")
         print("done")
-        # engine emits the authoritative session_ended on every terminal path: game_over=True
-        # for a completed match, game_over=False + peer_disconnected on disconnect (P1-6). Only
-        # mirror the normal game_over=True path here; never re-emit a spurious game_over=True
+        # engine emits the authoritative session_ended on every terminal path: completed=True
+        # for a completed match, completed=False + peer_disconnected on disconnect (P1-6). Only
+        # mirror the normal completed=True path here; never re-emit a spurious completed=True
         # over a disconnect, which would fake a successful match outcome (proof/score pollution).
-        if game_over:
-            _emit(event_bus, "session_ended", {"game_over": True})
-        close_session(rest_client, session_id_val, status="failed" if not game_over else "closed",
+        if completed:
+            _emit(event_bus, "session_ended", {"completed": True})
+        close_session(rest_client, session_id_val, status="failed" if not completed else "closed",
                       event_bus=event_bus)
         # v012 批次3：胜负上报走 /result（双方一致才结算 ELO），与 close 解耦
         # v016: mental_poker 协议仅在 audit_passed=True 且 receipt 双签通过后才上报
-        if game_over and result.get("winner") and result.get("audit_passed", True):
-            report_result(rest_client, session_id_val, result.get("winner"))
+        if completed and result.get("outcome") and result.get("audit_passed", True):
+            report_result(rest_client, session_id_val, result.get("outcome"))
         # daemon parent returns right after startup, so the business subprocess must persist the
         # final session.json status itself — otherwise console/list shows a stale "running" session.
-        update_session_meta(state_base, status="aborted" if not game_over else "closed",
-                            game_over=game_over, ended_at=time.time(), end_reason=end_reason)
+        update_session_meta(state_base, status="aborted" if not completed else "closed",
+                            completed=completed, ended_at=time.time(), end_reason=end_reason)
         return 0
     finally:
         if renew_task is not None and not renew_task.done():

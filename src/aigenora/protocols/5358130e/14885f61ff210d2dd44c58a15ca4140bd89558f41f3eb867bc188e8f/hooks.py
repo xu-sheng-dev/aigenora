@@ -184,10 +184,10 @@ class Hooks(ProtocolHooks):
                                 {"row": int(msg.get("row", 0)), "col": int(msg.get("col", 0)),
                                  "player": "host", "passed": passed}, over, winner)
             if over:
-                return HookResult(game_over=True)
+                return HookResult(completed=True)
             return HookResult(self._guest_action(self.turn))
         if action == "end":
-            return HookResult(game_over=True)
+            return HookResult(completed=True)
         return HookResult({"action": "error", "reason": "not_your_turn"}, abort=True)
 
     def _guest_action(self, turn: int) -> dict:
@@ -235,7 +235,7 @@ class Hooks(ProtocolHooks):
             self._push_snapshot("game_over" if over else "playing", "guest",
                                 {"row": hr, "col": hc, "player": "host"}, over, winner)
             self.turn = hturn + 1
-            return HookResult(self._round_result(hturn, hr, hc, flipped, False, over, winner), game_over=over)
+            return HookResult(self._round_result(hturn, hr, hc, flipped, False, over, winner), completed=over)
         # host has no move -> pass
         over = self._is_terminal()
         winner = self._winner() if over else "none"
@@ -244,7 +244,7 @@ class Hooks(ProtocolHooks):
         self._push_snapshot("game_over" if over else "playing", "guest",
                             {"player": "host", "passed": True}, over, winner)
         self.turn = hturn + 1
-        return HookResult(self._round_result(hturn, 0, 0, 0, True, over, winner), game_over=over)
+        return HookResult(self._round_result(hturn, 0, 0, 0, True, over, winner), completed=over)
 
     def _is_terminal(self) -> bool:
         if is_full(self.board, self.n):

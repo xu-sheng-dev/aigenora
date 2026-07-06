@@ -16,6 +16,9 @@ from aigenora.proto.sdk import StateStore
 
 
 class Hooks(ProtocolHooks):
+    # v015: weak-wins-all 是押注类，whisper 含数字时按 bid 解析（如"押30"→bid=30）
+    WHISPER_NUMERIC = True
+
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -45,14 +48,36 @@ class Hooks(ProtocolHooks):
     def _my_remaining(self) -> int:
         return self.host_remaining if self.role == "host" else self.guest_remaining
 
+    def _whisper_bid_override(self, round_index: int, remaining: int) -> int | None:
+        """v015: 从 strategy.operator_hint 提取数字作为 bid override（如"押30"→30）。"""
+        try:
+            strat = self.strategy.read() or {}
+        except Exception:
+            return None
+        hint = strat.get("operator_hint")
+        if not hint or not isinstance(hint, str) or not hint.strip():
+            return None
+        from aigenora.proto.whisper_bridge import extract_number
+        num = extract_number(hint)
+        if num is None:
+            return None
+        return max(0, min(num, remaining))
+
     def _bid_auto(self, round_index: int, remaining: int) -> int:
         # last round forces all-in
         if round_index >= self.total_rounds - 1:
+            self._emit_strategy_applied(round_index, None, remaining)
             return remaining
         rounds_left = max(1, self.total_rounds - round_index)
         default_bid = max(1, remaining // rounds_left)
         strat = self.strategy.read()
         if not strat:
+            # v015: 无 strategy 时检查 whisper override（operator_hint 数字）
+            wb = self._whisper_bid_override(round_index, remaining)
+            if wb is not None:
+                self._emit_strategy_applied(round_index, {"operator_hint": strat.get("operator_hint") if strat else ""}, wb)
+                return wb
+            self._emit_strategy_applied(round_index, None, min(default_bid, remaining))
             return min(default_bid, remaining)
         mode = strat.get("mode", "even_split")
         if mode == "fixed":
@@ -60,25 +85,43 @@ class Hooks(ProtocolHooks):
                 bid = int(strat.get("bid", default_bid))
             except (TypeError, ValueError):
                 bid = default_bid
+            bid = max(0, min(bid, remaining))
+            self._emit_strategy_applied(round_index, strat, bid)
+            return bid
         elif mode == "percent":
             try:
                 pct = float(strat.get("percent", 0))
             except (TypeError, ValueError):
                 pct = 0.0
             bid = max(1, int(round(remaining * pct / 100.0)))
+            bid = max(0, min(bid, remaining))
+            self._emit_strategy_applied(round_index, strat, bid)
+            return bid
         elif mode == "seq":
             seq = strat.get("sequence") or []
             if not seq:
-                return min(default_bid, remaining)
+                bid = min(default_bid, remaining)
+                self._emit_strategy_applied(round_index, strat, bid)
+                return bid
             try:
                 bid = int(seq[round_index % len(seq)])
             except (TypeError, ValueError):
                 bid = default_bid
+            bid = max(0, min(bid, remaining))
+            self._emit_strategy_applied(round_index, strat, bid)
+            return bid
         elif mode == "random":
             bid = random.randint(1, max(1, remaining))
-        else:
-            bid = default_bid
-        return max(0, min(bid, remaining))
+            self._emit_strategy_applied(round_index, strat, bid)
+            return bid
+        # v015: even_split（默认）时也检查 whisper override
+        wb = self._whisper_bid_override(round_index, remaining)
+        if wb is not None:
+            self._emit_strategy_applied(round_index, strat, wb)
+            return wb
+        bid = default_bid
+        self._emit_strategy_applied(round_index, strat, bid)
+        return bid
 
     def _pick(self, round_index: int) -> int:
         remaining = self._my_remaining()
@@ -171,7 +214,7 @@ class Hooks(ProtocolHooks):
             "game_winner": game_winner,
         }
         self._record_round(round_index, host_bid, guest_bid, winner, over, game_winner)
-        return HookResult(resp, game_over=over)
+        return HookResult(resp, completed=over)
 
     def _record_round(self, round_index: int, host_bid: int, guest_bid: int,
                       winner: str, over: bool, game_winner: str) -> None:

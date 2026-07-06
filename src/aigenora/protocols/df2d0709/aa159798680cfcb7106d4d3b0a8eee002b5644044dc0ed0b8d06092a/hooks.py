@@ -302,7 +302,7 @@ class Hooks(ProtocolHooks):
         self._record_round(round_index, resp["host_move"], resp["guest_move"],
                            resp["host_damage_dealt"], resp["guest_damage_dealt"],
                            resp["round_winner"], resp["game_over"], resp["game_winner"])
-        return HookResult(resp, game_over=resp["game_over"])
+        return HookResult(resp, completed=resp["game_over"])
 
     def proto_round_judge_pure(self, round_index: int, host_move: str, guest_move: str, state: dict) -> dict:
         """影子裁决（v015-M2）：用当前 self 战斗状态（= 上一轮结束后状态）纯重算本回合 round_result。

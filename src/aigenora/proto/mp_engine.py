@@ -1081,7 +1081,7 @@ def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
 def _mp_finalize_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
                       spec: dict[str, Any], validate: bool, event_bus: EventBus | None,
                       state_dir: Path, metadata: Any, winner: str | None) -> dict[str, Any]:
-    base = {"state_dir": str(state_dir), "game_over": True, "winner": winner,
+    base = {"state_dir": str(state_dir), "completed": True, "outcome": winner,
             "metadata": metadata}
 
     # opening exchange
@@ -1157,7 +1157,7 @@ def _mp_finalize_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
         )
     except OSError:
         pass
-    _emit(event_bus, "game_over", {"winner": winner, "audit_status": "passed"})
+    _emit(event_bus, "game_over", {"outcome": winner, "audit_status": "passed"})
     _snapshot_phase(hooks, "game_over", "Mental poker session completed", winner=winner)
     return {**base, "audit_passed": True}
 
@@ -1419,7 +1419,7 @@ async def _mp_play_loop_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineC
 async def _mp_finalize_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineChannel,
                              spec: dict[str, Any], validate: bool, event_bus: EventBus | None,
                              state_dir: Path, metadata: Any, winner: str | None) -> dict[str, Any]:
-    base = {"state_dir": str(state_dir), "game_over": True, "winner": winner, "metadata": metadata}
+    base = {"state_dir": str(state_dir), "completed": True, "outcome": winner, "metadata": metadata}
 
     if (_fault() or "") == "skip_opening":
         _emit(event_bus, "mp_test_fault_injected", {"fault": "skip_opening"})
@@ -1476,7 +1476,7 @@ async def _mp_finalize_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineCh
     if not peer_ok:
         _emit(event_bus, "audit_failed", {"reason": "peer_receipt_signature_invalid"})
         return {**base, "audit_passed": False}
-    _emit(event_bus, "game_over", {"winner": winner, "audit_status": "passed"})
+    _emit(event_bus, "game_over", {"outcome": winner, "audit_status": "passed"})
     _snapshot_phase(hooks, "game_over", "Mental poker session completed", winner=winner)
     return {**base, "audit_passed": True}
 

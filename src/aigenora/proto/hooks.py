@@ -10,7 +10,7 @@ from typing import Any
 @dataclass
 class HookResult:
     response: dict[str, Any] | None = None
-    game_over: bool = False
+    completed: bool = False
     abort: bool = False
 
 
@@ -19,6 +19,12 @@ class ProtocolHooks(ABC):
     snapshot: Any  # SnapshotBus
     details: Any  # DetailLog
     strategy: Any  # StrategyStore
+
+    # v015 whisper 桥：协议声明的选项关键词，用于把 whisper 自然语言解析成 strategy/decide。
+    # 子类按需覆盖，形如 {"rock": ["rock", "石头", "r"], ...}。None 表示该协议不支持 whisper 解析。
+    CHOICE_KEYWORDS: dict[str, list[str]] | None = None
+    # 数字类协议（guess-number/weak-wins-all）设为 True，whisper 含数字时按数字解析
+    WHISPER_NUMERIC: bool = False
 
     def proto_init(
         self,
@@ -232,3 +238,57 @@ class ProtocolHooks(ABC):
             if d.get(match_key) == match_value:
                 return d
         return None
+
+    # -- v015: whisper 桥 + 战术生效反馈 --
+
+    def _emit_strategy_applied(self, round_index: int, strategy: dict | None, result: Any) -> None:
+        """emit strategy_applied 事件，让用户看到"战术已生效"。
+
+        在各协议 _pick_auto/_bid_auto 的 return 前调用。strategy 为 None 表示用默认随机。
+        """
+        try:
+            from aigenora.proto.sdk import EventBus
+            EventBus(self.state_dir).emit("strategy_applied", {
+                "round": round_index,
+                "strategy": strategy or {},
+                "result": result,
+            })
+        except Exception:
+            pass  # 事件反馈是辅助功能，不影响主流程
+
+    def _resolve_whisper_override(self, match_key: str, match_value: Any) -> tuple[Any, dict | None] | None:
+        """读取 strategy.operator_hint，尝试解析成 override 值。
+
+        返回 (override_value, source_command) 或 None（无 hint 或无法解析）。
+        override_value 直接可用于 _pick_auto 的返回；source_command 是解析出的
+        {"type":..., "payload":...} 供审计。
+
+        本方法只读 operator_hint 字符串，不写入文件（写入由 web.py/CLI 的 whisper
+        入口负责，这里只做 hooks 侧的兜底解析）。
+        """
+        try:
+            strat = self.strategy.read() or {}
+        except Exception:
+            return None
+        hint = strat.get("operator_hint")
+        if not hint or not isinstance(hint, str) or not hint.strip():
+            return None
+        # 延迟导入避免循环依赖
+        from aigenora.proto.whisper_bridge import parse_whisper_to_command
+        cmd = parse_whisper_to_command(
+            hint,
+            self.CHOICE_KEYWORDS,
+            match_key=match_key,
+            match_value=match_value,
+        )
+        if cmd is None:
+            return None
+        payload = cmd.get("payload") or {}
+        # 只处理持久 strategy（operator_hint 本身是持久的）；单次 decide 由 web/CLI 入口提交
+        if cmd.get("type") != "strategy":
+            return None
+        fixed = payload.get("fixed")
+        if fixed is None:
+            return None
+        return (fixed, cmd)
+

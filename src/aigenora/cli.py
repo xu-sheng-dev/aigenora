@@ -393,6 +393,18 @@ def build_parser() -> argparse.ArgumentParser:
     sstr.add_argument("--merge", dest="merge_value", help="Shallow merge into strategy.json (JSON string)")
     sstr.add_argument("--json", action="store_true", dest="json_output")
 
+    # v015 whisper: send a tactical whisper (natural-language hint) to hooks.
+    # Text is parsed by whisper_bridge into strategy/decide if it matches the
+    # protocol's CHOICE_KEYWORDS; otherwise it is recorded as an audit-only hint.
+    swp = sess_sub.add_parser("whisper", help="Send a tactical whisper (natural-language hint) to hooks")
+    swp.add_argument("--state-dir", required=True)
+    swp.add_argument("--text", required=True, help="Whisper text (e.g. \"keep playing rock\")")
+    swp.add_argument("--role", default="user", choices=["user", "agent", "system"])
+    swp.add_argument("--protocol-dir", default=None,
+                     help="Protocol dir to load CHOICE_KEYWORDS from (auto-resolved if omitted)")
+    swp.add_argument("--json", action="store_true", dest="json_output")
+
+
     # web relay: start a local 127.0.0.1 web server for operators to view session state
     sweb = sess_sub.add_parser("web")
     sweb.add_argument("--state-dir", required=True)
@@ -554,6 +566,8 @@ def main(argv: list[str] | None = None) -> int:
             run = sess_mod.cmd_details
         elif args.session_cmd == "strategy":
             run = sess_mod.cmd_strategy
+        elif args.session_cmd == "whisper":
+            run = sess_mod.cmd_whisper
         elif args.session_cmd == "web":
             def run(_args):
                 from pathlib import Path as _P

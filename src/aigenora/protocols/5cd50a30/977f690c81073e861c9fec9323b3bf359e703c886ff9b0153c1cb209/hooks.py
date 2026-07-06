@@ -164,10 +164,10 @@ class Hooks(ProtocolHooks):
             winner = msg.get("winner", "none")
             self._record(r, c, "host", int(msg["turn"]), over, winner)
             if over:
-                return HookResult(game_over=True)
+                return HookResult(completed=True)
             return HookResult(self._guest_move())
         if action == "end":
-            return HookResult(game_over=True)
+            return HookResult(completed=True)
         return HookResult({"action": "error", "reason": "not_your_turn"}, abort=True)
 
     def _guest_move(self) -> dict:
@@ -195,7 +195,7 @@ class Hooks(ProtocolHooks):
         if is_win(self.board, self.rows, self.cols, gr, gcol, RED):
             self._record(gr, gcol, "guest", gturn, True, "guest")
             return HookResult({"action": "round_result", "turn": gturn, "col": gcol, "row": gr,
-                               "player": "guest", "game_over": True, "winner": "guest"}, game_over=True)
+                               "player": "guest", "game_over": True, "winner": "guest"}, completed=True)
         # host drop
         hcol = self._pick(YELLOW, gturn + 1)
         hr = drop_cell(self.board, self.rows, self.cols, hcol)
@@ -207,11 +207,11 @@ class Hooks(ProtocolHooks):
         if is_win(self.board, self.rows, self.cols, hr, hcol, YELLOW):
             self._record(hr, hcol, "host", hturn, True, "host")
             return HookResult({"action": "round_result", "turn": hturn, "col": hcol, "row": hr,
-                               "player": "host", "game_over": True, "winner": "host"}, game_over=True)
+                               "player": "host", "game_over": True, "winner": "host"}, completed=True)
         if is_full(self.board, self.rows, self.cols):
             self._record(hr, hcol, "host", hturn, True, "none")
             return HookResult({"action": "round_result", "turn": hturn, "col": hcol, "row": hr,
-                               "player": "host", "game_over": True, "winner": "none"}, game_over=True)
+                               "player": "host", "game_over": True, "winner": "none"}, completed=True)
         self._record(hr, hcol, "host", hturn, False, "none")
         self.turn = hturn + 1
         return HookResult({"action": "round_result", "turn": hturn, "col": hcol, "row": hr,

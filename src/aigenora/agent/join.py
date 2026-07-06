@@ -275,27 +275,27 @@ async def _join(args) -> int:
         except Exception as exc:
             msg = str(exc)[:200]
             if event_bus:
-                event_bus.emit("session_ended", {"game_over": False, "reason": "engine_error", "error": msg})
+                event_bus.emit("session_ended", {"completed": False, "reason": "engine_error", "error": msg})
             close_session(client, session_id, status="failed", event_bus=event_bus)
-            update_session_meta(state_base, status="crashed", game_over=False,
+            update_session_meta(state_base, status="crashed", completed=False,
                                 ended_at=time.time(), end_reason="engine_error", error=msg)
             raise
-        game_over = bool(result.get("game_over", True))
+        completed = bool(result.get("completed", True))
         end_reason = result.get("reason")
         print("done")
-        # engine emits session_ended on every terminal path (game_over=True for a completed match,
-        # game_over=False + peer_disconnected on disconnect). Only mirror the normal path here;
-        # never re-emit game_over=True over a disconnect (would fake a successful match outcome).
-        if event_bus and game_over:
-            event_bus.emit("session_ended", {"game_over": True})
-        close_session(client, session_id, status="failed" if not game_over else "closed",
+        # engine emits session_ended on every terminal path (completed=True for a completed match,
+        # completed=False + peer_disconnected on disconnect). Only mirror the normal path here;
+        # never re-emit completed=True over a disconnect (would fake a successful match outcome).
+        if event_bus and completed:
+            event_bus.emit("session_ended", {"completed": True})
+        close_session(client, session_id, status="failed" if not completed else "closed",
                       event_bus=event_bus)
         # v012 批次3：胜负上报走 /result（双方一致才结算 ELO），与 close 解耦
         # v016: mental_poker 协议仅在 audit_passed=True 且 receipt 双签通过后才上报
-        if game_over and result.get("winner") and result.get("audit_passed", True):
-            report_result(client, session_id, result.get("winner"))
-        update_session_meta(state_base, status="aborted" if not game_over else "closed",
-                            game_over=game_over, ended_at=time.time(), end_reason=end_reason)
+        if completed and result.get("outcome") and result.get("audit_passed", True):
+            report_result(client, session_id, result.get("outcome"))
+        update_session_meta(state_base, status="aborted" if not completed else "closed",
+                            completed=completed, ended_at=time.time(), end_reason=end_reason)
         return 0
     finally:
         await node.node().shutdown()

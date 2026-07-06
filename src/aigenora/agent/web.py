@@ -33,7 +33,12 @@ class _BadRequest(Exception):
 
 def resolve_state_dir(state_dir: str | Path) -> Path:
     """In daemon mode, the parent/ and child subdirectory form a two-layer structure; this locates
-    the directory containing snapshot.json in a unified way."""
+    the directory containing snapshot.json in a unified way.
+
+    注意：本函数是高频查询（broadcaster 每 0.5s 调用），**不能阻塞**。
+    v015 的 daemon 时序修复（等待子目录）在 session.py 的 _resolve_state_dir 里实现，
+    只用于写入类操作（strategy/decide/whisper），不影响本函数。
+    """
     p = Path(state_dir)
     if (p / "snapshot.json").exists() or (p / "details.jsonl").exists():
         return p
@@ -45,6 +50,18 @@ def resolve_state_dir(state_dir: str | Path) -> Path:
         if children:
             return children[-1]
     return p
+
+
+def _current_round(state_dir: str | Path) -> int:
+    """从 snapshot.json 读当前轮号（0-indexed，用于 decide match_value）。读不到返回 0。"""
+    try:
+        from aigenora.proto.sdk import SnapshotBus
+        snap = SnapshotBus(str(resolve_state_dir(state_dir))).read() or {}
+        # snapshot.round 是 1-indexed（hooks 写入 round=1 表示第一轮）；decide match 用 0-indexed
+        r = snap.get("round")
+        return max(0, int(r) - 1) if r is not None else 0
+    except Exception:
+        return 0
 
 
 def resolve_protocol_dir(root_dir: str | Path) -> Path | None:
@@ -1299,9 +1316,58 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                         origin="web",
                         agent_id=body.get("agent_id"),
                     )
+                    ack_status = None
+                    applied = None
                     if role == "user":
                         StrategyStore(cur).merge({"operator_hint": text})
-                    return self._send_json(200, entry)
+                        # v015: 尝试把 whisper 解析成结构化 strategy/decide，让 whisper 真正影响游戏
+                        # 注意：用 merge 而非 write，保留 operator_hint 审计字段
+                        try:
+                            from aigenora.proto.whisper_bridge import parse_whisper_to_command
+                            ck = None
+                            try:
+                                pd = resolve_protocol_dir(cur)
+                                if pd:
+                                    from aigenora.proto.loader import load_hooks
+                                    h = load_hooks(pd)
+                                    ck = getattr(h, "CHOICE_KEYWORDS", None)
+                            except Exception:
+                                pass
+                            cmd = parse_whisper_to_command(text, ck)
+                            if cmd and cmd.get("type") == "strategy":
+                                # merge 保留 operator_hint；payload 形如 {"mode":"fixed","fixed":"rock"}
+                                StrategyStore(cur).merge(cmd["payload"], _meta={"origin": "whisper_bridge"})
+                                ack_status = "executed"
+                                applied = {"type": "strategy", "payload": cmd["payload"]}
+                            elif cmd and cmd.get("type") == "decide":
+                                payload = dict(cmd["payload"])
+                                payload.setdefault("round", _current_round(cur))
+                                r = submit_decision(str(cur), payload, origin="whisper_bridge")
+                                if r.get("ok"):
+                                    ack_status = "executed"
+                                    applied = {"type": "decide", "payload": payload}
+                                else:
+                                    ack_status = "unparsed"
+                            else:
+                                ack_status = "unparsed"
+                        except Exception:
+                            ack_status = "unparsed"
+                        # 写一条 ack 记录，让前端知道 whisper 是否被解析成战术
+                        if ack_status:
+                            try:
+                                WhisperLog(cur).append_ack(
+                                    entry.get("id"), status=ack_status,
+                                    action=applied.get("type") if applied else None,
+                                    detail=json.dumps(applied.get("payload"), ensure_ascii=False) if applied else None,
+                                )
+                            except Exception:
+                                pass
+                    resp = dict(entry)
+                    if applied:
+                        resp["applied"] = applied
+                    if ack_status:
+                        resp["ack_status"] = ack_status
+                    return self._send_json(200, resp)
                 if path == "/api/whisper/ack":
                     if not isinstance(body, dict) or "id" not in body or "status" not in body:
                         return self._send_json(400, {"error": "expected {\"id\": str, \"status\": str}"})

@@ -211,7 +211,7 @@ class Hooks(ProtocolHooks):
     def proto_round_judge(self, round_index, host_value, guest_value, state):
         """Host only: judge the outcome after both sides reveal.
 
-        Must return HookResult(response=<round_result message>, game_over=<bool>),
+        Must return HookResult(response=<round_result message>, completed=<bool>),
         where response satisfies the host_to_guest round_result message constraints.
         """
 {_raise_block("proto_round_judge")}
@@ -272,7 +272,7 @@ class Hooks(ProtocolHooks):
     """session_loop (default mode): handshake + multiple rounds of guest_to_host / host_to_guest.
 
     Must implement both-side handshake + business-message callbacks; control the end
-    via HookResult.game_over.
+    via HookResult.completed.
     """
 
     def proto_host_metadata(self):
@@ -284,7 +284,7 @@ class Hooks(ProtocolHooks):
 {_raise_block("proto_host_handle_join")}
 
     def proto_host_handle(self, msg):
-        """Handle subsequent guest_to_host messages and return HookResult; game_over=True ends the session."""
+        """Handle subsequent guest_to_host messages and return HookResult; completed=True ends the session."""
 {_raise_block("proto_host_handle")}
 
     # ---- Guest ----

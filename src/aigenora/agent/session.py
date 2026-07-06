@@ -11,7 +11,7 @@ from aigenora.engine.config import get_server
 from aigenora.engine.keys import load_keys
 from aigenora.engine.rest import RestClient
 from aigenora.proto.decide_gateway import submit_decision
-from aigenora.proto.sdk import DecisionBus, DetailLog, EventBus, SnapshotBus, StrategyStore
+from aigenora.proto.sdk import DecisionBus, DetailLog, EventBus, SnapshotBus, StrategyStore, WhisperLog
 
 
 _GOVERNANCE_STRING_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -268,15 +268,27 @@ def _resolve_state_dir(state_dir: str) -> Path:
 
     If the passed path is parent (contains session.json but no snapshot.json),
     automatically locate the newest child subdirectory (host-*/ or guest-*/).
+
+    v015 修复时序 bug：daemon 模式下，业务子进程的子目录在 guest join 后才创建。
+    若调用方在 join 前（子目录尚未创建）执行 strategy/decide，旧实现会回退到 parent，
+    导致写入位置和 hooks 读取位置（子目录）错位。现在短暂轮询等待子目录出现。
     """
     p = Path(state_dir)
     if (p / "snapshot.json").exists() or (p / "details.jsonl").exists():
         return p
     if (p / "session.json").exists():
-        children = sorted(
-            [d for d in p.iterdir() if d.is_dir() and (d.name.startswith("host-") or d.name.startswith("guest-"))],
-            key=lambda d: d.name,
-        )
+        # 业务子进程的子目录可能还在创建中（daemon 启动到 guest join 之间），短暂等待
+        deadline = time.monotonic() + 8.0
+        children: list[Path] = []
+        while time.monotonic() < deadline:
+            children = sorted(
+                [d for d in p.iterdir() if d.is_dir() and (d.name.startswith("host-") or d.name.startswith("guest-"))],
+                key=lambda d: d.name,
+            )
+            if children:
+                return children[-1]
+            time.sleep(0.5)
+        # 超时仍无子目录：回退到 parent（保持旧行为，避免无限阻塞）
         if children:
             return children[-1]
     return p
@@ -411,6 +423,91 @@ def cmd_strategy(args) -> int:
         else:
             print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_whisper(args) -> int:
+    """Send a tactical whisper (natural-language hint) to hooks.
+
+    The text is parsed by whisper_bridge into a structured strategy/decide command
+    if it matches the protocol's CHOICE_KEYWORDS; otherwise it is recorded as an
+    audit-only hint (operator_hint) that hooks may read via _resolve_whisper_override.
+    """
+    state_dir = _resolve_state_dir(args.state_dir)
+    text = (args.text or "").strip()
+    role = getattr(args, "role", "user") or "user"
+    if not text:
+        print("error: --text must not be empty", flush=True)
+        return 2
+    wlog = WhisperLog(str(state_dir))
+    entry = wlog.append(role, text, origin="cli")
+    wid = entry.get("id")
+    ack_status = "unparsed"
+    applied = None
+    if role == "user":
+        # 把 operator_hint 写入 strategy，让 hooks 的 _resolve_whisper_override 兜底读取
+        StrategyStore(str(state_dir)).merge({"operator_hint": text})
+        # 尝试解析成结构化 strategy/decide（需要协议的 CHOICE_KEYWORDS）
+        try:
+            from aigenora.proto.whisper_bridge import parse_whisper_to_command
+            ck = None
+            pd = getattr(args, "protocol_dir", None)
+            if pd:
+                from aigenora.proto.loader import load_hooks
+                ck = getattr(load_hooks(pd), "CHOICE_KEYWORDS", None)
+            else:
+                # 从 daemon session.json 反查 protocol_dir
+                try:
+                    from aigenora.agent.web import resolve_protocol_dir
+                    rpd = resolve_protocol_dir(Path(args.state_dir))
+                    if rpd:
+                        from aigenora.proto.loader import load_hooks
+                        ck = getattr(load_hooks(rpd), "CHOICE_KEYWORDS", None)
+                except Exception:
+                    pass
+            cmd = parse_whisper_to_command(text, ck)
+            if cmd and cmd.get("type") == "strategy":
+                StrategyStore(str(state_dir)).merge(cmd["payload"], _meta={"origin": "whisper_bridge"})
+                ack_status = "executed"
+                applied = {"type": "strategy", "payload": cmd["payload"]}
+            elif cmd and cmd.get("type") == "decide":
+                payload = dict(cmd["payload"])
+                payload.setdefault("round", _snapshot_round_zero_indexed(state_dir))
+                r = submit_decision(str(state_dir), payload, origin="whisper_bridge")
+                if r.get("ok"):
+                    ack_status = "executed"
+                    applied = {"type": "decide", "payload": payload}
+                else:
+                    ack_status = "unparsed"
+        except Exception as exc:
+            ack_status = "error"
+            applied = {"error": str(exc)}
+        if wid and ack_status:
+            try:
+                wlog.append_ack(wid, status=ack_status,
+                                action=applied.get("type") if isinstance(applied, dict) else None,
+                                detail=json.dumps(applied.get("payload"), ensure_ascii=False) if isinstance(applied, dict) and applied.get("payload") else None)
+            except Exception:
+                pass
+    if getattr(args, "json_output", False):
+        print(json.dumps({"entry": entry, "ack_status": ack_status, "applied": applied}, ensure_ascii=False, indent=2))
+    else:
+        print(f"whisper [{wid}] ack={ack_status}", flush=True)
+        if applied:
+            print(f"  applied: {applied}", flush=True)
+        else:
+            print("  (recorded as audit-only hint; hooks may still read operator_hint)", flush=True)
+    return 0
+
+
+def _snapshot_round_zero_indexed(state_dir: Path) -> int:
+    """从 snapshot.json 读当前轮号（转 0-indexed）。读不到返回 0。"""
+    try:
+        from aigenora.proto.sdk import SnapshotBus
+        snap = SnapshotBus(str(state_dir)).read() or {}
+        r = snap.get("round")
+        return max(0, int(r) - 1) if r is not None else 0
+    except Exception:
+        return 0
 
 
 def cmd_abort(args) -> int:

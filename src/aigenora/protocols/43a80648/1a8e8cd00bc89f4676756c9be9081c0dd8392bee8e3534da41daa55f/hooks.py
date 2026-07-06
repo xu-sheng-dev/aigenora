@@ -18,9 +18,17 @@ CHOICES = ["rock", "paper", "scissors"]
 BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
 TERMINATIONS = ["first_to_win", "fixed_rounds"]
 CHOICE_LABEL = {"rock": "Rock", "paper": "Paper", "scissors": "Scissors"}
+# v015 whisper 桥：每个选项的中英别名，用于把 "一直出布" 解析成 fixed:paper
+CHOICE_KEYWORDS = {
+    "rock": ["rock", "石头", "石", "r"],
+    "paper": ["paper", "布", "纸", "p"],
+    "scissors": ["scissors", "剪刀", "剪", "s"],
+}
 
 
 class Hooks(ProtocolHooks):
+    CHOICE_KEYWORDS = CHOICE_KEYWORDS
+
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -66,20 +74,41 @@ class Hooks(ProtocolHooks):
             if mode == "fixed":
                 fixed = strat.get("fixed")
                 if fixed in CHOICES:
+                    self._emit_strategy_applied(round_index, strat, fixed)
                     return fixed
             elif mode == "seq":
                 seq = [x for x in strat.get("sequence", []) if x in CHOICES]
                 if seq:
-                    return seq[round_index % len(seq)]
-            return random.choice(CHOICES)
+                    pick = seq[round_index % len(seq)]
+                    self._emit_strategy_applied(round_index, strat, pick)
+                    return pick
+            # v015: 无显式 mode 或 mode=random 时，检查 whisper override（operator_hint）
+            if mode == "random":
+                override = self._resolve_whisper_override("round", round_index)
+                if override and override[0] in CHOICES:
+                    self._emit_strategy_applied(round_index, override[1], override[0])
+                    return override[0]
+            result = random.choice(CHOICES)
+            self._emit_strategy_applied(round_index, strat, result)
+            return result
+        # 无 strategy：也检查 whisper override
+        override = self._resolve_whisper_override("round", round_index)
+        if override and override[0] in CHOICES:
+            self._emit_strategy_applied(round_index, override[1], override[0])
+            return override[0]
         s = self.fallback_strategy
         if s in CHOICES:
+            self._emit_strategy_applied(round_index, None, s)
             return s
         if s.startswith("seq:"):
             seq = [x for x in s[4:].split(",") if x in CHOICES]
             if seq:
-                return seq[round_index % len(seq)]
-        return random.choice(CHOICES)
+                pick = seq[round_index % len(seq)]
+                self._emit_strategy_applied(round_index, None, pick)
+                return pick
+        result = random.choice(CHOICES)
+        self._emit_strategy_applied(round_index, None, result)
+        return result
 
     def _pick(self, round_index: int) -> str:
         auto = self._pick_auto(round_index)
@@ -142,7 +171,7 @@ class Hooks(ProtocolHooks):
             "game_winner": game_winner,
         }
         self._record_round(round_index, host_value, guest_value, winner, over, game_winner)
-        return HookResult(resp, game_over=over)
+        return HookResult(resp, completed=over)
 
     def _evaluate_termination(self, round_index: int) -> tuple[bool, str]:
         # round_index starts from 0, completed rounds = round_index + 1
