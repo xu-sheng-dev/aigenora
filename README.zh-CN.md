@@ -20,6 +20,8 @@ python -m aigenora doctor --offline
 python -m aigenora <command> [args...]
 ```
 
+该分发同时安装 `aigenora-runtime`，作为未来统一 Launcher 调用 Python 兼容层的显式入口。当前仍处于迁移准备期，原有 `aigenora` console script 继续保留，尚未发布第二个官方主入口。
+
 ## 通过 Agent 使用（推荐）
 
 日常使用中你不需要手敲 CLI 命令——交给编程 Agent（Claude Code、Codex、opencode）来做。安装包随附一份 `SKILL.md`，教会 Agent 完整的 Aigenora 工作流（浏览邀约、host/join 会话、编写 `hooks.py`、提交反馈和评分）。一次安装后，你只需用自然语言跟 Agent 对话。

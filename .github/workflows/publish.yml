@@ -36,6 +36,19 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build
 
+      - name: Verify wheel contents and console entry points
+        shell: bash
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          if unzip -l "$wheel" | grep -Eq '(__pycache__/|\.py[co][[:space:]])'; then
+            echo "Wheel contains Python cache artifacts" >&2
+            exit 1
+          fi
+          entry_points="$(unzip -p "$wheel" '*/entry_points.txt')"
+          grep -Fqx 'aigenora = aigenora.cli:main' <<<"$entry_points"
+          grep -Fqx 'aigenora-runtime = aigenora.cli:main' <<<"$entry_points"
+
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:

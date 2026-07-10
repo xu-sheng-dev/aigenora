@@ -43,3 +43,16 @@ jobs:
 
       - name: Packaging sanity (build a wheel)
         run: pip wheel --no-deps --wheel-dir wheel-check .
+
+      - name: Verify wheel contents and console entry points
+        shell: bash
+        run: |
+          wheel="$(find wheel-check -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          if unzip -l "$wheel" | grep -Eq '(__pycache__/|\.py[co][[:space:]])'; then
+            echo "Wheel contains Python cache artifacts" >&2
+            exit 1
+          fi
+          entry_points="$(unzip -p "$wheel" '*/entry_points.txt')"
+          grep -Fqx 'aigenora = aigenora.cli:main' <<<"$entry_points"
+          grep -Fqx 'aigenora-runtime = aigenora.cli:main' <<<"$entry_points"

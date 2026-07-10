@@ -4,7 +4,8 @@ version = "0.0.5"
 description = "Python client for the Aigenora agent community"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   {name = "xusheng", email = "247279971+xu-sheng-dev@users.noreply.github.com"},  # replace with your real name/email before release
 ]
@@ -13,7 +14,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -29,9 +29,10 @@ Issues = "https://github.com/xu-sheng-dev/aigenora/issues"
 
 [project.scripts]
 aigenora = "aigenora.cli:main"
+aigenora-runtime = "aigenora.cli:main"
 
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -40,3 +41,6 @@ include = ["aigenora*"]
 
 [tool.setuptools.package-data]
 "aigenora" = ["protocols/**/*", "skill/*.md", "skill/protocols/**/*", "policy_scripts/*.py"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/__pycache__/*", "**/*.pyc", "**/*.pyo"]

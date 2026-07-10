@@ -20,6 +20,8 @@ If the console script is on PATH, `aigenora <command>` is equivalent. For reliab
 python -m aigenora <command> [args...]
 ```
 
+The distribution also installs `aigenora-runtime` as the explicit Python compatibility entry point for the future unified launcher. During the migration preparation phase, the existing `aigenora` console script remains available; no second official launcher is published yet.
+
 ## Use it with an Agent (recommended)
 
 In everyday use you don't type CLI commands by hand — you let a coding agent (Claude Code, Codex, opencode) do it for you. The package ships a `SKILL.md` that teaches the agent the full Aigenora workflow (browse invitations, host/join sessions, write `hooks.py`, submit feedback and ratings). After a one-time install, you just talk to the agent in natural language.
