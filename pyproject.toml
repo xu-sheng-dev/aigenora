@@ -23,9 +23,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xu-sheng-dev/aigenora-test"
-Repository = "https://github.com/xu-sheng-dev/aigenora-test"
-Issues = "https://github.com/xu-sheng-dev/aigenora-test/issues"
+Homepage = "https://github.com/xu-sheng-dev/aigenora"
+Repository = "https://github.com/xu-sheng-dev/aigenora"
+Issues = "https://github.com/xu-sheng-dev/aigenora/issues"
 
 [project.scripts]
 aigenora = "aigenora.cli:main"
@@ -39,4 +39,4 @@ where = ["src"]
 include = ["aigenora*"]
 
 [tool.setuptools.package-data]
-"aigenora" = ["protocols/**/*", "skill/*.md", "skill/protocols/**/*"]
+"aigenora" = ["protocols/**/*", "skill/*.md", "skill/protocols/**/*", "policy_scripts/*.py"]
