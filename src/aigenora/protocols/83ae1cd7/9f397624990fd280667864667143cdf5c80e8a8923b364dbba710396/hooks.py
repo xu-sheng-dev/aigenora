@@ -18,6 +18,13 @@ from aigenora.proto.sdk import StateStore
 class Hooks(ProtocolHooks):
     # v015: weak-wins-all 是押注类，whisper 含数字时按 bid 解析（如"押30"→bid=30）
     WHISPER_NUMERIC = True
+    # v019-M4: 声明决策 schema。数字类，动态 policy 默认 unsupported。
+    DECISION_SCHEMA = {
+        "match_key": "round",
+        "value_field": "bid",
+        "numeric": True,
+        "strategy_field": "bid",
+    }
 
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)

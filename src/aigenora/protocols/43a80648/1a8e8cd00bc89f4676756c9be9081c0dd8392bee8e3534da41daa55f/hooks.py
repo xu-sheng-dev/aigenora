@@ -28,6 +28,15 @@ CHOICE_KEYWORDS = {
 
 class Hooks(ProtocolHooks):
     CHOICE_KEYWORDS = CHOICE_KEYWORDS
+    # v019-M4: 声明决策 schema。beats 由本协议 run_policy 解释，引擎不读。
+    DECISION_SCHEMA = {
+        "match_key": "round",
+        "value_field": "choice",
+        "choices": CHOICE_KEYWORDS,
+        "strategy_field": "fixed",
+        "policy_family": "rps",
+        "beats": BEATS,
+    }
 
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
@@ -46,6 +55,7 @@ class Hooks(ProtocolHooks):
         self.host_wins = 0
         self.guest_wins = 0
         self.fallback_strategy: str = args[0] if args else "random"
+        self._last_round_context: dict | None = None  # v019-M4: 缓存上一轮 context
         self.snapshot.update(
             score={"host": 0, "guest": 0},
             round=1,
@@ -53,6 +63,59 @@ class Hooks(ProtocolHooks):
             termination=self.termination,
             rounds_to_win=self.rounds_to_win,
         )
+
+    # v019-M4: 动态策略 context 与 run_policy
+
+    def build_decision_context(self, match_key: str, match_value: Any) -> dict:
+        """提供上一轮 self/opponent 动作与结果。优先读内存缓存。"""
+        if self._last_round_context:
+            ctx = dict(self._last_round_context)
+            ctx["match_key"] = match_key
+            ctx["match_value"] = match_value
+            ctx["value_field"] = "choice"
+            ctx["legal_values"] = CHOICES
+            ctx["supported"] = True
+            return ctx
+        # 回退：读 details.jsonl 末尾一条
+        last = self._read_last_details(1)
+        if last:
+            host_c = last.get("host_choice")
+            guest_c = last.get("guest_choice")
+            if host_c and guest_c:
+                winner = last.get("winner")
+                self_role = "host" if self.role == "host" else "guest"
+                opp_role = "guest" if self_role == "host" else "host"
+                return {
+                    "supported": True,
+                    "match_key": match_key, "match_value": match_value,
+                    "value_field": "choice", "legal_values": CHOICES,
+                    "previous": {
+                        "self": {"choice": host_c if self_role == "host" else guest_c},
+                        "opponent": {"choice": guest_c if self_role == "host" else host_c},
+                        "result": "win" if winner == self_role else ("loss" if winner and winner != self_role else "draw"),
+                    },
+                    "history": [],
+                }
+        return {"supported": False, "reason": "no_context"}
+
+    def run_policy(self, strategy: dict, context: dict) -> dict:
+        """RPS 内置策略：mirror/counter/repeat。读 DECISION_SCHEMA.beats 算克制。"""
+        if not context.get("supported"):
+            return {"ok": False, "reason": "unsupported_context"}
+        policy = strategy.get("policy")
+        beats = self.DECISION_SCHEMA.get("beats", {})
+        opp = context.get("previous", {}).get("opponent", {}).get("choice")
+        if not opp:
+            return {"ok": False, "reason": "no_context"}
+        if policy == "mirror_previous_opponent":
+            return {"ok": True, "decision": {"choice": opp}}
+        if policy == "counter_previous_opponent":
+            counter = next((k for k, v in beats.items() if v == opp), None)
+            return {"ok": True, "decision": {"choice": counter}} if counter else {"ok": False, "reason": "no_counter"}
+        if policy == "repeat_own_previous":
+            own = context.get("previous", {}).get("self", {}).get("choice")
+            return {"ok": True, "decision": {"choice": own}} if own else {"ok": False, "reason": "no_context"}
+        return {"ok": False, "reason": "unknown_policy"}
 
     def proto_host_metadata(self):
         return (
@@ -193,6 +256,16 @@ class Hooks(ProtocolHooks):
     def _record_round(self, round_index: int, host_choice: str, guest_choice: str,
                       winner: str, over: bool, game_winner: str) -> None:
         rd = round_index + 1
+        # v019-M4: 缓存上一轮 context，供 build_decision_context 读内存
+        self_role = "host" if self.role == "host" else "guest"
+        opp_role = "guest" if self_role == "host" else "host"
+        self_c = host_choice if self_role == "host" else guest_choice
+        opp_c = guest_choice if self_role == "host" else host_choice
+        result = "win" if winner == self_role else ("loss" if winner and winner != self_role and winner != "draw" else "draw")
+        self._last_round_context = {
+            "previous": {"self": {"choice": self_c}, "opponent": {"choice": opp_c}, "result": result},
+            "history": [],  # 完整 history 由 details.jsonl 补，这里只缓存最近一条
+        }
         self.details.append(
             type="round_result",
             round=rd,

@@ -2,23 +2,37 @@
 
 Introduced in v005a: ensures the web side also runs finalized checks, match_key validation,
 idempotent deduplication, and audit _meta.
+
+v019-M1: match key 解析改为 body 显式优先于 state.json；支持 round/turn/attempt/action_seq；
+为每条 record 补 _meta.decision_id。
 """
 from __future__ import annotations
 
 import json
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from aigenora.proto.sdk import DecisionBus
 
+# v019-M1: 支持的 match key 字段（schema 声明可覆盖，这里给默认集合）
+_MATCH_KEY_FIELDS = ("round", "turn", "attempt", "action_seq")
+
 
 def _find_match_key(state_dir: str | Path, decision: dict) -> tuple[str | None, Any]:
-    """Extract match_key/match_value from state.json or the decision.
+    """Extract match_key/match_value.
 
-    Ignores _meta and all top-level keys starting with an underscore.
+    v019-M1: body 显式含 round/turn/attempt/action_seq 时，body 优先；
+    body 无 match key 时，才读 decision/state.json。
+    忽略 _meta 和所有以 _ 开头的顶层键。
     """
+    # 1. body 显式 match key 优先
+    for key in _MATCH_KEY_FIELDS:
+        if key in decision and not key.startswith("_") and decision[key] is not None:
+            return key, decision[key]
+    # 2. 回退到 state.json
     p = Path(state_dir)
     state_file = p / "decision" / "state.json"
     if state_file.exists():
@@ -30,11 +44,6 @@ def _find_match_key(state_dir: str | Path, decision: dict) -> tuple[str | None, 
                 return mk, mv
         except (json.JSONDecodeError, OSError):
             pass
-    for key, value in decision.items():
-        if key.startswith("_"):
-            continue
-        if key in ("round", "attempt"):
-            return key, value
     return None, None
 
 
@@ -47,10 +56,11 @@ def submit_decision(
     idempotency_key: str | None = None,
     caused_by_whisper_id: str | None = None,
     require_match_key: bool = False,
+    target_policy: str | None = None,
 ) -> dict:
     """Unified decision submission.
 
-    Returns {ok, status, reason, match_key, match_value}
+    Returns {ok, status, reason, match_key, match_value, decision_id}
       status: "ok" | "rejected"
       reason: None | "match_key_required" | "decision_finalized" | "duplicate_idempotency"
     """
@@ -64,6 +74,7 @@ def submit_decision(
             "reason": "match_key_required",
             "match_key": None,
             "match_value": None,
+            "decision_id": None,
         }
 
     if match_key is not None:
@@ -75,6 +86,7 @@ def submit_decision(
                 "reason": "decision_finalized",
                 "match_key": match_key,
                 "match_value": match_value,
+                "decision_id": None,
             }
 
     if idempotency_key and agent_id:
@@ -98,16 +110,21 @@ def submit_decision(
                             "reason": "duplicate_idempotency",
                             "match_key": match_key,
                             "match_value": match_value,
+                            "decision_id": meta.get("decision_id"),
                         }
             except OSError:
                 pass
 
+    # v019-M1: 为每条 record 生成 decision_id
+    decision_id = f"dec_{uuid.uuid4().hex[:16]}"
     decision = dict(decision)
     decision["_meta"] = {
+        "decision_id": decision_id,
         "origin": origin,
         "agent_id": agent_id,
         "idempotency_key": idempotency_key,
         "caused_by_whisper_id": caused_by_whisper_id,
+        "target_policy": target_policy,
         "request_ts": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -119,4 +136,5 @@ def submit_decision(
         "reason": None,
         "match_key": match_key,
         "match_value": match_value,
+        "decision_id": decision_id,
     }

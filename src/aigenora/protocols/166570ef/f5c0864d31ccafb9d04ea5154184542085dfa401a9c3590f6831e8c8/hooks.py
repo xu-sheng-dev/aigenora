@@ -10,6 +10,14 @@ from aigenora.proto.sdk import StateStore
 
 
 class Hooks(ProtocolHooks):
+    # v019-M4: 声明决策 schema。match_key=attempt，value_field=number（不是 bid）。
+    DECISION_SCHEMA = {
+        "match_key": "attempt",
+        "value_field": "number",
+        "numeric": True,
+        "strategy_field": "number",
+    }
+
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)

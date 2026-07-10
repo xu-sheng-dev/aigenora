@@ -411,6 +411,82 @@ The built-in RPS (v004 standard) uses `decision.mode = "auto"` and **does not ac
 
 The legacy RPS (v1 deprecated) allowed `extra_args` such as `rock` directly; v004 dropped this. The note is kept here to prevent agents from copying the old pattern. Whether other protocols integrate StrategyStore depends on their own `hooks.py`; do not assume all built-in protocols support real-time strategy files.
 
+### Dynamic Policy Interfaces (v019)
+
+v019 lets protocols support "dynamic command at will" (mirror previous, counter previous, probability distributions, conditional branches). **The engine does not hardcode any game rules** — strategy logic is implemented by the protocol; the engine only provides the framework (sandbox + orchestration + channels).
+
+To support dynamic strategy, protocol authors override three interfaces (all have default empty implementations in the `ProtocolHooks` base class):
+
+#### 1. DECISION_SCHEMA (declare decision fields and rules)
+
+```python
+class Hooks(ProtocolHooks):
+    DECISION_SCHEMA = {
+        "match_key": "round",          # match key: round/turn/attempt/action_seq
+        "value_field": "choice",       # decision value field: choice/bid/number/action
+        "choices": {"rock": ["rock", "stone"], ...},  # enum options (optional)
+        "numeric": False,              # set True for numeric protocols
+        "policy_family": "rps",        # policy family (optional, protocol-defined)
+        "beats": {"rock": "scissors", "paper": "rock", "scissors": "paper"},  # counter relations (optional, protocol interprets, engine never reads)
+    }
+```
+
+`beats` / `policy_family` are protocol-layer declarations. **The engine never reads `beats`.** The protocol interprets them in its own `run_policy()`. Protocols without `policy_family` get `unsupported_policy` from the engine for `mode=policy`.
+
+#### 2. build_decision_context (provide current situation)
+
+```python
+def build_decision_context(self, match_key: str, match_value: Any) -> dict:
+    """Return current situation for policy runner / script. Default: unsupported."""
+    if not self._last_round_context:
+        return {"supported": False, "reason": "no_context"}
+    return {
+        "supported": True,
+        "match_key": match_key,
+        "match_value": match_value,
+        "value_field": "choice",
+        "legal_values": ["rock", "paper", "scissors"],
+        "previous": {
+            "self": {"choice": "paper"},
+            "opponent": {"choice": "scissors"},
+            "result": "loss",
+        },
+        "history": [...],
+    }
+```
+
+**IO contract**: prefer reading from in-memory cache (hooks caches previous round result to `self._last_round_context` in `_record_round`); when falling back to `details.jsonl`, use `self._read_last_details(n)` to seek only the last N lines, no full scan.
+
+#### 3. run_policy (protocol built-in strategy logic)
+
+```python
+def run_policy(self, strategy: dict, context: dict) -> dict:
+    """Protocol built-in policy (synchronous fast path). Default: unsupported_policy."""
+    policy = strategy.get("policy")
+    beats = self.DECISION_SCHEMA.get("beats", {})
+    opp = context.get("previous", {}).get("opponent", {}).get("choice")
+    if not opp:
+        return {"ok": False, "reason": "no_context"}
+    if policy == "mirror_previous_opponent":
+        return {"ok": True, "decision": {"choice": opp}}
+    if policy == "counter_previous_opponent":
+        counter = next((k for k, v in beats.items() if v == opp), None)
+        return {"ok": True, "decision": {"choice": counter}} if counter else {"ok": False, "reason": "no_counter"}
+    return {"ok": False, "reason": "unknown_policy"}
+```
+
+`run_policy` runs in-process, synchronous, no subprocess, millisecond-level. Only supports the protocol's preset strategies.
+
+#### mode=script (script producer, no hooks changes needed)
+
+If the protocol doesn't want to implement `run_policy`, or the user wants a strategy the protocol doesn't preset, use script producer: the user/agent writes a `.py` script in `<state_dir>/policy_scripts/`, activates with `mode=script`. The engine sandbox runs the script, passing context via JSON stdin, collecting decision via JSON stdout. **The protocol needs no code changes** — as long as `build_decision_context()` returns `supported=True`, scripts can read the situation.
+
+Script contract: see `aigenora/policy_scripts/README.md`. 4 built-in example scripts ship with the package.
+
+#### Mental poker boundary
+
+Mental poker (Crazy Eights / Briscola) **does not declare `policy_family`, does not support mirror/counter policy** — card games have no counter relations, and context must not leak the opponent's hand. Mental poker only supports explicit action decisions (user explicitly says "play this card").
+
 ### Mental Poker Fair Dealing
 
 The crux of card games is "hidden hands + a shared deck." If the Host is trusted to build the deck, the Host can single-handedly deal itself good cards and see the Guest's entire hand — such a protocol cannot stand. These two protocols use the engine-level **Mental Poker** mechanism for fair dealing, trusting neither side:

@@ -24,7 +24,11 @@ class ProtocolHooks(ABC):
     # 子类按需覆盖，形如 {"rock": ["rock", "石头", "r"], ...}。None 表示该协议不支持 whisper 解析。
     CHOICE_KEYWORDS: dict[str, list[str]] | None = None
     # 数字类协议（guess-number/weak-wins-all）设为 True，whisper 含数字时按数字解析
+    # v019-M2: dead code（bridge 从未读取），保留只为兼容；一律以 DECISION_SCHEMA.numeric 为准。
     WHISPER_NUMERIC: bool = False
+    # v019-M2: 协议声明决策 schema（当前代码库不存在，M2 全新引入）。子类按需覆盖。
+    # 形如 {"match_key":"round","value_field":"choice","choices":{...},"policy_family":"rps","beats":{...}}
+    DECISION_SCHEMA: dict[str, Any] | None = None
 
     def proto_init(
         self,
@@ -206,13 +210,17 @@ class ProtocolHooks(ABC):
     def _clear_timing_snapshot(self) -> None:
         self.snapshot.update(timing={})
 
-    # -- v012: hybrid 干预（auto 模式默认可干预，不阻塞） --
+    # -- v012/v019: hybrid 干预（auto 模式默认可干预，不阻塞） --
 
     def _consume_hybrid(self, match_key: str, match_value: Any) -> dict | None:
         """默认 hybrid 干预入口（auto 模式）：返回匹配的已提交 decision dict，无则 None。
 
+        v019-M1: 改用定向消费 consume_latest_for_match()，不再用 read_pending() 全量推进 offset，
+        避免当前轮读到未来轮 decision 时把未来 record 一并越过。同时发布 decision/state.json，
+        让 Web/CLI/producer 知道当前窗口；consumed/fallback 后写 finalized 关闭窗口。
+
         与 --coach 的 await_latest_decision 区别：**不等 max_think**。
-        - ``min_think_seconds == 0``（默认）：``read_pending`` 一次（非阻塞），无决策立即返回 None，
+        - ``min_think_seconds == 0``（默认）：定向消费一次（非阻塞），无决策立即返回 None，
           下一层用 auto 值——对局毫秒级自动推进，但人工通过 ``session decide`` 提前提交的决策
           会被读到并生效。
         - ``min_think_seconds > 0``：poll 到该秒数给一个干预窗口，到时仍无决策立即返回 None。
@@ -223,21 +231,325 @@ class ProtocolHooks(ABC):
         """
         if self.bus is None:
             return None
-        # hybrid 默认 min_think=0（毫秒级）；用户可通过 options.min_think_seconds 配短干预窗口。
-        # 不读 spec.timing.min_think_seconds（那是 --coach 的 hold 默认值，默认 1s 会拖慢 hybrid）。
+        from aigenora.proto.sdk import EventBus
+
+        bus = EventBus(self.state_dir)
         min_think = float(self.options.get("min_think_seconds", 0) or 0)
         poll = getattr(self.bus, "POLL_INTERVAL", 0.2)
+        now = time.monotonic()
+        release_at = now
+        deadline_at = now + min_think
+
+        # v019-M1: 发布当前窗口状态，让 Web/CLI 知道该写哪个 match_key/match_value
+        self.bus.publish_state({
+            "match_key": match_key,
+            "match_value": match_value,
+            "mode": "hybrid",
+            "release_at": release_at,
+            "deadline_at": deadline_at,
+            "waiting_for": "decision",
+        })
+        bus.emit("local_decision_window_started", data={
+            "match_key": match_key, "match_value": match_value,
+            "mode": "hybrid",
+            "release_at": release_at, "deadline_at": deadline_at,
+        })
+
+        # v019-M3: materialize 适用于当前窗口的 pending intents / active policy（M2/M3 接入点）
+        self._materialize_pending_intents(match_key, match_value)
+        self._materialize_active_policy(match_key, match_value)
+
+        # 定向消费（非阻塞或短窗口轮询）
+        def _try_consume() -> dict | None:
+            return self.bus.consume_latest_for_match(match_key, match_value, consumer_id=f"hybrid:{self.role}")
+
         if min_think > 0:
             deadline = time.monotonic() + min_think
             while time.monotonic() < deadline:
-                for d in self.bus.read_pending():
-                    if d.get(match_key) == match_value:
-                        return d
+                d = _try_consume()
+                if d is not None:
+                    self.bus.finalize_window(match_key, match_value, "consumed")
+                    bus.emit("local_decision_consumed", data={
+                        "match_key": match_key, "match_value": match_value,
+                        "decision": d, "origin": (d.get("_meta") or {}).get("origin"),
+                    })
+                    return d
                 time.sleep(poll)
-        for d in self.bus.read_pending():
-            if d.get(match_key) == match_value:
-                return d
+        d = _try_consume()
+        if d is not None:
+            self.bus.finalize_window(match_key, match_value, "consumed")
+            bus.emit("local_decision_consumed", data={
+                "match_key": match_key, "match_value": match_value,
+                "decision": d, "origin": (d.get("_meta") or {}).get("origin"),
+            })
+            return d
+
+        # 无 decision：fallback，写 finalized 关闭窗口
+        self.bus.finalize_window(match_key, match_value, "fallback")
+        bus.emit("local_decision_fallback", data={
+            "match_key": match_key, "match_value": match_value, "reason": "no_decision",
+        })
         return None
+
+    # v019-M2/M3 接入点：默认空实现，由 M2/M3 填充。先占位保证 _consume_hybrid 可调用。
+    def _materialize_pending_intents(self, match_key: str, match_value: Any) -> None:
+        """窗口打开时 materialize 适用于当前窗口的 pending intents。
+
+        v019-M2: 读取 InterventionIntentStore，把适用于当前窗口的 pending intent
+        落成 strategy/decision/policy。不得覆盖更高优先级 explicit decision。
+        """
+        try:
+            from aigenora.proto.intervention_intent import InterventionIntentStore
+            store = InterventionIntentStore(self.state_dir)
+            pending = store.pending_for_window(match_key, match_value)
+            for intent_rec in pending:
+                self._materialize_one_intent(intent_rec, match_key, match_value, store)
+        except Exception:
+            pass  # intent materialize 是辅助，不影响主流程
+
+    def _materialize_one_intent(self, intent_rec: dict, match_key: str, match_value: Any, store: Any) -> None:
+        """materialize 单条 intent。"""
+        from aigenora.proto.decide_gateway import submit_decision
+        from aigenora.proto.sdk import EventBus
+
+        intent_id = intent_rec.get("intent_id")
+        policy = intent_rec.get("policy")
+        value = intent_rec.get("value")
+        meta = intent_rec.get("_meta") or {}
+        bus = EventBus(self.state_dir)
+
+        try:
+            if policy is not None:
+                # 一次性策略 intent（如"下一轮克制对方上一轮"）：
+                # 目标窗口已打开，直接运行策略/脚本产出 decision。
+                # 先检查当前窗口是否已有显式 decision；若有，跳过（不覆盖人工临时战术）。
+                if self.bus is not None:
+                    existing = self.bus.peek_latest_for_match(match_key, match_value)
+                    if existing is not None and (existing.get("_meta") or {}).get("origin") not in ("policy_runner", "script_runner", None):
+                        store.mark(intent_id, "materialized", reason="explicit_decision_present")
+                        bus.emit("intent_materialized", data={"intent_id": intent_id, "reason": "explicit_decision_present"})
+                        return
+
+                # 构造 context 并运行策略
+                schema = self.get_decision_schema()
+                context = self.build_decision_context(match_key, match_value)
+                if not context.get("supported"):
+                    store.mark(intent_id, "failed", reason="unsupported_context")
+                    bus.emit("intent_failed", data={"intent_id": intent_id, "reason": "unsupported_context"})
+                    return
+
+                policy_mode = policy.get("mode", "policy")
+                if policy_mode == "script":
+                    # 脚本策略：经引擎沙箱运行
+                    from aigenora.proto import script_runner
+                    timeout_ms = int(policy.get("timeout_ms", 1000))
+                    result = script_runner.run_script(
+                        policy, context, state_dir=str(self.state_dir), schema=schema, timeout_ms=timeout_ms,
+                    )
+                else:
+                    # 内置策略：调协议 run_policy
+                    result = self.run_policy(policy, context)
+
+                if not result.get("ok"):
+                    reason = result.get("reason", "unknown")
+                    store.mark(intent_id, "failed", reason=reason)
+                    bus.emit("intent_failed", data={"intent_id": intent_id, "reason": reason})
+                    return
+
+                decision = result.get("decision") or {}
+                mk_field = schema.get("match_key", match_key)
+                if mk_field not in decision:
+                    decision[mk_field] = match_value
+                elif decision[mk_field] != match_value:
+                    store.mark(intent_id, "failed", reason="match_mismatch")
+                    bus.emit("intent_failed", data={"intent_id": intent_id, "reason": "match_mismatch"})
+                    return
+
+                origin = "script_runner" if policy_mode == "script" else "policy_runner"
+                res = submit_decision(
+                    str(self.state_dir), decision,
+                    origin=origin, agent_id=meta.get("agent_id"),
+                    caused_by_whisper_id=meta.get("caused_by_whisper_id"),
+                    require_match_key=True,
+                )
+                if res.get("ok"):
+                    store.mark(intent_id, "materialized", reason="policy_decision_written",
+                               detail={"decision_id": res.get("decision_id")})
+                    bus.emit("intent_materialized", data={
+                        "intent_id": intent_id, "decision_id": res.get("decision_id"),
+                        "match_key": match_key, "match_value": match_value, "origin": origin,
+                    })
+                    bus.emit("policy_generated", data={
+                        "match_key": match_key, "match_value": match_value,
+                        "decision": decision, "decision_id": res.get("decision_id"),
+                        "origin": origin, "reason": result.get("reason"),
+                        "source": "intent",
+                    })
+                else:
+                    store.mark(intent_id, "failed", reason=res.get("reason") or "submit_failed")
+                    bus.emit("intent_failed", data={"intent_id": intent_id, "reason": res.get("reason")})
+                return
+
+            if value is not None:
+                # 固定值 intent → 写 decision
+                res = submit_decision(
+                    str(self.state_dir),
+                    {match_key: match_value, **value},
+                    origin="intent_materialize",
+                    agent_id=meta.get("agent_id"),
+                    caused_by_whisper_id=meta.get("caused_by_whisper_id"),
+                    require_match_key=True,
+                )
+                if res.get("ok"):
+                    store.mark(intent_id, "materialized", reason="decision_written", detail={"decision_id": res.get("decision_id")})
+                    bus.emit("intent_materialized", data={"intent_id": intent_id, "decision_id": res.get("decision_id"), "match_key": match_key, "match_value": match_value})
+                else:
+                    store.mark(intent_id, "failed", reason=res.get("reason") or "submit_failed")
+                    bus.emit("intent_failed", data={"intent_id": intent_id, "reason": res.get("reason")})
+        except Exception as e:
+            store.mark(intent_id, "failed", reason=f"exception:{type(e).__name__}")
+            bus.emit("intent_failed", data={"intent_id": intent_id, "reason": str(e)})
+
+    def _materialize_active_policy(self, match_key: str, match_value: Any) -> None:
+        """v019-M3: 窗口打开时 materialize active policy/script 为当前窗口 decision。
+
+        引擎编排（不含策略逻辑）：
+        1. 读 StrategyStore，若 mode 不是 policy/script，返回。
+        2. 先检查当前窗口是否已有未消费的显式 decision；若有，skip。
+        3. 调 build_decision_context() 构造 context（协议负责）。
+        4. mode=policy → 调 self.run_policy()（协议实现）。
+           mode=script → 调 script_runner.run_script()（引擎沙箱）。
+        5. 校验输出 decision，调 submit_decision() 写入。
+        """
+        try:
+            from aigenora.proto.sdk import EventBus
+            from aigenora.proto.decide_gateway import submit_decision
+            from aigenora.proto import script_runner
+
+            strat = self.strategy.read() or {}
+            mode = strat.get("mode")
+            if mode not in ("policy", "script"):
+                return
+
+            bus = EventBus(self.state_dir)
+
+            # 1. 已有显式 decision 则 skip
+            if self.bus is not None:
+                existing = self.bus.peek_latest_for_match(match_key, match_value)
+                if existing is not None and (existing.get("_meta") or {}).get("origin") not in ("policy_runner", "script_runner", None):
+                    bus.emit("policy_skipped", data={
+                        "match_key": match_key, "match_value": match_value,
+                        "reason": "explicit_decision_present",
+                    })
+                    return
+
+            # 2. 构造 context
+            schema = self.get_decision_schema()
+            context = self.build_decision_context(match_key, match_value)
+            if not context.get("supported"):
+                bus.emit("policy_failed", data={
+                    "match_key": match_key, "match_value": match_value,
+                    "reason": "unsupported_context",
+                })
+                return
+
+            # 3. 运行策略
+            if mode == "policy":
+                result = self.run_policy(strat, context)
+            else:
+                timeout_ms = int(strat.get("timeout_ms", 1000))
+                result = script_runner.run_script(
+                    strat, context, state_dir=str(self.state_dir), schema=schema, timeout_ms=timeout_ms,
+                )
+
+            # 4. 处理结果
+            if not result.get("ok"):
+                reason = result.get("reason", "unknown")
+                event_name = "policy_timeout" if reason == "policy_timeout" else "policy_failed"
+                bus.emit(event_name, data={
+                    "match_key": match_key, "match_value": match_value,
+                    "reason": reason, "script_id": strat.get("script_id"),
+                })
+                return
+
+            decision = result.get("decision") or {}
+            # 5. 校验 match key/value
+            mk_field = schema.get("match_key", match_key)
+            if mk_field not in decision:
+                decision[mk_field] = match_value
+            elif decision[mk_field] != match_value:
+                bus.emit("policy_failed", data={
+                    "match_key": match_key, "match_value": match_value,
+                    "reason": "match_mismatch", "got": decision[mk_field],
+                })
+                return
+
+            # 6. 写入 decision
+            origin = "policy_runner" if mode == "policy" else "script_runner"
+            res = submit_decision(
+                str(self.state_dir), decision,
+                origin=origin, agent_id=strat.get("_meta", {}).get("agent_id"),
+                caused_by_whisper_id=strat.get("_meta", {}).get("caused_by_whisper_id"),
+                require_match_key=True,
+            )
+            if res.get("ok"):
+                bus.emit("policy_generated", data={
+                    "match_key": match_key, "match_value": match_value,
+                    "decision": decision, "decision_id": res.get("decision_id"),
+                    "origin": origin, "reason": result.get("reason"),
+                })
+            else:
+                bus.emit("policy_failed", data={
+                    "match_key": match_key, "match_value": match_value,
+                    "reason": res.get("reason") or "submit_failed",
+                })
+        except Exception:
+            pass  # policy materialize 是辅助，不影响主流程
+
+    # -- v019-M3: 协议策略接口（默认实现，协议覆盖） --
+
+    def get_decision_schema(self) -> dict:
+        """返回协议的 DECISION_SCHEMA。无 schema 时从 CHOICE_KEYWORDS 兼容生成。"""
+        if self.DECISION_SCHEMA:
+            return self.DECISION_SCHEMA
+        if self.CHOICE_KEYWORDS:
+            return {"match_key": "round", "value_field": "choice", "choices": self.CHOICE_KEYWORDS}
+        return {}
+
+    def build_decision_context(self, match_key: str, match_value: Any) -> dict:
+        """构造决策上下文。默认返回 unsupported；协议覆盖后提供历史/合法动作。
+
+        IO 契约：优先读内存缓存（self._last_round_context），回退 details.jsonl 只 seek 末尾 N 行。
+        """
+        return {"supported": False, "reason": "unsupported_context"}
+
+    def run_policy(self, strategy: dict, context: dict) -> dict:
+        """协议内置策略逻辑（同步快路径）。默认返回 unsupported_policy。
+
+        引擎不解释 policy 字符串、不读 beats；由协议自己实现 mirror/counter/repeat 等。
+        """
+        return {"ok": False, "reason": "unsupported_policy"}
+
+    def _read_last_details(self, n: int = 1) -> list[dict]:
+        """基类 helper：seek 读 details.jsonl 末尾 N 行，不全量扫描。"""
+        import json as _json
+        fp = Path(self.state_dir) / "details.jsonl"
+        if not fp.exists():
+            return []
+        try:
+            lines = fp.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        result = []
+        for line in lines[-n:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                result.append(_json.loads(line))
+            except _json.JSONDecodeError:
+                continue
+        return result
 
     # -- v015: whisper 桥 + 战术生效反馈 --
 

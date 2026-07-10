@@ -72,6 +72,7 @@ def resolve_protocol_dir(root_dir: str | Path) -> Path | None:
       from the subprocess via the peer_joined event (see join._join emitting it and
       _run_daemon reading startup_data["protocol_dir"] into session_meta).
     - Also covers the case where a session.json exists in the child directory.
+    - v019-M2: 当传入的是业务子目录（child state_dir）时，向上查找 parent session.json。
 
     Returns None if it cannot be resolved. The web side uses this to decide whether /api/ui-available is true.
     """
@@ -83,6 +84,13 @@ def resolve_protocol_dir(root_dir: str | Path) -> Path | None:
         eff = root
     if eff != root:
         candidates.append(eff / "session.json")
+    # v019-M2: 向上查找 parent session.json（child state_dir 场景）
+    parent = root.parent
+    for _ in range(3):  # 最多向上 3 层
+        if parent == root or parent == parent.parent:
+            break
+        candidates.append(parent / "session.json")
+        parent = parent.parent
     for sj in candidates:
         if not sj.exists():
             continue
@@ -1320,34 +1328,45 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                     applied = None
                     if role == "user":
                         StrategyStore(cur).merge({"operator_hint": text})
-                        # v015: 尝试把 whisper 解析成结构化 strategy/decide，让 whisper 真正影响游戏
-                        # 注意：用 merge 而非 write，保留 operator_hint 审计字段
+                        # v019-M2: 用 parse_whisper_to_intent + materialize_intent 替代旧 parse_whisper_to_command
+                        # 修复 round:null、setdefault 覆盖、Coin ack=unparsed 等问题
                         try:
-                            from aigenora.proto.whisper_bridge import parse_whisper_to_command
-                            ck = None
+                            from aigenora.proto.whisper_bridge import parse_whisper_to_intent, materialize_intent
+                            # 读协议 DECISION_SCHEMA（而非只读 CHOICE_KEYWORDS）
+                            schema = None
+                            cur_match_key = "round"
+                            cur_match_value = _current_round(cur)
                             try:
                                 pd = resolve_protocol_dir(cur)
                                 if pd:
                                     from aigenora.proto.loader import load_hooks
                                     h = load_hooks(pd)
-                                    ck = getattr(h, "CHOICE_KEYWORDS", None)
+                                    schema = getattr(h, "DECISION_SCHEMA", None)
+                                    if schema and schema.get("match_key"):
+                                        cur_match_key = schema["match_key"]
                             except Exception:
                                 pass
-                            cmd = parse_whisper_to_command(text, ck)
-                            if cmd and cmd.get("type") == "strategy":
-                                # merge 保留 operator_hint；payload 形如 {"mode":"fixed","fixed":"rock"}
-                                StrategyStore(cur).merge(cmd["payload"], _meta={"origin": "whisper_bridge"})
-                                ack_status = "executed"
-                                applied = {"type": "strategy", "payload": cmd["payload"]}
-                            elif cmd and cmd.get("type") == "decide":
-                                payload = dict(cmd["payload"])
-                                payload.setdefault("round", _current_round(cur))
-                                r = submit_decision(str(cur), payload, origin="whisper_bridge")
-                                if r.get("ok"):
-                                    ack_status = "executed"
-                                    applied = {"type": "decide", "payload": payload}
-                                else:
-                                    ack_status = "unparsed"
+                            # 从 decision/state.json 读当前窗口
+                            try:
+                                state_fp = Path(cur) / "decision" / "state.json"
+                                if state_fp.exists():
+                                    st = json.loads(state_fp.read_text(encoding="utf-8"))
+                                    if st.get("match_key"):
+                                        cur_match_key = st["match_key"]
+                                    if st.get("match_value") is not None:
+                                        cur_match_value = st["match_value"]
+                            except Exception:
+                                pass
+                            ck = schema.get("choices") if schema else None
+                            intent = parse_whisper_to_intent(text, schema, choice_keywords=ck, match_key=cur_match_key, match_value=cur_match_value)
+                            if intent is not None:
+                                result = materialize_intent(
+                                    intent, state_dir=str(cur), origin="whisper_bridge",
+                                    agent_id=body.get("agent_id"), whisper_id=entry.get("id"),
+                                    current_match_key=cur_match_key, current_match_value=cur_match_value,
+                                )
+                                ack_status = result.get("ack_status", "unparsed")
+                                applied = result.get("applied")
                             else:
                                 ack_status = "unparsed"
                         except Exception:
@@ -1358,7 +1377,7 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                                 WhisperLog(cur).append_ack(
                                     entry.get("id"), status=ack_status,
                                     action=applied.get("type") if applied else None,
-                                    detail=json.dumps(applied.get("payload"), ensure_ascii=False) if applied else None,
+                                    detail=json.dumps(applied, ensure_ascii=False) if applied else None,
                                 )
                             except Exception:
                                 pass

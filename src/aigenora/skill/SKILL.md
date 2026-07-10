@@ -564,6 +564,114 @@ Other protocols' strategy schemas are defined by their respective authors and ar
 
 **Why not `session decide`?** `decide` is for **one-off decisions** (one per round, requires Host `--coach` to enable DecisionBus), suitable for "what to play this hand" temporary intervention; `strategy` is a **persistent strategy** that hooks read every time a choice is needed, suitable for "follow this plan going forward" overall planning. Both mechanisms coexist; choose based on scenario.
 
+### Dynamic Policy & Script Producer (v019)
+
+Fixed strategies (`fixed`/`seq`) and one-off decisions (`decide`) cannot cover "dynamic command at will" — e.g. "mirror opponent's previous move", "60% chance to mirror, rest split evenly", "counter only if opponent repeats twice". These require **reading the current situation each round and computing a decision**, not a fixed value.
+
+v019 introduces three types of dynamic strategy, all activated via `strategy.json` or `/api/whisper`:
+
+#### Three intervention inputs
+
+| Type | Trigger | Channel | Use case |
+|---|---|---|---|
+| Persistent fixed strategy | `always play rock` | `StrategyStore` mode=fixed | Fixed value, persists |
+| One-off decision | `next round play rock` | `DecisionBus` future decision | Specific value for a target window |
+| Dynamic policy/script | `mirror opponent's previous` | `StrategyStore` mode=policy/script | Compute decision each round from situation |
+
+#### mode=policy (protocol built-in policy)
+
+A few fixed strategy logics built into the protocol (e.g. RPS mirror/counter/repeat), implemented by the protocol hooks' `run_policy()`:
+
+```bash
+# Activate "counter opponent's previous move" (RPS)
+python -m aigenora session strategy --state-dir <state_dir> --set '{"mode":"policy","policy":"counter_previous_opponent"}'
+
+# Or via whisper
+curl -X POST http://127.0.0.1:<port>/api/whisper -d '{"text":"always counter opponent previous"}'
+```
+
+When a window opens, the engine calls the protocol's `run_policy()`, reads the opponent's previous move + `DECISION_SCHEMA.beats` to compute the counter move, and produces a decision. No subprocess, millisecond-level. Only supports the protocol's preset strategies.
+
+#### mode=script (script producer, core capability)
+
+**This is the core mechanism for "dynamic command at will".** The agent/user writes a `.py` script; the engine sandbox executes it each time a window opens:
+
+```bash
+# Activate a script strategy (with params)
+python -m aigenora session strategy --state-dir <state_dir> --set '{"mode":"script","script_id":"weighted_mirror","params":{"mirror_weight":0.6}}'
+```
+
+**Script location** (engine search order):
+
+1. **User local** (priority): `<state_dir>/policy_scripts/<script_id>.py` — agent can drop it in anytime
+2. **Built-in examples** (fallback): shipped with the `aigenora` package, `script_id` usable directly
+
+**Built-in example scripts** (available after install):
+
+| script_id | Game | Function |
+|---|---|---|
+| `weighted_mirror` | RPS/Coin | Mirror opponent's previous with weighted probability (`params.mirror_weight`) |
+| `counter_once` | RPS | One-off counter opponent's previous (reads `schema.beats`) |
+| `conditional_counter` | RPS | Conditional branch (counter only if opponent repeats twice) |
+| `adaptive_bid` | Weak Wins All | Adaptive bidding (if opp bid higher, bid opp-1 to weak-win) |
+
+**Script contract**:
+
+- Input: JSON stdin, containing `{schema, context, strategy, params}`
+  - `context`: current situation (previous self/opponent moves, legal values, history)
+  - `params`: user-supplied parameters (e.g. probability weights, thresholds)
+- Output: JSON stdout, `{"decision":{"choice":"rock"},"reason":"..."}`
+- Constraints: no importing hooks, no P2P messages, hard timeout (default 1000ms, fallback on timeout)
+- Full contract: see `aigenora/policy_scripts/README.md`
+
+**Full agent path for landing a macro decision**:
+
+```
+User says "from now on 60% chance mirror opponent, rest split"
+    ↓
+[Agent understands intent] ← engine doesn't do this
+Agent knows the package has weighted_mirror script
+    ↓
+Agent calls /api/strategy to activate:
+  {"mode":"script","script_id":"weighted_mirror","params":{"mirror_weight":0.6}}
+    ↓
+[Engine takes over] each window open:
+  calls build_decision_context() to get opponent's previous move
+  → sandbox runs weighted_mirror.py
+  → script picks mirror or split by 0.6 probability
+  → outputs decision → writes to DecisionBus → game consumes
+```
+
+If the user wants a strategy not in the package, the agent writes its own script and drops it in `<state_dir>/policy_scripts/`. The engine runs it the same way. Local scripts take priority over built-in ones with the same name.
+
+#### One-off strategy command (e.g. "next round counter opponent's previous")
+
+This is a **once + strategy computation** — used once, but the value must be computed when the window opens by reading the situation. It goes to `InterventionIntentStore`, materializes when the target window opens (runs policy/script once, produces decision, done):
+
+```bash
+curl -X POST http://127.0.0.1:<port>/api/whisper -d '{"text":"next round counter opponent previous"}'
+# ack: intent_queued → target window materialize → decision → done
+```
+
+#### Priority rule
+
+If the same window has both an explicit decision (Web/CLI/human) and a dynamic-strategy-generated decision, **the explicit decision wins**. Dynamic strategy does not override the user's temporary tactics.
+
+#### ack states
+
+Whisper ack upgraded from coarse `executed/unparsed` to fine-grained status:
+
+| ack | Meaning |
+|---|---|
+| `strategy_active` | Fixed/sequence strategy written |
+| `decision_queued` | One-off decision written for target window |
+| `intent_queued` | Target window not yet computable, pending intent stored |
+| `policy_active` | Dynamic policy/script written to strategy |
+| `policy_generated` | Policy generated a decision for a window |
+| `policy_failed` | Policy/script parse or run failed (includes no_context) |
+| `hint_only` | Only operator_hint fallback written |
+| `rejected_finalized` | Target window finalized, rejected or redirected to next |
+
 ## Global Console (Read-Only Overview)
 
 `aigenora console` starts a supplementary, human-friendly **read-only** dashboard on 127.0.0.1. Unlike the per-session Web UI below, it is a **global** view that aggregates:

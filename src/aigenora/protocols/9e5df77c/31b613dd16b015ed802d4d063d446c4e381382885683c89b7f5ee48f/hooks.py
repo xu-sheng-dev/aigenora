@@ -25,6 +25,14 @@ CHOICE_KEYWORDS = {
 
 class Hooks(ProtocolHooks):
     CHOICE_KEYWORDS = CHOICE_KEYWORDS
+    # v019-M4: 声明决策 schema。Coin 无克制关系，counter 降级 unsupported。
+    DECISION_SCHEMA = {
+        "match_key": "round",
+        "value_field": "choice",
+        "choices": CHOICE_KEYWORDS,
+        "strategy_field": "fixed",
+        "policy_family": "coin",
+    }
 
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
@@ -33,12 +41,33 @@ class Hooks(ProtocolHooks):
         self.rounds_to_win = self.best_of // 2 + 1
         self.host_wins = 0
         self.guest_wins = 0
+        self._last_round_context: dict | None = None  # v019-M4
         self.snapshot.update(
             score={"host": 0, "guest": 0},
             round=1,
             best_of=self.best_of,
             rounds_to_win=self.rounds_to_win,
         )
+
+    def build_decision_context(self, match_key: str, match_value: Any) -> dict:
+        """提供上一轮 self/opponent 动作。Coin 无克制，mirror 可用，counter unsupported。"""
+        if self._last_round_context:
+            ctx = dict(self._last_round_context)
+            ctx.update(match_key=match_key, match_value=match_value, value_field="choice",
+                       legal_values=SIDES, supported=True)
+            return ctx
+        return {"supported": False, "reason": "no_context"}
+
+    def run_policy(self, strategy: dict, context: dict) -> dict:
+        """Coin 只支持 mirror；counter 无克制关系，返回 unsupported_policy。"""
+        if not context.get("supported"):
+            return {"ok": False, "reason": "unsupported_context"}
+        policy = strategy.get("policy")
+        opp = context.get("previous", {}).get("opponent", {}).get("choice")
+        if policy == "mirror_previous_opponent":
+            return {"ok": True, "decision": {"choice": opp}} if opp else {"ok": False, "reason": "no_context"}
+        # counter/repeat 在 Coin 无意义
+        return {"ok": False, "reason": "unsupported_policy"}
 
     def proto_host_metadata(self):
         return ("Coin Flip", "game,coin", "supply", {"best_of": self.best_of})
@@ -140,6 +169,14 @@ class Hooks(ProtocolHooks):
     def _record_round(self, round_index: int, host_choice: str, guest_choice: str,
                       winner: str, over: bool, game_winner: str) -> None:
         rd = round_index + 1
+        # v019-M4: 缓存上一轮 context
+        self_role = "host" if self.role == "host" else "guest"
+        self_c = host_choice if self_role == "host" else guest_choice
+        opp_c = guest_choice if self_role == "host" else host_choice
+        result = "win" if winner == self_role else ("loss" if winner and winner != self_role and winner != "draw" else "draw")
+        self._last_round_context = {
+            "previous": {"self": {"choice": self_c}, "opponent": {"choice": opp_c}, "result": result},
+        }
         self.details.append(
             type="round_result",
             round=rd,

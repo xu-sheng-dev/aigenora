@@ -274,7 +274,14 @@ class WhisperLog:
         detail: dict | None = None,
         ts_client: float | None = None,
     ) -> dict:
-        valid = ("executed", "dismissed", "unparsed", "error")
+        valid = (
+            # legacy
+            "executed", "dismissed", "unparsed", "error",
+            # v019-M2: 细粒度生命周期 ack
+            "strategy_active", "decision_queued", "intent_queued",
+            "policy_active", "policy_generated", "policy_failed",
+            "decision_produced", "hint_only", "rejected_finalized",
+        )
         if status not in valid:
             raise ValueError(f"status must be one of {valid}, got {status!r}")
         eff_agent = agent_id if agent_id else "anonymous"
@@ -647,11 +654,14 @@ class DecisionBus:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.state_file = self.dir / "state.json"
         self.decisions_file = self.dir / "decisions.jsonl"
+        self.consumed_file = self.dir / "consumed.jsonl"
         self.timeout = timeout
         self.timeout_action = timeout_action
         self.fallback_value = fallback_value
         self._lock = threading.Lock()
         self._consumed_offset: int = 0
+        # v019-M1: 内存缓存已消费的 decision_id 集合，避免长局全量扫描 consumed.jsonl。
+        self._consumed_ids: set[str] = self._read_consumed_ids()
 
     def publish_state(self, state_dict: dict) -> None:
         tmp = self.state_file.with_suffix(".tmp")
@@ -692,6 +702,127 @@ class DecisionBus:
             pending = all_decisions[self._consumed_offset :]
             self._consumed_offset = len(all_decisions)
             return pending
+
+    # -- v019-M1: 定向消费（替代 hybrid 中的 read_pending，不丢 future decision） --
+
+    def _read_consumed_ids(self) -> set[str]:
+        """启动时一次性 load consumed.jsonl 到内存集合。"""
+        ids: set[str] = set()
+        if not self.consumed_file.exists():
+            return ids
+        try:
+            for line in self.consumed_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    did = rec.get("decision_id")
+                    if did:
+                        ids.add(did)
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            pass
+        return ids
+
+    @staticmethod
+    def _decision_id_for(record: dict, line_no: int) -> str:
+        """为 record 生成稳定 decision_id。有 _meta.decision_id 用之；否则生成 virtual id。"""
+        meta = record.get("_meta") or {}
+        did = meta.get("decision_id")
+        if did:
+            return did
+        # legacy 无 id 记录：用行号 + canonical json hash 生成稳定 virtual id，避免重启后重复消费。
+        canonical = json.dumps(record, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        h = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+        return f"legacy:{line_no}:{h}"
+
+    def _decision_priority(self, record: dict) -> int:
+        """返回 decision 优先级：显式 100 > policy/script 50 > legacy 0。"""
+        meta = record.get("_meta") or {}
+        origin = meta.get("origin") or ""
+        if origin in ("policy_runner", "script_runner"):
+            return 50
+        if origin:  # web/cli/human/agent 等显式来源
+            return 100
+        return 0  # legacy 无 origin
+
+    def peek_latest_for_match(self, match_key: str, match_value: Any) -> dict | None:
+        """按 match 精确过滤，返回最高优先级最新未 consumed 的 decision（不改变状态）。"""
+        with self._lock:
+            all_decisions = self._read_all_decisions()
+        candidates: list[tuple[int, int, dict, str]] = []  # (priority, line_no, record, decision_id)
+        for i, rec in enumerate(all_decisions):
+            if rec.get(match_key) != match_value:
+                continue
+            did = self._decision_id_for(rec, i)
+            if did in self._consumed_ids:
+                continue
+            pri = self._decision_priority(rec)
+            candidates.append((pri, i, rec, did))
+        if not candidates:
+            return None
+        # 最高优先级；同优先级取最新（line_no 最大）
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        return candidates[-1][2]
+
+    def consume_latest_for_match(
+        self, match_key: str, match_value: Any, *, consumer_id: str | None = None
+    ) -> dict | None:
+        """定向消费：返回最高优先级最新未 consumed decision，并标记 consumed/superseded。"""
+        with self._lock:
+            all_decisions = self._read_all_decisions()
+            candidates: list[tuple[int, int, dict, str]] = []
+            for i, rec in enumerate(all_decisions):
+                if rec.get(match_key) != match_value:
+                    continue
+                did = self._decision_id_for(rec, i)
+                if did in self._consumed_ids:
+                    continue
+                pri = self._decision_priority(rec)
+                candidates.append((pri, i, rec, did))
+            if not candidates:
+                return None
+            candidates.sort(key=lambda t: (t[0], t[1]))
+            winner = candidates[-1]
+            winner_did = winner[3]
+            # 标记 winner 为 consumed
+            self._mark_consumed(winner_did, match_key, match_value, reason="consumed", consumer_id=consumer_id)
+            # 同窗口其他未消费候选标记 superseded
+            for pri, i, rec, did in candidates[:-1]:
+                self._mark_consumed(did, match_key, match_value, reason="superseded", consumer_id=consumer_id)
+            return winner[2]
+
+    def _mark_consumed(
+        self,
+        decision_id: str,
+        match_key: str,
+        match_value: Any,
+        *,
+        reason: str = "consumed",
+        consumer_id: str | None = None,
+    ) -> None:
+        """追加 consumed 记录到文件并同步更新内存集合。调用方需持 self._lock。"""
+        rec = {
+            "decision_id": decision_id,
+            "match_key": match_key,
+            "match_value": match_value,
+            "consumer_id": consumer_id or "auto",
+            "reason": reason,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        line = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
+        try:
+            with open(self.consumed_file, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+        self._consumed_ids.add(decision_id)
+
+    def finalize_window(self, match_key: str, match_value: Any, reason: str = "consumed") -> None:
+        """hybrid 窗口关闭：写 finalized，关闭当前窗口。"""
+        self._write_finalized(match_key, match_value, reason)
 
     @staticmethod
     def submit(state_dir: str | Path, decision_dict: dict) -> None:
