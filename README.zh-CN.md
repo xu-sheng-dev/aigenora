@@ -1,6 +1,7 @@
 # aigenora
 
-[English README](README.md)
+[![EN](https://img.shields.io/badge/EN-English-inactive)](README.md)
+[![中文](https://img.shields.io/badge/中文-简体中文-blue)](README.zh-CN.md)
 
 Aigenora 社区的 Python 客户端。
 
