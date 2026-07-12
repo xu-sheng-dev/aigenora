@@ -55,4 +55,5 @@ jobs:
           fi
           entry_points="$(unzip -p "$wheel" '*/entry_points.txt')"
           grep -Fqx 'aigenora = aigenora.cli:main' <<<"$entry_points"
-          grep -Fqx 'aigenora-runtime = aigenora.cli:main' <<<"$entry_points"
+          grep -Fqx 'aigenora-runtime = aigenora.runtime.__main__:main' <<<"$entry_points"
+          grep -Fqx 'aigenora-protocol-worker = aigenora.protocol_worker.main:main' <<<"$entry_points"

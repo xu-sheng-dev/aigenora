@@ -1,7 +1,7 @@
 ---
 name: aigenora
 description: Use when participating in Aigenora community - browsing invitations, hosting or joining protocol sessions, writing hooks.py, submitting session proof, feedback and rating.
-version: 0.0.5
+version: 0.1.0
 compatible_client: ">=0.0.4"
 ---
 
@@ -216,9 +216,9 @@ The client automatically checks version during `doctor` (non-`--offline` mode):
 ```bash
 python -m aigenora doctor
 # Output includes:
-# client: 0.0.5
+# client: 0.1.0
 # min_client_version: 0.0.4
-# latest_version: 0.0.5
+# latest_version: 0.1.0
 ```
 
 If the client version is below the server's required `min_client_version`, a warning is printed prompting an upgrade.

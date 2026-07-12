@@ -11,7 +11,8 @@ from aigenora.engine.config import get_server
 from aigenora.engine.keys import load_keys
 from aigenora.engine.rest import RestClient
 from aigenora.proto.decide_gateway import submit_decision
-from aigenora.proto.sdk import DecisionBus, DetailLog, EventBus, SnapshotBus, StrategyStore, WhisperLog
+from aigenora.proto.sdk import EventBus, SnapshotBus, StrategyStore, WhisperLog
+from aigenora.services import SessionStateService
 
 
 _GOVERNANCE_STRING_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -319,11 +320,7 @@ def cmd_events(args) -> int:
 def cmd_decide(args) -> int:
     decision = json.loads(args.decision)
     state_dir = str(_resolve_state_dir(args.state_dir))
-    result = submit_decision(
-        state_dir, decision,
-        origin="cli",
-        require_match_key=False,
-    )
+    result = SessionStateService.submit_decision(state_dir, decision, origin="cli")
     if not result["ok"]:
         print(json.dumps({
             "status": result["status"],
@@ -337,7 +334,7 @@ def cmd_decide(args) -> int:
 
 
 def cmd_snapshot(args) -> int:
-    snap = SnapshotBus(str(_resolve_state_dir(args.state_dir))).read()
+    snap = SessionStateService.snapshot(_resolve_state_dir(args.state_dir))
     if getattr(args, "json_output", False):
         print(json.dumps(snap, ensure_ascii=False, indent=2))
         return 0
@@ -363,9 +360,9 @@ def cmd_snapshot(args) -> int:
 
 
 def cmd_details(args) -> int:
-    log = DetailLog(str(_resolve_state_dir(args.state_dir)))
+    state_dir = _resolve_state_dir(args.state_dir)
     if not args.follow:
-        for entry in log.read_all():
+        for entry in SessionStateService.details(state_dir):
             if getattr(args, "json_output", False):
                 print(json.dumps(entry, ensure_ascii=False))
             else:
@@ -378,7 +375,7 @@ def cmd_details(args) -> int:
         return 0
     last_ts = None
     while True:
-        items = log.read_all()
+        items = SessionStateService.details(state_dir)
         for entry in items:
             ts = entry.get("ts", "")
             if last_ts is not None and ts <= last_ts:
@@ -396,7 +393,7 @@ def cmd_details(args) -> int:
 
 
 def cmd_strategy(args) -> int:
-    store = StrategyStore(str(_resolve_state_dir(args.state_dir)))
+    state_dir = _resolve_state_dir(args.state_dir)
     set_value = getattr(args, "set_value", None)
     merge_value = getattr(args, "merge_value", None)
     if set_value and merge_value:
@@ -407,14 +404,14 @@ def cmd_strategy(args) -> int:
         if not isinstance(payload, dict):
             print("error: --set value must be a JSON object", flush=True)
             return 2
-        store.write(payload)
+        SessionStateService.strategy_write(state_dir, payload)
     elif merge_value is not None:
         patch = json.loads(merge_value)
         if not isinstance(patch, dict):
             print("error: --merge value must be a JSON object", flush=True)
             return 2
-        store.merge(patch)
-    data = store.read()
+        SessionStateService.strategy_merge(state_dir, patch)
+    data = SessionStateService.strategy_read(state_dir)
     if getattr(args, "json_output", False):
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:

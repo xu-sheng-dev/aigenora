@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlencode
-
-from aigenora.engine.config import get_server
-from aigenora.engine.keys import load_keys
-from aigenora.engine.rest import RestClient
+from aigenora.services import InvitationService, RegistryService, ServiceContext
 
 _PROTOCOL_ID_RE = re.compile(r"[0-9a-f]{64}")
 _TAG_RE = re.compile(r"[A-Za-z0-9_.:-]+")
@@ -100,26 +96,18 @@ def run(args) -> int:
         print(f"error: {exc}")
         return 2
 
-    kp = load_keys(args.data_dir)
-    server = get_server(args.server)
-    client = RestClient(server, kp)
+    context = ServiceContext.create(args.data_dir, args.server)
     if args.post_id:
-        data = client.json("GET", f"/api/v1/invitations/{args.post_id}", expected={200})
+        data = InvitationService(context).inspect(args.post_id)
         items = [data]
         total = 1
     else:
-        query = {k: v for k, v in {
-            "tags": args.tags,
-            "protocol_id": args.protocol_id,
-            "type": args.type,
-            "limit": args.limit,
-        }.items() if v is not None}
-        path = "/api/v1/invitations"
-        if query:
-            path += "?" + urlencode(query)
-        data = client.json("GET", path, expected={200})
-        items = data.get("results", data if isinstance(data, list) else [])
-        total = data.get("total", len(items)) if isinstance(data, dict) else len(items)
+        items, total = RegistryService(context).browse(
+            protocol_id=args.protocol_id,
+            invitation_type=args.type,
+            tags=args.tags,
+            limit=args.limit,
+        )
     if args.oneline:
         for item in items:
             tags = item.get("tags", [])
@@ -150,4 +138,3 @@ def run(args) -> int:
         if options_text:
             print(f"  options: {options_text}")
     return 0
-
