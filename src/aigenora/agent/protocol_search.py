@@ -4,16 +4,52 @@ import json
 from pathlib import Path
 from typing import Any
 
-from aigenora.engine.config import data_protocols_root
+from aigenora.engine.config import builtin_protocols_root, data_protocols_root
 from aigenora.proto.prefs import is_blocked
 
 
 def _load_index(data_dir_value: str | None = None) -> list[dict[str, Any]]:
+    """Load user protocols plus any newer built-ins shipped by the package.
+
+    The user library remains authoritative when ids or aliases collide.  Merging
+    packaged entries in memory makes newly shipped built-ins discoverable after
+    an upgrade without forcing ``aigenora init`` to mutate the user's library.
+    """
     index_file = data_protocols_root(data_dir_value) / "index.json"
-    if not index_file.exists():
-        return []
-    data = json.loads(index_file.read_text(encoding="utf-8"))
-    return data.get("protocols", data if isinstance(data, list) else [])
+    user_entries: list[dict[str, Any]] = []
+    if index_file.exists():
+        data = json.loads(index_file.read_text(encoding="utf-8"))
+        user_entries = data.get("protocols", data if isinstance(data, list) else [])
+
+    builtin_index = builtin_protocols_root() / "index.json"
+    builtin_entries: list[dict[str, Any]] = []
+    if builtin_index.exists():
+        data = json.loads(builtin_index.read_text(encoding="utf-8"))
+        builtin_entries = data.get("protocols", data if isinstance(data, list) else [])
+
+    merged = [entry for entry in user_entries if isinstance(entry, dict)]
+    seen_ids = {entry.get("protocol_id") for entry in merged}
+    seen_aliases = {entry.get("alias") for entry in merged}
+    for entry in builtin_entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("protocol_id") in seen_ids or entry.get("alias") in seen_aliases:
+            continue
+        merged.append(entry)
+    return merged
+
+
+def _resolve_protocol_dir(p: dict[str, Any], data_dir: str | None) -> Path | None:
+    relative = p.get("path", "")
+    if not relative:
+        return None
+    user_dir = data_protocols_root(data_dir) / relative
+    if (user_dir / "spec.json").exists():
+        return user_dir
+    builtin_dir = builtin_protocols_root() / relative
+    if (builtin_dir / "spec.json").exists():
+        return builtin_dir
+    return user_dir
 
 
 def search_protocols(
@@ -58,7 +94,6 @@ def select_protocol(
     save_preference: bool = False,
     data_dir: str | None = None,
 ) -> dict[str, Any]:
-    from aigenora.proto.validate import validate_options
     from aigenora.proto.prefs import get_preference, set_preference as save_pref
 
     protocols = _load_index(data_dir)
@@ -184,7 +219,7 @@ def _build_result(
 
     # Validate options against spec if parameters exist
     warnings: list[str] = []
-    proto_dir = data_protocols_root(data_dir) / p.get("path", "") if p.get("path") else None
+    proto_dir = _resolve_protocol_dir(p, data_dir)
     if proto_dir and (proto_dir / "spec.json").exists() and resolved_options:
         try:
             spec = load_spec(proto_dir / "spec.json")

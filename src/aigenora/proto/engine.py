@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from aigenora.engine.p2p import AsyncJsonLineChannel, ChannelClosed, JsonLineChannel
-from aigenora.engine.crypto import commit_hash, random_nonce, sha256
+from aigenora.engine.crypto import random_nonce, sha256
+from aigenora.control import AUTONOMOUS, HUMAN, resolve_control_mode
 
-from .hooks import HookResult, ProtocolHooks
+from .hooks import HookResult
 from .loader import load_hooks
 from .sdk import EventBus
 from .validate import (
@@ -177,14 +178,34 @@ async def _maybe_wrap_heartbeat(
     return wrapped
 
 
-def _resolve_decision_config(spec: dict[str, Any], coach: bool) -> dict[str, Any] | None:
-    if coach:
-        return {"mode": "manual", "timeout_seconds": 0, "timeout_action": "fallback"}
+def _resolve_decision_config(spec: dict[str, Any], coach: bool | str) -> dict[str, Any] | None:
+    """Map the local runtime mode to the legacy hooks decision configuration.
+
+    Internal engine functions still call their compatibility argument ``coach``;
+    dispatch now passes the canonical control-mode string through that slot.  Direct
+    legacy calls with a bool remain supported.
+    """
+    control_mode = (
+        resolve_control_mode(coach)
+        if isinstance(coach, str)
+        else resolve_control_mode(None, coach=bool(coach))
+    )
+    if control_mode == AUTONOMOUS:
+        return None
+    spec_decision = spec.get("decision") or {}
+    if control_mode == HUMAN:
+        return {
+            "mode": "manual",
+            "control_mode": HUMAN,
+            "timeout_seconds": spec_decision.get("timeout_seconds", 120),
+            "timeout_action": "abort",
+            "require_explicit": True,
+        }
     # 非 coach：默认 hybrid。即便 spec.decision.mode == "auto" 也带上 mode 字段，
     # 让 hooks 在 auto 模式下创建 bus（毫秒级 auto + 可干预），而不是 bus=None 完全跳过。
-    spec_decision = spec.get("decision") or {}
     return {
         "mode": "auto",
+        "control_mode": "hybrid",
         "timeout_seconds": spec_decision.get("timeout_seconds", 120),
         "timeout_action": spec_decision.get("timeout_action", "fallback"),
     }
@@ -533,6 +554,37 @@ async def _run_session_loop_async_guest(
         return _handle_peer_disconnect(hooks, event_bus, state_dir=str(state_dir))
 
 
+def _read_free_inbox(path: Path, offset: int) -> tuple[list[str], int]:
+    """Read complete JSONL inbox records from *offset* without losing a partial tail."""
+    if not path.exists():
+        return [], offset
+    items: list[str] = []
+    with open(path, "r", encoding="utf-8") as stream:
+        stream.seek(offset)
+        while True:
+            record_start = stream.tell()
+            raw = stream.readline()
+            if raw == "":
+                break
+            # An appender may still be writing the final record. Keep the offset at
+            # its start so the next poll retries the complete line.
+            if not raw.endswith("\n"):
+                stream.seek(record_start)
+                break
+            offset = stream.tell()
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            text = str(record.get("text", "")) if isinstance(record, dict) else ""
+            if text:
+                items.append(text)
+    return items, offset
+
+
 def _run_free(
     spec: dict[str, Any],
     proto_dir: Path,
@@ -566,6 +618,7 @@ def _run_free(
 
     input_q: "_queue.Queue[tuple[str, str]]" = _queue.Queue()  # (source, text)
     inbox_path = state_dir / "inbox.jsonl"
+    inbox_offset = 0
 
     def receiver():
         while not end_event.is_set():
@@ -607,25 +660,34 @@ def _run_free(
                 return
             input_q.put(("stdin", line.rstrip("\n")))
 
+    def send_local_text(text: str) -> bool:
+        """Send one local line; return True when it terminates the session."""
+        if text.strip() == "/quit":
+            end_msg = {"action": "end"}
+            if validate:
+                _validate(spec, end_msg, "both")
+            channel.send(end_msg)
+            hooks.proto_on_end()
+            end_event.set()
+            return True
+        seq[0] += 1
+        msg = {"action": "chat", "text": text, "seq": seq[0]}
+        if validate:
+            _validate(spec, msg, "both")
+        channel.send(msg)
+        try:
+            hooks.proto_on_send(msg)
+        except Exception:
+            pass
+        return False
+
     def inbox_producer():
-        offset = 0
+        nonlocal inbox_offset
         while not end_event.is_set():
             try:
-                if inbox_path.exists():
-                    with open(inbox_path, "r", encoding="utf-8") as f:
-                        f.seek(offset)
-                        for raw in f:
-                            line = raw.strip()
-                            if not line:
-                                continue
-                            try:
-                                rec = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            text = str(rec.get("text", ""))
-                            if text:
-                                input_q.put(("inbox", text))
-                        offset = f.tell()
+                items, inbox_offset = _read_free_inbox(inbox_path, inbox_offset)
+                for text in items:
+                    input_q.put(("inbox", text))
             except Exception:
                 pass
             end_event.wait(timeout=0.1)
@@ -636,23 +698,8 @@ def _run_free(
                 source, text = input_q.get(timeout=0.2)
             except _queue.Empty:
                 continue
-            if text.strip() == "/quit":
-                end_msg = {"action": "end"}
-                if validate:
-                    _validate(spec, end_msg, "both")
-                channel.send(end_msg)
-                hooks.proto_on_end()
-                end_event.set()
+            if send_local_text(text):
                 return
-            seq[0] += 1
-            msg = {"action": "chat", "text": text, "seq": seq[0]}
-            if validate:
-                _validate(spec, msg, "both")
-            channel.send(msg)
-            try:
-                hooks.proto_on_send(msg)
-            except Exception:
-                pass
 
     if role == "host":
         join_msg = channel.recv()
@@ -674,6 +721,19 @@ def _run_free(
     # Handshake done: switch from the engine default "waiting_peer" to the chatting phase
     # the hooks intended (proto_init set phase="chatting" but _snapshot_init overwrote it).
     _snapshot_phase(hooks, "chatting", "Chat ready")
+
+    # The state directory is visible before the peer handshake completes, so Web UI
+    # may already have appended commands. Drain that durable backlog synchronously
+    # before starting the receiver; otherwise an immediately arriving peer /quit can
+    # win the thread race and discard valid local commands.
+    try:
+        initial_items, inbox_offset = _read_free_inbox(inbox_path, inbox_offset)
+    except Exception:
+        initial_items = []
+    for text in initial_items:
+        if send_local_text(text):
+            _snapshot_phase(hooks, "ended", "Free mode session ended")
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
 
     t_recv = threading.Thread(target=receiver, daemon=True)
     t_send = threading.Thread(target=sender, daemon=True)
@@ -735,6 +795,7 @@ async def _run_free_async(
 
     loop = asyncio.get_event_loop()
     inbox_path = state_dir / "inbox.jsonl"
+    inbox_offset = 0
     input_q: asyncio.Queue = asyncio.Queue()
     end_event = asyncio.Event()
     terminal_result: dict[str, Any] | None = None
@@ -774,32 +835,36 @@ async def _run_free_async(
                 return
             await input_q.put(("stdin", line.rstrip("\n")))
 
+    async def send_local_text(text: str) -> bool:
+        if text.strip() == "/quit":
+            end_msg = {"action": "end"}
+            if validate:
+                _validate(spec, end_msg, "both")
+            await channel.send(end_msg)
+            hooks.proto_on_end()
+            end_event.set()
+            return True
+        seq[0] += 1
+        msg = {"action": "chat", "text": text, "seq": seq[0]}
+        if validate:
+            _validate(spec, msg, "both")
+        await channel.send(msg)
+        try:
+            hooks.proto_on_send(msg)
+        except Exception:
+            pass
+        return False
+
     async def inbox_producer():
-        offset = 0
+        nonlocal inbox_offset
         while not end_event.is_set():
             try:
-                if inbox_path.exists():
-                    def _read():
-                        nonlocal offset
-                        items: list[str] = []
-                        with open(inbox_path, "r", encoding="utf-8") as f:
-                            f.seek(offset)
-                            for raw in f:
-                                line = raw.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    rec = json.loads(line)
-                                except json.JSONDecodeError:
-                                    continue
-                                txt = str(rec.get("text", ""))
-                                if txt:
-                                    items.append(txt)
-                            offset = f.tell()
-                        return items
-                    items = await loop.run_in_executor(None, _read)
-                    for txt in items:
-                        await input_q.put(("inbox", txt))
+                def _read():
+                    return _read_free_inbox(inbox_path, inbox_offset)
+
+                items, inbox_offset = await loop.run_in_executor(None, _read)
+                for text in items:
+                    await input_q.put(("inbox", text))
             except Exception:
                 pass
             try:
@@ -813,23 +878,23 @@ async def _run_free_async(
                 source, text = await asyncio.wait_for(input_q.get(), timeout=0.2)
             except asyncio.TimeoutError:
                 continue
-            if text.strip() == "/quit":
-                end_msg = {"action": "end"}
-                if validate:
-                    _validate(spec, end_msg, "both")
-                await channel.send(end_msg)
-                hooks.proto_on_end()
-                end_event.set()
+            if await send_local_text(text):
                 return
-            seq[0] += 1
-            msg = {"action": "chat", "text": text, "seq": seq[0]}
-            if validate:
-                _validate(spec, msg, "both")
-            await channel.send(msg)
-            try:
-                hooks.proto_on_send(msg)
-            except Exception:
-                pass
+
+    # See the sync counterpart: commands appended while the handshake is still
+    # forming are durable work, not historical noise. Deliver them before the
+    # remote receiver can terminate the session.
+    try:
+        def _read_initial():
+            return _read_free_inbox(inbox_path, inbox_offset)
+
+        initial_items, inbox_offset = await loop.run_in_executor(None, _read_initial)
+    except Exception:
+        initial_items = []
+    for text in initial_items:
+        if await send_local_text(text):
+            _snapshot_phase(hooks, "ended", "Free mode session ended")
+            return {"metadata": metadata, "state_dir": str(state_dir), "completed": True}
 
     tasks = [
         asyncio.create_task(receiver()),
@@ -1702,6 +1767,18 @@ async def _run_mental_poker_async_entry(*args: Any, **kwargs: Any) -> dict[str, 
     return await run_mental_poker_async(*args, **kwargs)
 
 
+def _run_authoritative_realtime_sync_entry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from .realtime import run_authoritative_realtime_sync
+
+    return run_authoritative_realtime_sync(*args, **kwargs)
+
+
+async def _run_authoritative_realtime_async_entry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from .realtime import run_authoritative_realtime_async
+
+    return await run_authoritative_realtime_async(*args, **kwargs)
+
+
 # Engine registry
 ENGINES_SYNC: dict[str, Callable[..., dict[str, Any]]] = {
     "session_loop": _run_session_loop_sync,
@@ -1709,6 +1786,7 @@ ENGINES_SYNC: dict[str, Callable[..., dict[str, Any]]] = {
     "request_response": _run_request_response_sync,
     "simultaneous_round": _run_simultaneous_round_sync,
     "mental_poker": _run_mental_poker_sync_entry,
+    "authoritative_realtime": _run_authoritative_realtime_sync_entry,
 }
 
 ENGINES_ASYNC: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
@@ -1717,6 +1795,7 @@ ENGINES_ASYNC: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
     "request_response": _run_request_response_async,
     "simultaneous_round": _run_simultaneous_round_async,
     "mental_poker": _run_mental_poker_async_entry,
+    "authoritative_realtime": _run_authoritative_realtime_async_entry,
 }
 
 
@@ -1743,6 +1822,7 @@ def _dispatch_sync(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     proto_dir = Path(protocol_dir)
     spec = load_spec(proto_dir / "spec.json")
@@ -1757,9 +1837,10 @@ def _dispatch_sync(
     extra: dict[str, Any] = {}
     if mode == "mental_poker":
         extra = {"session_id": session_id, "keypair": keypair, "peer_public_key": peer_public_key}
+    effective_control_mode = resolve_control_mode(control_mode, coach=coach)
     return engine(
         spec, proto_dir, channel, opts, args, state_base, validate, role,
-        event_bus=event_bus, coach=coach, pace=pace, **extra,
+        event_bus=event_bus, coach=effective_control_mode, pace=pace, **extra,
     )
 
 
@@ -1779,6 +1860,7 @@ async def _dispatch_async(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     proto_dir = Path(protocol_dir)
     spec = load_spec(proto_dir / "spec.json")
@@ -1793,9 +1875,10 @@ async def _dispatch_async(
     extra: dict[str, Any] = {}
     if mode == "mental_poker":
         extra = {"session_id": session_id, "keypair": keypair, "peer_public_key": peer_public_key}
+    effective_control_mode = resolve_control_mode(control_mode, coach=coach)
     return await engine(
         spec, proto_dir, channel, opts, args, state_base, validate, role,
-        event_bus=event_bus, coach=coach, pace=pace,
+        event_bus=event_bus, coach=effective_control_mode, pace=pace,
         heartbeat_interval=heartbeat_interval, heartbeat_timeout=heartbeat_timeout,
         **extra,
     )
@@ -1814,10 +1897,11 @@ def run_host(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     return _dispatch_sync(
         "host", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace, session_id, keypair, peer_public_key,
+        event_bus, coach, pace, session_id, keypair, peer_public_key, control_mode,
     )
 
 
@@ -1834,10 +1918,11 @@ def run_guest(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     return _dispatch_sync(
         "guest", protocol_dir, channel, options, args, state_base, validate,
-        event_bus, coach, pace, session_id, keypair, peer_public_key,
+        event_bus, coach, pace, session_id, keypair, peer_public_key, control_mode,
     )
 
 
@@ -1856,10 +1941,12 @@ async def run_host_async(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     return await _dispatch_async(
         "host", protocol_dir, channel, options, args, state_base, validate,
         event_bus, coach, pace, heartbeat_interval, heartbeat_timeout, session_id, keypair, peer_public_key,
+        control_mode,
     )
 
 
@@ -1878,10 +1965,12 @@ async def run_guest_async(
     session_id: str | None = None,
     keypair: Any = None,
     peer_public_key: str | None = None,
+    control_mode: str | None = None,
 ) -> dict[str, Any]:
     return await _dispatch_async(
         "guest", protocol_dir, channel, options, args, state_base, validate,
         event_bus, coach, pace, heartbeat_interval, heartbeat_timeout, session_id, keypair, peer_public_key,
+        control_mode,
     )
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from aigenora.control import CONTROL_MODES
+
 
 def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--server")
@@ -12,18 +14,36 @@ def _add_web_flags(p: argparse.ArgumentParser) -> None:
     """Add the mutually exclusive web-flags group for host/join.
 
     Three modes: auto (start relay subprocess + open browser), headless (start relay subprocess but do not open browser), off (do not start relay subprocess).
-    Default is off (pure CLI). --web-on is a convenience alias for --web auto;
+    Without an explicit flag/env choice, human daemon sessions use auto while
+    autonomous/hybrid use off. --web-on is a convenience alias for --web auto;
     --no-web is equivalent to --web off; --no-browser is equivalent to --web headless.
     """
     g = p.add_mutually_exclusive_group()
     g.add_argument("--web-on", action="store_true",
                    help="Start the web relay subprocess and open the browser (convenience alias for --web auto; the common entry when you want a live broadcast)")
     g.add_argument("--web", choices=["auto", "headless", "off"],
-                   help="Web UI mode: auto=start relay subprocess + open browser, headless=start relay subprocess without opening browser, off=do not start relay subprocess. Default is off (pure CLI); use --web-on for auto")
+                   help="Web UI mode: auto=start relay subprocess + open browser, headless=start relay subprocess without opening browser, off=do not start relay subprocess. Defaults: human daemon=auto; autonomous/hybrid=off")
     g.add_argument("--no-web", action="store_true",
-                   help="Equivalent to --web off: do not start the web relay subprocess (this is now the default)")
+                   help="Equivalent to --web off: do not start the web relay subprocess")
     g.add_argument("--no-browser", action="store_true",
                    help="Equivalent to --web headless: start the relay subprocess but do not auto-open the browser")
+
+
+def _add_control_mode_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--control-mode",
+        choices=CONTROL_MODES,
+        help=(
+            "Local action source: autonomous=automatic only, hybrid=automatic with "
+            "human intervention (default), human=every local action must be submitted "
+            "explicitly"
+        ),
+    )
+    p.add_argument(
+        "--coach",
+        action="store_true",
+        help="Deprecated alias for --control-mode human (unrelated to the Web tactical coach)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     _common(p)
     p.add_argument("post_id")
     p.add_argument("--daemon", action="store_true")
-    p.add_argument("--coach", action="store_true")
+    _add_control_mode_flags(p)
     p.add_argument("--pace", type=float, default=0)
     p.add_argument("--heartbeat-interval", type=float, default=10.0,
                    help="Heartbeat interval in seconds (0 to disable)")
@@ -66,9 +86,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Seconds without any message before peer is considered offline")
     p.add_argument("--allow-skeleton-hooks", action="store_true",
                    help="Skip pristine skeleton detection (test bypass only; takes precedence over the environment variable)")
+    p.add_argument(
+        "--accept-ui",
+        action="store_true",
+        help="Accept and locally sandbox the protocol author's platform-published UI bundle (third-party web code; rejected by default)",
+    )
+    p.add_argument(
+        "--accept-host-ui",
+        action="store_true",
+        help="Allow Host-provided UI over P2P only when no local/platform UI is available (higher-risk third-party web code; rejected by default)",
+    )
     _add_web_flags(p)
     p.add_argument("--_internal-run", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--_state-dir", help=argparse.SUPPRESS)
+    p.add_argument("--_controller-required", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("extra_args", nargs="*")
 
     p = sub.add_parser("host")
@@ -76,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--protocol-dir", required=True)
     p.add_argument("--options")
     p.add_argument("--daemon", action="store_true")
-    p.add_argument("--coach", action="store_true")
+    _add_control_mode_flags(p)
     p.add_argument("--pace", type=float, default=0)
     p.add_argument("--heartbeat-interval", type=float, default=10.0,
                    help="Heartbeat interval in seconds (0 to disable)")
@@ -88,9 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Disable automatic invitation renewal (renews every 2 minutes by default)")
     p.add_argument("--allow-skeleton-hooks", action="store_true",
                    help="Skip pristine skeleton detection (test bypass only; takes precedence over the environment variable)")
+    p.add_argument(
+        "--share-ui",
+        action="store_true",
+        help="Offer this protocol directory's ui/ bundle over P2P to Guests that explicitly accept Host UI",
+    )
     _add_web_flags(p)
     p.add_argument("--_internal-run", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--_state-dir", help=argparse.SUPPRESS)
+    p.add_argument("--_controller-required", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("extra_args", nargs="*")
 
     p = sub.add_parser("guest")

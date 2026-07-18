@@ -5,6 +5,7 @@ import json
 import queue
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -84,6 +85,8 @@ class IrohTicket:
 
 
 class IrohJsonLineChannel(AsyncJsonLineChannel):
+    MAX_JSON_LINE_BYTES = 8 * 1024 * 1024
+
     def __init__(self, send_stream: Any, recv_stream: Any):
         self.send_stream = send_stream
         self.recv_stream = recv_stream
@@ -100,6 +103,8 @@ class IrohJsonLineChannel(AsyncJsonLineChannel):
         while True:
             idx = self._buf.find(b"\n")
             if idx >= 0:
+                if idx > self.MAX_JSON_LINE_BYTES:
+                    raise ChannelClosed("iroh JSON frame exceeds size limit")
                 raw = bytes(self._buf[:idx])
                 del self._buf[: idx + 1]
                 if not raw:
@@ -116,6 +121,8 @@ class IrohJsonLineChannel(AsyncJsonLineChannel):
             if not chunk:
                 raise ChannelClosed("iroh stream closed")
             self._buf.extend(chunk)
+            if len(self._buf) > self.MAX_JSON_LINE_BYTES and b"\n" not in self._buf:
+                raise ChannelClosed("iroh JSON frame exceeds size limit")
 
     async def send(self, msg: dict[str, Any]) -> None:
         await self.async_send(msg)
@@ -220,7 +227,13 @@ async def connect_by_ticket(ticket: str) -> tuple[IrohRuntime, Any, IrohJsonLine
     return runtime, node, IrohJsonLineChannel(bi.send(), bi.recv())
 
 
-def run_in_threads(host_fn, guest_fn) -> tuple[Any, Any]:
+def run_in_threads(
+    host_fn,
+    guest_fn,
+    *,
+    join_timeout: float = 30.0,
+    terminal_grace: float = 1.0,
+) -> tuple[Any, Any]:
     results: dict[str, Any] = {}
     errors: dict[str, BaseException] = {}
 
@@ -234,10 +247,21 @@ def run_in_threads(host_fn, guest_fn) -> tuple[Any, Any]:
     gt = threading.Thread(target=wrap, args=("guest", guest_fn), daemon=True)
     ht.start()
     gt.start()
-    ht.join(30)
-    gt.join(30)
-    if ht.is_alive() or gt.is_alive():
-        raise TimeoutError("protocol threads did not finish")
+    ht.join(join_timeout)
+    gt.join(join_timeout)
+    alive = [("host", ht), ("guest", gt)]
+    alive = [(name, thread) for name, thread in alive if thread.is_alive()]
+    # In request/response protocols both threads normally finish well inside the
+    # first join.  A real-time match can outlive that first window: Guest returns
+    # as soon as it consumes the terminal frame, a few instructions before Host
+    # finishes its bounded journal/event-loop teardown.  Give that sole remaining
+    # thread a small grace period without extending a genuine two-sided deadlock.
+    if len(alive) == 1 and terminal_grace > 0:
+        alive[0][1].join(terminal_grace)
+        alive = [(name, thread) for name, thread in alive if thread.is_alive()]
+    if alive:
+        names = ", ".join(name for name, _ in alive)
+        raise TimeoutError(f"protocol threads did not finish: {names}")
     if errors:
         name, exc = next(iter(errors.items()))
         raise RuntimeError(f"{name} failed") from exc
@@ -245,16 +269,20 @@ def run_in_threads(host_fn, guest_fn) -> tuple[Any, Any]:
 
 
 class AsyncHeartbeatChannel(AsyncJsonLineChannel):
-    """Async channel heartbeat decorator.
+    """Async channel heartbeat, liveness and round-trip latency decorator.
 
     Responsibilities:
       - Periodically send a `{"_sys": "ping", "ts": ...}` heartbeat frame to the peer in the background.
       - A background read loop filters out the peer's `_sys` frames and only dispatches business frames to the business recv.
       - A watchdog monitors the last activity time; on timeout it notifies the Agent via EventBus / SnapshotBus.
+      - Echo bounded ping ids as pong frames and retain local RTT/jitter samples.  Callers can
+        actively probe before a protocol handshake without adding game-specific wire messages.
       - Does not raise a timeout exception and does not interrupt the business loop — whether to disconnect is decided by the Agent.
     """
 
     REEMIT_INTERVAL = 30.0
+    MAX_PENDING_PROBES = 64
+    MAX_RTT_SAMPLES = 32
 
     def __init__(
         self,
@@ -276,17 +304,113 @@ class AsyncHeartbeatChannel(AsyncJsonLineChannel):
         self._tasks: list[asyncio.Task] = []
         self._closed = False
         self._reader_error: BaseException | None = None
+        self._probe_seq = 0
+        self._pending_probes: dict[str, tuple[int, asyncio.Future[float] | None]] = {}
+        self._rtt_samples_ms: deque[float] = deque(maxlen=self.MAX_RTT_SAMPLES)
+        self._smoothed_rtt_ms: float | None = None
 
     async def start(self) -> None:
-        """Start three background tasks: heartbeat send, message receive, and timeout monitoring."""
+        """Start the reader plus any enabled heartbeat/watchdog tasks.
+
+        The reader always runs, even when periodic heartbeat is disabled, because an
+        authoritative real-time engine can still request an explicit latency probe.
+        """
         if self._tasks:
             return
         self._last_recv_ts = time.monotonic()
-        self._tasks = [
-            asyncio.create_task(self._sender()),
-            asyncio.create_task(self._reader()),
-            asyncio.create_task(self._watchdog()),
-        ]
+        self._tasks = [asyncio.create_task(self._reader())]
+        if self._interval > 0:
+            self._tasks.append(asyncio.create_task(self._sender()))
+        if self._timeout > 0:
+            self._tasks.append(asyncio.create_task(self._watchdog()))
+
+    def _new_probe_id(self) -> str:
+        self._probe_seq += 1
+        return f"{id(self):x}-{self._probe_seq:x}"
+
+    async def _send_probe(self, *, wait_for_reply: bool) -> asyncio.Future[float] | None:
+        probe_id = self._new_probe_id()
+        future: asyncio.Future[float] | None = None
+        if wait_for_reply:
+            future = asyncio.get_running_loop().create_future()
+        while len(self._pending_probes) >= self.MAX_PENDING_PROBES:
+            stale_id = next(iter(self._pending_probes))
+            _, stale_future = self._pending_probes.pop(stale_id)
+            if stale_future is not None and not stale_future.done():
+                stale_future.cancel()
+        self._pending_probes[probe_id] = (time.monotonic_ns(), future)
+        try:
+            async with self._send_lock:
+                await self._inner.send(
+                    {"_sys": "ping", "probe_id": probe_id, "ts": time.time()}
+                )
+        except Exception:
+            self._pending_probes.pop(probe_id, None)
+            if future is not None and not future.done():
+                future.cancel()
+            raise
+        return future
+
+    def _record_pong(self, probe_id: str) -> None:
+        pending = self._pending_probes.pop(probe_id, None)
+        if pending is None:
+            return
+        sent_ns, future = pending
+        rtt_ms = max(0.0, (time.monotonic_ns() - sent_ns) / 1_000_000.0)
+        self._rtt_samples_ms.append(rtt_ms)
+        if self._smoothed_rtt_ms is None:
+            self._smoothed_rtt_ms = rtt_ms
+        else:
+            self._smoothed_rtt_ms = self._smoothed_rtt_ms * 0.75 + rtt_ms * 0.25
+        if future is not None and not future.done():
+            future.set_result(rtt_ms)
+
+    async def probe_latency(
+        self,
+        *,
+        samples: int = 3,
+        timeout: float = 1.0,
+        spacing: float = 0.02,
+    ) -> dict[str, Any]:
+        """Measure peer RTT without exposing heartbeat frames to the business protocol.
+
+        Older peers safely ignore the probe id, in which case the returned metrics have
+        ``samples == 0``.  Probe count/timeouts are bounded so a missing peer cannot stall
+        the protocol handshake indefinitely.
+        """
+        count = max(1, min(8, int(samples)))
+        per_probe_timeout = max(0.05, min(5.0, float(timeout)))
+        for index in range(count):
+            if self._closed:
+                break
+            future = await self._send_probe(wait_for_reply=True)
+            assert future is not None
+            try:
+                await asyncio.wait_for(future, timeout=per_probe_timeout)
+            except asyncio.TimeoutError:
+                for probe_id, (_, pending_future) in list(self._pending_probes.items()):
+                    if pending_future is future:
+                        self._pending_probes.pop(probe_id, None)
+                        break
+            except asyncio.CancelledError:
+                if self._closed:
+                    break
+                raise
+            if index + 1 < count and spacing > 0:
+                await asyncio.sleep(min(0.25, float(spacing)))
+        return self.latency_metrics()
+
+    def latency_metrics(self) -> dict[str, Any]:
+        samples = list(self._rtt_samples_ms)
+        jitter = 0.0
+        if len(samples) > 1:
+            jitter = sum(abs(second - first) for first, second in zip(samples, samples[1:])) / (len(samples) - 1)
+        return {
+            "samples": len(samples),
+            "rtt_ms": round(samples[-1], 2) if samples else None,
+            "smoothed_rtt_ms": round(self._smoothed_rtt_ms, 2) if self._smoothed_rtt_ms is not None else None,
+            "jitter_ms": round(jitter, 2) if samples else None,
+        }
 
     async def _sender(self) -> None:
         try:
@@ -294,12 +418,16 @@ class AsyncHeartbeatChannel(AsyncJsonLineChannel):
                 await asyncio.sleep(self._interval)
                 if self._closed:
                     return
-                async with self._send_lock:
-                    try:
-                        await self._inner.send({"_sys": "ping", "ts": time.time()})
-                    except Exception:
-                        return
+                try:
+                    await self._send_probe(wait_for_reply=False)
+                except Exception:
+                    return
         except asyncio.CancelledError:
+            return
+        except BaseException as exc:
+            # A failed pong write or unexpected transport error must wake business recv;
+            # otherwise the reader task could die while callers wait forever on an empty queue.
+            self._reader_error = exc
             return
 
     async def _reader(self) -> None:
@@ -316,6 +444,16 @@ class AsyncHeartbeatChannel(AsyncJsonLineChannel):
                     continue
                 if msg.get("_sys") == "ping":
                     self._touch()
+                    probe_id = msg.get("probe_id")
+                    if isinstance(probe_id, str) and 0 < len(probe_id) <= 64:
+                        async with self._send_lock:
+                            await self._inner.send({"_sys": "pong", "probe_id": probe_id})
+                    continue
+                if msg.get("_sys") == "pong":
+                    self._touch()
+                    probe_id = msg.get("probe_id")
+                    if isinstance(probe_id, str) and len(probe_id) <= 64:
+                        self._record_pong(probe_id)
                     continue
                 self._touch()
                 await self._business_queue.put(msg)
@@ -407,6 +545,10 @@ class AsyncHeartbeatChannel(AsyncJsonLineChannel):
         if self._closed:
             return
         self._closed = True
+        for _, future in self._pending_probes.values():
+            if future is not None and not future.done():
+                future.cancel()
+        self._pending_probes.clear()
         for t in self._tasks:
             t.cancel()
         for t in self._tasks:

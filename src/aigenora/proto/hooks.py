@@ -14,6 +14,10 @@ class HookResult:
     abort: bool = False
 
 
+class InvalidHumanDecisionError(ValueError):
+    """An explicit human submission is present but is not a legal local action."""
+
+
 class ProtocolHooks(ABC):
     bus: Any  # DecisionBus | None
     snapshot: Any  # SnapshotBus
@@ -29,6 +33,10 @@ class ProtocolHooks(ABC):
     # v019-M2: 协议声明决策 schema（当前代码库不存在，M2 全新引入）。子类按需覆盖。
     # 形如 {"match_key":"round","value_field":"choice","choices":{...},"policy_family":"rps","beats":{...}}
     DECISION_SCHEMA: dict[str, Any] | None = None
+    # Protocol authors opt into ``human`` only after every local action path uses
+    # an explicit DecisionBus input and rejects timeout/invalid input without auto
+    # fallback.  Base hooks safely support automatic and hybrid execution only.
+    SUPPORTED_CONTROL_MODES: tuple[str, ...] = ("autonomous", "hybrid")
 
     def proto_init(
         self,
@@ -50,9 +58,24 @@ class ProtocolHooks(ABC):
         self.timing = None  # v004: spec.timing, set by engine after proto_init
         self.bus = None
         self.decision_mode = None  # None | "auto" | "manual"
+        if decision_config:
+            self.control_mode = decision_config.get("control_mode") or (
+                "human" if decision_config.get("mode") == "manual" else "hybrid"
+            )
+        else:
+            self.control_mode = "autonomous"
+        # Enforce the capability at the package API boundary too. CLI host/join do
+        # an earlier preflight for a friendlier error, but direct run_host/run_guest
+        # callers must not be able to bypass a hooks bundle's declaration.
+        from aigenora.control import ensure_control_mode_supported
+
+        ensure_control_mode_supported(self, self.control_mode)
+        self.snapshot.update(control_mode=self.control_mode)
         # auto 模式也创建 bus：默认 hybrid（毫秒级 auto + 人工可干预）；
-        # manual（--coach）才阻塞逐手等待。命令行带 fallback 策略参数（args 非空）时不建 bus。
-        if decision_config and not args:
+        # strict human 才阻塞逐手等待。旧式 fallback 参数仅能抑制 hybrid bus。
+        # Legacy positional args may intentionally suppress the hybrid override bus,
+        # but strict human mode must always have an explicit input channel.
+        if decision_config and (not args or self.control_mode == "human"):
             mode = decision_config.get("mode")
             if mode in ("manual", "auto"):
                 from aigenora.proto.sdk import DecisionBus
@@ -62,8 +85,12 @@ class ProtocolHooks(ABC):
                     timeout=decision_config.get("timeout_seconds", 120),
                     timeout_action=decision_config.get("timeout_action", "forfeit"),
                     fallback_value=decision_config.get("fallback_value"),
+                    require_explicit=bool(decision_config.get("require_explicit", False)),
                 )
                 self.decision_mode = mode
+
+    def supported_control_modes(self) -> tuple[str, ...]:
+        return self.SUPPORTED_CONTROL_MODES
 
     def proto_host_metadata(self) -> tuple[str, str, str, dict[str, Any]]:
         return ("Game", "game", "supply", {})
@@ -107,6 +134,82 @@ class ProtocolHooks(ABC):
 
     def proto_on_end(self) -> None:
         """Free mode: callback when the session ends."""
+
+    # -- authoritative_realtime hooks --
+
+    def proto_realtime_initial_state(self) -> dict[str, Any]:
+        """Host only: create the complete authoritative world at tick 0."""
+        raise NotImplementedError(
+            "proto_realtime_initial_state must be overridden for authoritative_realtime"
+        )
+
+    def proto_realtime_commands(self, state: dict[str, Any], target_tick: int) -> list[dict[str, Any]]:
+        """Return this local Agent's micro-command list for ``target_tick``.
+
+        The call is non-blocking from the engine's perspective: Host never waits for
+        Guest commands.  Human macro strategy should be read from ``self.strategy``
+        and translated into micro commands here.
+        """
+        return []
+
+    def proto_realtime_validate_commands(
+        self,
+        side: str,
+        commands: list[dict[str, Any]],
+        state: dict[str, Any],
+        target_tick: int,
+    ) -> list[dict[str, Any]]:
+        """Validate and normalize a command frame for ``side``.
+
+        Protocols must enforce unit ownership here.  Raising ``ValueError`` rejects a
+        peer frame without stopping the authoritative simulation.
+        """
+        return commands
+
+    def proto_realtime_step(
+        self,
+        state: dict[str, Any],
+        tick: int,
+        commands: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Host only: advance one tick.
+
+        Return ``{"state": ..., "events": [...], "outcome": "none|host|guest|draw"}``.
+        """
+        raise NotImplementedError(
+            "proto_realtime_step must be overridden for authoritative_realtime"
+        )
+
+    def proto_realtime_snapshot(
+        self,
+        state: dict[str, Any],
+        frame: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return protocol-specific fields merged into the local snapshot.json."""
+        return {"world": state}
+
+    def proto_realtime_audit_outcome(self, frame: dict[str, Any]) -> dict[str, Any] | None:
+        """Optional Guest-side post-game audit; never affects or blocks live play.
+
+        Returning ``None`` explicitly defers semantic auditing.  The engine always
+        retains the complete frame and command journals for future offline review.
+        """
+        return None
+
+    def proto_parse_whisper_intent(
+        self,
+        text: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Optionally compile protocol-specific natural language into an intent.
+
+        The Web bridge calls this on a freshly loaded hooks object before falling back
+        to the generic choice/number parser.  Implementations must be deterministic,
+        bounded and side-effect free; real-time hooks use it for macro plans only and
+        never invoke an LLM from the tick loop.
+        """
+        del text, context
+        return None
 
     # -- simultaneous_round hooks --
 
@@ -167,6 +270,52 @@ class ProtocolHooks(ABC):
         """
         raise NotImplementedError("proto_mp_choose_action must be overridden for mental_poker")
 
+    def proto_mp_legal_actions(self, state: dict) -> list[dict[str, Any]]:
+        """Return the local player's currently legal mental-poker actions.
+
+        Human-capable card protocols must override this method.  Returned values
+        are copied into the local snapshot for Web rendering; they must never
+        contain the opponent's hidden cards.
+        """
+        return []
+
+    def proto_realtime_transport_update(self, profile: dict[str, Any]) -> None:
+        """Receive local P2P RTT/jitter advice for real-time command generation.
+
+        ``profile`` is observational local data, not authoritative game state.  Hooks
+        may expose it to their Agent or use it to prefer macro planning over direct
+        micro-control, but must not read it from ``proto_realtime_step`` or make rules
+        depend on it.
+        """
+        del profile
+
+    def proto_mp_coerce_action(self, state: dict, decision: dict[str, Any]) -> dict[str, Any]:
+        """Validate/coerce an explicit DecisionBus record into a mental-poker action."""
+        if not isinstance(decision, dict):
+            raise ValueError("action decision must be an object")
+        kind = decision.get("kind")
+        if kind not in ("play", "draw", "pass"):
+            raise ValueError("kind must be play, draw, or pass")
+        action: dict[str, Any] = {"kind": kind}
+        if kind == "play":
+            id_b = decision.get("id_b")
+            hand = state.get("_mp_hand") or set()
+            if not isinstance(id_b, str) or id_b not in hand:
+                raise ValueError("id_b is not a card in the local hand")
+            action["id_b"] = id_b
+            if decision.get("call_suit") is not None:
+                action["call_suit"] = int(decision["call_suit"])
+        return action
+
+    def proto_mp_apply_local_action(self, state: dict, action: dict[str, Any]) -> None:
+        """Apply business-only local state for an explicit action.
+
+        Automatic ``proto_mp_choose_action`` implementations historically update
+        their own business state before returning.  This callback gives explicit
+        human/hybrid actions the same update without calling the auto picker.
+        """
+        return None
+
     def proto_mp_check_winner(self, state: dict) -> str | None:
         """mental_poker: return "host" / "guest" if the game has a winner, else None.
 
@@ -202,13 +351,70 @@ class ProtocolHooks(ABC):
 
     def _update_timing_snapshot(self, match_key: str, match_value, release_at: float,
                                  deadline_at: float, phase: str = "waiting") -> None:
+        monotonic_now = time.monotonic()
+        epoch_now = time.time()
         self.snapshot.update(
             timing={"match_key": match_key, "match_value": match_value,
-                     "release_at": release_at, "deadline_at": deadline_at, "phase": phase},
+                     "release_at": release_at, "deadline_at": deadline_at,
+                     "release_at_epoch": epoch_now + max(0.0, release_at - monotonic_now),
+                     "deadline_at_epoch": epoch_now + max(0.0, deadline_at - monotonic_now),
+                     "phase": phase},
         )
 
     def _clear_timing_snapshot(self) -> None:
         self.snapshot.update(timing={})
+
+    def _await_human_decision(self, match_key: str, match_value: Any) -> dict:
+        """Open one strict human window and return an explicit submitted decision.
+
+        Unlike the historical ``--coach`` snippets in individual protocols, this
+        helper never manufactures or accepts an automatic fallback.  The protocol
+        still owns legality checks after the decision is returned.
+        """
+        if self.control_mode != "human" or self.bus is None:
+            raise RuntimeError("strict human decision requested outside human control mode")
+        now = time.monotonic()
+        if self.timing_enabled:
+            min_think = float(self.options.get(
+                "min_think_seconds", self.timing.get("min_think_seconds", 0)
+            ) or 0)
+            max_think = float(self.options.get(
+                "max_think_seconds", self.timing.get("max_think_seconds", self.bus.timeout)
+            ) or self.bus.timeout)
+        else:
+            min_think = float(self.options.get("min_think_seconds", 0) or 0)
+            max_think = float(
+                self.options.get("max_think_seconds", self.bus.timeout) or self.bus.timeout
+            )
+        max_think = max(max_think, min_think)
+        self._update_timing_snapshot(
+            match_key, match_value, now + min_think, now + max_think, "waiting"
+        )
+        try:
+            return self.bus.await_latest_decision(
+                match_key=match_key,
+                match_value=match_value,
+                release_at=now + min_think,
+                deadline_at=now + max_think,
+                fallback_value=None,
+            )
+        finally:
+            self._clear_timing_snapshot()
+
+    def _reject_human_decision(
+        self, match_key: str, match_value: Any, decision: Any, reason: str = "invalid"
+    ) -> None:
+        from aigenora.proto.sdk import EventBus
+
+        EventBus(self.state_dir).emit("human_decision_failed", data={
+            "match_key": match_key,
+            "match_value": match_value,
+            "reason": reason,
+            "decision": decision,
+        })
+        raise InvalidHumanDecisionError(
+            f"invalid human decision for {match_key}={match_value}: {reason}"
+        )
 
     # -- v012/v019: hybrid 干预（auto 模式默认可干预，不阻塞） --
 

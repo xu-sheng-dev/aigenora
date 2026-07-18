@@ -649,6 +649,7 @@ class DecisionBus:
         timeout: float = 120.0,
         timeout_action: str = "forfeit",
         fallback_value: dict | None = None,
+        require_explicit: bool = False,
     ):
         self.dir = Path(state_dir) / "decision"
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -658,6 +659,7 @@ class DecisionBus:
         self.timeout = timeout
         self.timeout_action = timeout_action
         self.fallback_value = fallback_value
+        self.require_explicit = require_explicit
         self._lock = threading.Lock()
         self._consumed_offset: int = 0
         # v019-M1: 内存缓存已消费的 decision_id 集合，避免长局全量扫描 consumed.jsonl。
@@ -666,7 +668,7 @@ class DecisionBus:
     def publish_state(self, state_dict: dict) -> None:
         tmp = self.state_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(state_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.state_file)
+        _replace_with_retry(tmp, self.state_file)
 
     def _read_all_decisions(self) -> list[dict]:
         if not self.decisions_file.exists():
@@ -855,7 +857,7 @@ class DecisionBus:
         }
         tmp = fp.with_suffix(".tmp")
         tmp.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(fp)
+        _replace_with_retry(tmp, fp)
 
     def is_finalized(self, match_key: str, match_value: Any) -> bool:
         fp = self._finalized_file()
@@ -898,12 +900,14 @@ class DecisionBus:
         self.publish_state({
             "match_key": match_key,
             "match_value": match_value,
+            "mode": "human" if self.require_explicit else "manual",
             "release_at": release_at,
             "deadline_at": deadline_at,
             "waiting_for": "decision",
         })
         bus.emit("local_decision_window_started", data={
             "match_key": match_key, "match_value": match_value,
+            "mode": "human" if self.require_explicit else "manual",
             "release_at": release_at, "deadline_at": deadline_at,
         })
 
@@ -935,10 +939,20 @@ class DecisionBus:
                     self._write_finalized(match_key, match_value, "release")
                     bus.emit("local_decision_finalized", data={"match_key": match_key, "match_value": match_value, "reason": "release", "decision": latest})
                     return latest
-                fb = fallback_value if fallback_value is not None else (self.fallback_value if isinstance(self.fallback_value, dict) else {"value": self.fallback_value} if self.fallback_value is not None else {})
-                self._write_finalized(match_key, match_value, "fallback")
-                bus.emit("local_decision_fallback", data={"match_key": match_key, "match_value": match_value, "reason": "fallback", "fallback": fb})
-                return fb
+                if not self.require_explicit:
+                    fb = fallback_value if fallback_value is not None else (self.fallback_value if isinstance(self.fallback_value, dict) else {"value": self.fallback_value} if self.fallback_value is not None else {})
+                    self._write_finalized(match_key, match_value, "fallback")
+                    bus.emit("local_decision_fallback", data={"match_key": match_key, "match_value": match_value, "reason": "fallback", "fallback": fb})
+                    return fb
+                self._write_finalized(match_key, match_value, "timeout")
+                bus.emit("human_decision_failed", data={
+                    "match_key": match_key,
+                    "match_value": match_value,
+                    "reason": "timeout",
+                })
+                raise DecisionTimeoutError(
+                    f"Human decision timed out waiting for {match_key}={match_value}"
+                )
 
             # waiting for first decision after release
             time.sleep(self.POLL_INTERVAL)

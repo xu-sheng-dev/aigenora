@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from aigenora.engine.config import get_server
+from aigenora.control import HUMAN, control_mode_from_args, ensure_control_mode_supported
 from aigenora.engine.crypto import protocol_hash, transport_binding_canonical
 from aigenora.engine.keys import load_keys, sign_raw
 from aigenora.engine.p2p import AsyncReplayChannel, create_host_node
@@ -20,6 +21,10 @@ from aigenora.proto.sdk import EventBus
 from aigenora.proto.spec_version import check_spec_version
 from aigenora.proto.validate import validate_extra_args
 from aigenora.agent.skeleton import assert_hooks_implemented
+from aigenora.agent.protocol_ui_p2p import (
+    build_host_ui_artifact,
+    serve_host_ui_and_wait_ready,
+)
 
 
 def _resolve_state_dir(args) -> Path:
@@ -35,6 +40,10 @@ def _run_daemon(args) -> int:
     state_dir = _resolve_state_dir(args)
     protocol_dir = str(Path(args.protocol_dir).resolve())
     state_dir_str = str(state_dir)
+    control_mode = control_mode_from_args(args)
+    from aigenora.agent._web_mode import resolve_web_mode
+    web_mode = resolve_web_mode(args, control_mode=control_mode)
+    controller_required = control_mode == HUMAN and web_mode != "off"
 
     cmd = [sys.executable, "-m", "aigenora", "host",
            "--protocol-dir", protocol_dir,
@@ -46,11 +55,10 @@ def _run_daemon(args) -> int:
         cmd.extend(["--server", args.server])
     if args.options:
         cmd.extend(["--options", args.options])
-    daemon_flag = args.daemon
-    coach_flag = getattr(args, "coach", False) or daemon_flag
+    cmd.extend(["--control-mode", control_mode])
+    if controller_required:
+        cmd.append("--_controller-required")
     pace_val = getattr(args, "pace", 0) or 0
-    if coach_flag:
-        cmd.append("--coach")
     if pace_val > 0:
         cmd.extend(["--pace", str(pace_val)])
     hb_interval = getattr(args, "heartbeat_interval", 10.0)
@@ -63,6 +71,8 @@ def _run_daemon(args) -> int:
         cmd.append("--no-invitation-renew")
     if getattr(args, "allow_skeleton_hooks", False):
         cmd.append("--allow-skeleton-hooks")
+    if getattr(args, "share_ui", False):
+        cmd.append("--share-ui")
     if args.extra_args:
         cmd.extend(["--"] + args.extra_args)
 
@@ -71,6 +81,10 @@ def _run_daemon(args) -> int:
         "status": "starting",
         "protocol_dir": protocol_dir,
         "state_dir": state_dir_str,
+        "local_control_mode": control_mode,
+        "web_mode": web_mode,
+        "controller_required": controller_required,
+        "share_ui": bool(getattr(args, "share_ui", False)),
         "started_at": time.time(),
     }
     (state_dir / "session.json").write_text(json.dumps(session_meta, ensure_ascii=False), encoding="utf-8")
@@ -134,21 +148,36 @@ def _run_daemon(args) -> int:
     startup_data = startup_event.get("data") or {}
     post_id = str(startup_data.get("post_id") or "")
     protocol_id = str(startup_data.get("protocol_id") or "")
+    shared_ui_manifest_hash = str(startup_data.get("ui_manifest_hash") or "")
     session_meta["post_id"] = post_id
     session_meta["protocol_id"] = protocol_id
+    if shared_ui_manifest_hash:
+        session_meta["shared_ui_manifest_hash"] = shared_ui_manifest_hash
     write_session_meta(state_dir, session_meta)
 
     # Based on web_mode, decide whether to start the relay subprocess and whether to open a browser
-    from aigenora.agent._web_mode import resolve_web_mode
+    from aigenora.agent._controller import mark_controller_ready
     from aigenora.agent.web import spawn_broadcast
-    web_mode = resolve_web_mode(args)
-    session_meta["web_mode"] = web_mode
     bc = None
     if web_mode != "off":
         bc = spawn_broadcast(state_dir, open_browser=(web_mode == "auto"))
         if bc:
             session_meta["broadcast_pid"] = bc["pid"]
             session_meta["broadcast_url"] = bc["url"]
+            if controller_required:
+                mark_controller_ready(state_dir)
+        elif controller_required:
+            session_meta["status"] = "startup_failed"
+            session_meta["startup_error"] = "human Web controller failed to start"
+            write_session_meta(state_dir, session_meta)
+            terminate_process(proc)
+            print(json.dumps({
+                "status": "error",
+                "reason": "human Web controller failed to start",
+                "state_dir": state_dir_str,
+                "control_mode": control_mode,
+            }, ensure_ascii=False))
+            return 1
     write_session_meta(state_dir, session_meta)
 
     result = {
@@ -156,7 +185,9 @@ def _run_daemon(args) -> int:
         "state_dir": state_dir_str,
         "post_id": post_id,
         "protocol_id": protocol_id,
+        "control_mode": control_mode,
         "web_mode": web_mode,
+        "share_ui": bool(getattr(args, "share_ui", False)),
     }
     if bc:
         result["broadcast_url"] = bc["url"]
@@ -173,6 +204,7 @@ def run(args) -> int:
 
 
 async def _network_host(args) -> int:
+    control_mode = control_mode_from_args(args)
     protocol_dir = Path(args.protocol_dir)
     spec = json.loads((protocol_dir / "spec.json").read_text(encoding="utf-8"))
     check_spec_version(spec, reject_unknown=True)
@@ -185,6 +217,12 @@ async def _network_host(args) -> int:
     kp = load_keys(args.data_dir)
     proto_id = protocol_hash(protocol_dir / "spec.json")
     hooks = load_hooks(protocol_dir)
+    ensure_control_mode_supported(hooks, control_mode)
+    shared_ui_artifact = None
+    if getattr(args, "share_ui", False):
+        shared_ui_artifact = build_host_ui_artifact(protocol_dir)
+        if shared_ui_artifact is None:
+            raise RuntimeError("--share-ui requires protocol_dir/ui/index.html")
     # Pre-initialize hooks only to obtain metadata; use a temporary dir to avoid snapshot polluting CWD
     import tempfile
     _tmp_state = Path(tempfile.mkdtemp(prefix="aigenora-meta-"))
@@ -194,7 +232,6 @@ async def _network_host(args) -> int:
     shutil.rmtree(_tmp_state, ignore_errors=True)
     publish_options = options or hook_options or {}
 
-    coach = getattr(args, "coach", False)
     pace = getattr(args, "pace", 0) or 0
     state_base = getattr(args, "_state_dir", None)
     event_bus = EventBus(state_base) if state_base else None
@@ -214,6 +251,7 @@ async def _network_host(args) -> int:
             "transport_info": {"version": 1, "endpoint_id": kp.public_key, "ticket": ticket},
             "transport_binding_signature": sign_raw(kp.private_key, binding.encode("utf-8")),
             "protocol_id": proto_id,
+            "host_control_mode": control_mode,
             "type": invite_type or "supply",
         }
         if publish_options:
@@ -222,7 +260,10 @@ async def _network_host(args) -> int:
         post_id = data["post_id"]
         print(f"invite_created: true")
         print(f"post_id: {post_id}")
-        _emit(event_bus, "invite_created", {"post_id": post_id, "protocol_id": proto_id})
+        invite_event = {"post_id": post_id, "protocol_id": proto_id}
+        if shared_ui_artifact is not None:
+            invite_event["ui_manifest_hash"] = shared_ui_artifact.offer["manifest_hash"]
+        _emit(event_bus, "invite_created", invite_event)
 
         # P2: start the invitation auto-renewal loop (unless --no-invitation-renew is set)
         if not getattr(args, "no_invitation_renew", False):
@@ -238,26 +279,50 @@ async def _network_host(args) -> int:
         first = await channel.recv()
         session_id_val = ""
         guest_public_key = ""
+        guest_control_mode = "hybrid"
         if first.get("_session_init") is True:
             guest_public_key = first.get("guest_public_key", "")
+            candidate_guest_mode = first.get("guest_control_mode")
+            if candidate_guest_mode in ("autonomous", "hybrid", "human"):
+                guest_control_mode = candidate_guest_mode
             session_nonce = first.get("session_nonce", "")
             host_signature = sign_session(kp, post_id, kp.public_key, guest_public_key, proto_id, session_nonce)
-            await channel.send(
-                {
-                    "_session_proof": True,
-                    "host_public_key": kp.public_key,
-                    "host_signature": host_signature,
-                    "protocol_id": proto_id,
-                }
+            guest_ui_capabilities = first.get("ui_capabilities")
+            offered_ui = (
+                shared_ui_artifact
+                if isinstance(guest_ui_capabilities, dict)
+                and guest_ui_capabilities.get("p2p_ui_v1") is True
+                else None
             )
-            ready = await channel.recv()
+            proof_payload = {
+                "_session_proof": True,
+                "host_public_key": kp.public_key,
+                "host_signature": host_signature,
+                "protocol_id": proto_id,
+                "host_control_mode": control_mode,
+            }
+            if offered_ui is not None:
+                proof_payload["ui_offer"] = offered_ui.offer
+            await channel.send(proof_payload)
+            ready = await serve_host_ui_and_wait_ready(channel, artifact=offered_ui)
             if ready.get("_session_ready") is True and ready.get("session_id"):
                 session_id_val = ready["session_id"]
                 print(f"session_id: {session_id_val}")
+                ready_ui = ready.get("ui_artifact")
+                if isinstance(ready_ui, dict):
+                    update_session_meta(state_base, ui_artifact=ready_ui)
+                    if ready_ui.get("source_kind") == "host_p2p":
+                        _emit(event_bus, "ui_artifact_shared", ready_ui)
         else:
             channel = AsyncReplayChannel(channel, first)
         print(f"peer_joined: {guest_public_key[:16]}...")
-        _emit(event_bus, "peer_joined", {"guest_public_key": guest_public_key, "session_id": session_id_val})
+        update_session_meta(state_base, peer_control_mode=guest_control_mode)
+        _emit(event_bus, "peer_joined", {
+            "guest_public_key": guest_public_key,
+            "session_id": session_id_val,
+            "local_control_mode": control_mode,
+            "peer_control_mode": guest_control_mode,
+        })
         # Paired; stop the renewal loop
         if renew_task is not None and not renew_task.done():
             renew_task.cancel()
@@ -267,8 +332,12 @@ async def _network_host(args) -> int:
                 pass
             renew_task = None
         try:
+            if getattr(args, "_controller_required", False) and state_base:
+                from aigenora.agent._controller import wait_for_controller_ready
+                await asyncio.to_thread(wait_for_controller_ready, state_base)
             result = await run_host_async(protocol_dir, channel, options=options, args=args.extra_args,
-                                 state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
+                                 state_base=state_base, event_bus=event_bus,
+                                 control_mode=control_mode, pace=pace,
                                  heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
                                  heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
                                  session_id=session_id_val, keypair=kp,

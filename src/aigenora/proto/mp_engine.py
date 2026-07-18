@@ -996,6 +996,62 @@ def _run_mp_sync_guest(
                              hooks.proto_host_metadata(), winner)
 
 
+def _mp_select_local_action(s: _MpSession, hooks: Any, action_seq: int) -> dict[str, Any]:
+    """Resolve one mental-poker action through the participant's local control mode."""
+    hand_cards = s.state.get("_mp_hand_cards") or {}
+    deck = s.state.get("_mp_deck_view")
+    legal_actions = hooks.proto_mp_legal_actions(s.state)
+    hand_view = [
+        {"id_b": id_b, "rank": int(face[0]), "suit": int(face[1])}
+        for id_b, face in sorted(hand_cards.items())
+    ]
+    opponent = "guest" if s.role == "host" else "host"
+    hooks.snapshot.update(
+        phase="action_required" if hooks.control_mode == "human" else "playing",
+        action_seq=action_seq,
+        hand=hand_view,
+        legal_actions=legal_actions,
+        stock_count=len(deck.stock) if deck is not None else 0,
+        opponent_hand_count=len(deck.hand_of(opponent)) if deck is not None else 0,
+        last_event={
+            "summary": "Choose a card action" if hooks.control_mode == "human" else "Selecting card action",
+            "structured": {"action_seq": action_seq, "control_mode": hooks.control_mode},
+        },
+    )
+
+    explicit: dict[str, Any] | None = None
+    if hooks.control_mode == "human":
+        decision = hooks._await_human_decision("action_seq", action_seq)
+        try:
+            explicit = hooks.proto_mp_coerce_action(s.state, decision)
+        except (KeyError, TypeError, ValueError) as exc:
+            hooks._reject_human_decision("action_seq", action_seq, decision, str(exc))
+    elif hooks.control_mode == "hybrid":
+        decision = hooks._consume_hybrid("action_seq", action_seq)
+        if decision is not None:
+            try:
+                explicit = hooks.proto_mp_coerce_action(s.state, decision)
+            except (KeyError, TypeError, ValueError) as exc:
+                _emit(s.bus, "local_decision_rejected", {
+                    "match_key": "action_seq",
+                    "match_value": action_seq,
+                    "reason": str(exc),
+                    "decision": decision,
+                })
+
+    if explicit is not None:
+        hooks.proto_mp_apply_local_action(s.state, explicit)
+        hooks.snapshot.update(
+            phase="action_submitted",
+            last_event={
+                "summary": f"Submitted {explicit.get('kind', 'action')}",
+                "structured": {"action_seq": action_seq, "action": explicit},
+            },
+        )
+        return explicit
+    return hooks.proto_mp_choose_action(s.state)
+
+
 def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
                        spec: dict[str, Any], validate: bool, *, host_first: bool) -> str | None:
     """Strictly alternating turns. The actor plays / draws / passes; the peer verifies.
@@ -1004,11 +1060,13 @@ def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
     when both sides stall (two consecutive ``mp_pass`` → ``state["_mp_stalled"]``).
     """
     turn = 0
+    local_action_seq = 0
     consecutive_passes = 0
     while True:
         actor = "host" if turn % 2 == 0 else "guest"
         if actor == s.role:
-            action = hooks.proto_mp_choose_action(s.state)
+            action = _mp_select_local_action(s, hooks, local_action_seq)
+            local_action_seq += 1
             kind = action.get("kind")
             if kind == "play":
                 consecutive_passes = 0
@@ -1347,11 +1405,13 @@ async def _run_mp_async_guest(
 async def _mp_play_loop_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineChannel,
                               spec: dict[str, Any], validate: bool) -> str | None:
     turn = 0
+    local_action_seq = 0
     consecutive_passes = 0
     while True:
         actor = "host" if turn % 2 == 0 else "guest"
         if actor == s.role:
-            action = hooks.proto_mp_choose_action(s.state)
+            action = _mp_select_local_action(s, hooks, local_action_seq)
+            local_action_seq += 1
             kind = action.get("kind")
             if kind == "play":
                 consecutive_passes = 0

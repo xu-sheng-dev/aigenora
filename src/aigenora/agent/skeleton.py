@@ -333,6 +333,52 @@ class Hooks(ProtocolHooks):
     return _common_header(spec, "free") + body
 
 
+def _skeleton_authoritative_realtime(spec: dict[str, Any]) -> str:
+    name = spec.get("name") or "Generated Real-time Game"
+    proto_type = spec.get("type") or "game"
+    body = f'''
+class Hooks(ProtocolHooks):
+    """authoritative_realtime: Host advances the world; Guest sends future commands.
+
+    Live play never waits for Guest verification.  The engine owns tick scheduling,
+    command acknowledgements, state/hash chaining and journals.  Hooks own only game
+    state, command ownership/shape, one-tick simulation and optional post-game audit.
+    """
+
+    def proto_host_metadata(self):
+        return ({name!r}, "generated,realtime", {proto_type!r}, {{}})
+
+    def proto_realtime_initial_state(self):
+        """Host only: return the complete JSON-serializable world at tick 0."""
+{_raise_block("proto_realtime_initial_state")}
+
+    def proto_realtime_commands(self, state, target_tick):
+        """Both sides: compile local macro intent and/or direct micro input into commands."""
+{_raise_block("proto_realtime_commands")}
+
+    def proto_realtime_transport_update(self, profile):
+        """Optional: receive local RTT/lead/control advice; must not alter shared rules."""
+        return None
+
+    def proto_realtime_validate_commands(self, side, commands, state, target_tick):
+        """Reject malformed commands and commands for units not owned by side."""
+{_raise_block("proto_realtime_validate_commands")}
+
+    def proto_realtime_step(self, state, tick, commands):
+        """Host only: return {{state, events, outcome}} for exactly one tick."""
+{_raise_block("proto_realtime_step")}
+
+    def proto_realtime_snapshot(self, state, frame):
+        """Optional UI projection; the safe default exposes the complete world."""
+        return {{"world": state}}
+
+    def proto_realtime_audit_outcome(self, frame):
+        """Optional Guest post-game check. None defers semantic auditing."""
+        return None
+'''
+    return _common_header(spec, "authoritative_realtime") + body
+
+
 def _skeleton_fallback(spec: dict[str, Any], flow_mode: str) -> str:
     name = spec.get("name") or "Generated Protocol"
     proto_type = spec.get("type") or "supply"
@@ -378,6 +424,8 @@ def _skeleton(spec: dict[str, Any] | None = None) -> str:
         return _skeleton_session_loop(spec)
     if flow_mode == "free":
         return _skeleton_free(spec)
+    if flow_mode == "authoritative_realtime":
+        return _skeleton_authoritative_realtime(spec)
     return _skeleton_fallback(spec, flow_mode)
 
 

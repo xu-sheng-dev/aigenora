@@ -127,6 +127,7 @@ def run(args) -> int:
                 str(item.get("agent_id", "") or ""),
                 _pricing_text(item),
                 _options_text(item),
+                str(item.get("host_control_mode", "hybrid") or "hybrid"),
             ]))
         return 0
     print(f"Total: {total}")
@@ -134,6 +135,7 @@ def run(args) -> int:
         print(f"{item.get('post_id')} [{item.get('type', 'chat')}] {item.get('message', '')}")
         print(f"  protocol_id: {item.get('protocol_id', '')}")
         print(f"  public_key: {item.get('public_key', '')}")
+        print(f"  host_control_mode: {item.get('host_control_mode', 'hybrid') or 'hybrid'}")
         options_text = _options_text(item)
         if options_text:
             print(f"  options: {options_text}")

@@ -13,7 +13,6 @@ import json
 import threading
 import time
 import webbrowser
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,8 @@ from urllib.parse import urlparse
 
 from aigenora.proto.decide_gateway import submit_decision
 from aigenora.agent.coach import CoachWorker
-from aigenora.proto.sdk import DecisionBus, DetailLog, EventBus, SnapshotBus, StrategyStore, WhisperLog
+from aigenora.proto.sdk import DetailLog, EventBus, SnapshotBus, StrategyStore, WhisperLog
+from aigenora.control import declared_control_modes
 
 
 class _BadRequest(Exception):
@@ -106,10 +106,118 @@ def resolve_protocol_dir(root_dir: str | Path) -> Path | None:
     return None
 
 
+def _read_session_meta(root_dir: str | Path) -> dict[str, Any]:
+    """Read daemon session metadata from a parent or resolved child directory."""
+    root = Path(root_dir)
+    candidates = [root / "session.json"]
+    try:
+        effective = resolve_state_dir(root)
+        candidates.extend([effective / "session.json", effective.parent / "session.json"])
+    except Exception:
+        pass
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def session_runtime_info(root_dir: str | Path) -> dict[str, Any]:
+    """Return stable local runtime metadata for the parent page and protocol UI."""
+    root = Path(root_dir)
+    cur = resolve_state_dir(root)
+    meta = _read_session_meta(root)
+    snapshot = SnapshotBus(cur).read() or {}
+    mode = meta.get("local_control_mode") or snapshot.get("control_mode") or "hybrid"
+    if mode not in ("autonomous", "hybrid", "human"):
+        mode = "hybrid"
+    role = meta.get("role") or snapshot.get("role") or ""
+    peer_mode = meta.get("peer_control_mode") or ""
+    supported: list[str] = []
+    schema = None
+    ui_artifact = meta.get("ui_artifact") if isinstance(meta.get("ui_artifact"), dict) else None
+    protocol_dir = resolve_protocol_dir(root)
+    if protocol_dir is not None:
+        try:
+            from aigenora.proto.loader import load_hooks
+            hooks = load_hooks(protocol_dir)
+            supported = list(declared_control_modes(hooks))
+            schema = getattr(hooks, "DECISION_SCHEMA", None)
+        except Exception:
+            supported = []
+            schema = None
+        if ui_artifact is None and (protocol_dir / "ui" / "index.html").is_file():
+            try:
+                from aigenora.agent.protocol_ui import read_ui_sidecar
+                sidecar = read_ui_sidecar(protocol_dir) or {}
+                source_kind = sidecar.get("source_kind") or (
+                    "platform" if sidecar.get("source_server") else "local"
+                )
+                ui_artifact = {
+                    "status": (
+                        "session_consent_required"
+                        if source_kind == "host_p2p"
+                        else "available"
+                    ),
+                    "source_kind": source_kind,
+                }
+                if sidecar.get("ui_manifest_hash"):
+                    ui_artifact["manifest_hash"] = sidecar["ui_manifest_hash"]
+                if sidecar.get("source_peer"):
+                    ui_artifact["source_peer"] = sidecar["source_peer"]
+            except Exception:
+                ui_artifact = {"status": "available", "source_kind": "local"}
+    return {
+        "root_dir": str(root),
+        "state_dir": str(cur),
+        "role": role,
+        "control_mode": mode,
+        "peer_control_mode": peer_mode,
+        "supported_control_modes": supported,
+        "decision_schema": schema,
+        "web_mode": meta.get("web_mode") or "",
+        "ui_artifact": ui_artifact,
+    }
+
+
 def _ui_dir(root_dir: str | Path) -> Path | None:
+    meta = _read_session_meta(root_dir)
+    session_ui_dir = meta.get("ui_dir")
+    if isinstance(session_ui_dir, str) and session_ui_dir:
+        ui = Path(session_ui_dir)
+        if (ui / "index.html").is_file():
+            artifact = meta.get("ui_artifact")
+            source_kind = artifact.get("source_kind") if isinstance(artifact, dict) else None
+            # Remote HTML/JS must use the isolated-origin postMessage bridge.  The
+            # same-origin compatibility path exists only for trusted local installs;
+            # otherwise an old platform/P2P page would inherit the relay origin and
+            # bypass the capability boundary described by the remote-UI consent.
+            if source_kind in {"platform", "host_p2p"} and _detect_legacy_ui(ui):
+                return None
+            return ui
     pd = resolve_protocol_dir(root_dir)
     if pd is None:
         return None
+    try:
+        from aigenora.agent.protocol_ui import read_ui_sidecar
+        sidecar = read_ui_sidecar(pd) or {}
+        # P2P consent is session-scoped.  Old clients may have placed a Host
+        # snapshot in the protocol cache; never auto-execute that in a new session.
+        source_kind = sidecar.get("source_kind")
+        if source_kind == "host_p2p":
+            return None
+        ui = pd / "ui"
+        if source_kind == "platform" and _detect_legacy_ui(ui):
+            return None
+    except Exception:
+        pass
     ui = pd / "ui"
     if (ui / "index.html").exists():
         return ui
@@ -142,6 +250,33 @@ def _detect_legacy_ui(ui_dir: Path | None) -> bool:
     return "parent.postMessage" not in content
 
 
+def _rejected_remote_legacy_source(root_dir: str | Path) -> str | None:
+    """Return the rejected remote source when its UI lacks the bridge contract."""
+    meta = _read_session_meta(root_dir)
+    artifact = meta.get("ui_artifact")
+    source_kind = artifact.get("source_kind") if isinstance(artifact, dict) else None
+    session_ui_dir = meta.get("ui_dir")
+    if source_kind in {"platform", "host_p2p"} and isinstance(session_ui_dir, str):
+        ui = Path(session_ui_dir)
+        if (ui / "index.html").is_file() and _detect_legacy_ui(ui):
+            return source_kind
+
+    protocol_dir = resolve_protocol_dir(root_dir)
+    if protocol_dir is None:
+        return None
+    try:
+        from aigenora.agent.protocol_ui import read_ui_sidecar
+        sidecar = read_ui_sidecar(protocol_dir) or {}
+    except Exception:
+        return None
+    source_kind = sidecar.get("source_kind")
+    ui = protocol_dir / "ui"
+    if source_kind in {"platform", "host_p2p"} and (ui / "index.html").is_file():
+        if _detect_legacy_ui(ui):
+            return source_kind
+    return None
+
+
 # ---------------------------------------------------------------------------
 # HTML template (single file, no build dependency)
 
@@ -150,6 +285,7 @@ _INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>aigenora session</title>
+<link rel="icon" href="data:,">
 <style>
   :root { color-scheme: light dark; }
   html, body { height: 100%; margin: 0; }
@@ -163,6 +299,16 @@ _INDEX_HTML = """<!doctype html>
   .tab:disabled { color: #888; cursor: not-allowed; }
   .tab-spacer { flex: 1; }
   .tab-meta { padding: 8px 12px; font-size: 11px; color: #888; align-self: center; }
+  .mode-badge { align-self: center; display: inline-flex; align-items: center; gap: 7px;
+                margin: 5px 2px; padding: 4px 10px; border-radius: 999px;
+                border: 1px solid #8884; font-size: 11px; font-weight: 700;
+                letter-spacing: .04em; text-transform: uppercase; }
+  .mode-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #f0a93b; }
+  body[data-control-mode="human"] .mode-badge::before { background: #25b889; box-shadow: 0 0 0 3px #25b88922; }
+  body[data-control-mode="autonomous"] .mode-badge::before { background: #6d7cff; box-shadow: 0 0 0 3px #6d7cff22; }
+  body[data-control-mode="human"] .automation-control,
+  body[data-control-mode="human"] .whisper-wrap { display: none !important; }
+  body[data-control-mode="autonomous"] .decision-control { display: none !important; }
   /* Main view: two mutually exclusive views, filling the remaining height */
   .views { flex: 1; min-height: 0; position: relative; }
   .view { position: absolute; inset: 0; display: none; }
@@ -265,9 +411,13 @@ _INDEX_HTML = """<!doctype html>
   /* v014-M2: embedded coach panel (mirrors whisper popover, anchored bottom-left) */
   .coach-wrap { position: fixed; left: 20px; bottom: 20px; z-index: 1000; }
   .coach-fab { width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
-               font-size: 22px; background: #6c5ce7; color: #fff; box-shadow: 0 4px 12px #0004;
-               display: flex; align-items: center; justify-content: center; }
+               background: #6c5ce7; color: #fff; box-shadow: 0 4px 12px #0004;
+               display: flex; align-items: center; justify-content: center;
+               transition: transform .16s ease, box-shadow .16s ease, background .16s ease; }
   .coach-fab:hover { transform: translateY(-1px); box-shadow: 0 6px 16px #0005; }
+  .coach-fab:focus-visible { outline: 3px solid #a89cff; outline-offset: 3px; }
+  .coach-fab svg { width: 24px; height: 24px; fill: none; stroke: currentColor;
+                   stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .coach-popover { position: fixed; left: 20px; bottom: 80px; width: 420px; max-height: 70vh;
                    display: none; flex-direction: column; background: var(--whisper-bg, #fff);
                    color: inherit; border-radius: 10px; box-shadow: 0 8px 28px #0006;
@@ -299,6 +449,11 @@ _INDEX_HTML = """<!doctype html>
   .coach-popover .input-row textarea { min-height: 36px; max-height: 120px; resize: none;
                                        flex: 1; padding: 8px; }
   .coach-popover .input-row button { padding: 8px 14px; white-space: nowrap; }
+  @media (max-width: 720px) {
+    .tab { padding-inline: 10px; }
+    .tab-meta { display: none; }
+    .mode-badge { margin-left: 6px; padding-inline: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -309,6 +464,7 @@ _INDEX_HTML = """<!doctype html>
   <button class="tab" id="tab-business" data-view="business">Business</button>
   <button class="tab" id="tab-debug" data-view="debug">Raw / Debug</button>
   <div class="tab-spacer"></div>
+  <div class="mode-badge" id="control-mode-badge" title="Local action source">hybrid</div>
   <div class="tab-meta" id="tab-meta"></div>
 </div>
 
@@ -334,7 +490,16 @@ _INDEX_HTML = """<!doctype html>
 </div>
 
 <div class="coach-wrap">
-  <button class="coach-fab" id="coach-toggle" title="Tactical coach: analyze the live game with your agent CLI">🎓</button>
+  <button class="coach-fab" id="coach-toggle" type="button"
+          aria-label="Open tactical coach"
+          title="Tactical coach: analyze the live game with your agent CLI">
+    <svg class="coach-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.25"></circle>
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path>
+      <path d="M8.75 8.75 6.6 6.6M15.25 8.75l2.15-2.15M8.75 15.25 6.6 17.4M15.25 15.25l2.15 2.15"></path>
+      <circle cx="12" cy="12" r=".8" fill="currentColor" stroke="none"></circle>
+    </svg>
+  </button>
 </div>
 <div class="coach-popover" id="coach-popover">
   <header>
@@ -363,7 +528,7 @@ _INDEX_HTML = """<!doctype html>
          (see <code>docs/cn/SKILL.md</code> §UI postMessage protocol).</p>
     </div>
     <iframe id="business-frame" src="about:blank" style="display:none"
-            sandbox="allow-scripts allow-popups allow-modals"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
             referrerpolicy="no-referrer"></iframe>
     <!-- v005 legacy fallback: same-origin sandbox for built-in protocol UIs
          not yet migrated to postMessage bridge. Detected at runtime. -->
@@ -378,7 +543,7 @@ _INDEX_HTML = """<!doctype html>
         <div id="snapshot" class="kv"></div>
       </div>
 
-      <div class="block">
+      <div class="block decision-control">
         <h2>Submit Decision</h2>
         <p class="warn">Spec-constrained structured decision, written to DecisionBus, consumed by hooks.</p>
         <div id="decision-form"></div>
@@ -389,7 +554,7 @@ _INDEX_HTML = """<!doctype html>
         </details>
       </div>
 
-      <div class="block">
+      <div class="block automation-control">
         <h2>Strategy JSON</h2>
         <p class="warn">Written to strategy.json, read by hooks before each decision round. Must be a JSON object.</p>
         <textarea id="strategy" rows="6"></textarea>
@@ -420,6 +585,23 @@ const toast = (msg, ok=true) => {
 };
 
 let currentSnapshot = {};
+let runtimeInfo = { control_mode: "hybrid" };
+
+async function loadRuntimeInfo() {
+  try {
+    const r = await fetch("/api/info");
+    if (r.ok) runtimeInfo = await r.json();
+  } catch (_) {}
+  const mode = runtimeInfo.control_mode || "hybrid";
+  document.body.dataset.controlMode = mode;
+  const badge = $("#control-mode-badge");
+  badge.textContent = mode;
+  badge.title = mode === "human"
+    ? "Every local action requires an explicit human submission"
+    : mode === "autonomous"
+      ? "Local actions are generated automatically"
+      : "Automatic play with human intervention enabled";
+}
 
 function renderSnapshot(snap) {
   currentSnapshot = snap || {};
@@ -790,12 +972,15 @@ document.querySelectorAll(".tab").forEach(t => {
   t.addEventListener("click", () => switchTab(t.dataset.view));
 });
 
-async function initUiTab() {
-  let info = { available: false };
+async function fetchUiAvailable() {
   try {
     const r = await fetch("/api/ui-available");
-    if (r.ok) info = await r.json();
+    if (r.ok) return await r.json();
   } catch (_) { /* ignore */ }
+  return { available: false };
+}
+
+function applyUiAvailable(info) {
   const frame = $("#business-frame");
   const legacyFrame = $("#business-frame-legacy");
   const fallback = $("#business-fallback");
@@ -817,6 +1002,7 @@ async function initUiTab() {
     }
     fallback.style.display = "none";
     $("#tab-meta").textContent = info.protocol_name || "";
+    $("#tab-business").disabled = false;
     document.body.dataset.hasBusinessUi = "true";
     $(".whisper-wrap").style.display = "none";
   } else {
@@ -825,6 +1011,37 @@ async function initUiTab() {
     fallback.style.display = "block";
     $("#tab-business").disabled = true;
     $("#tab-meta").textContent = "No business UI";
+  }
+}
+
+// Poll until /api/ui-available reports available (or give up). The protocol dir may
+// not be resolved yet at first load — e.g. a Guest opening the page before peer_joined
+// lands its protocol_dir into session.json. Re-polling lets the panel appear once it's
+// ready, and hides the floating whisper box at that point (so both boxes never coexist).
+let _uiApplied = false;
+function pollUiAvailable() {
+  if (_uiApplied) return;
+  fetchUiAvailable().then(info => {
+    if (_uiApplied) return;
+    if (info.available) {
+      _uiApplied = true;
+      applyUiAvailable(info);
+    }
+  });
+}
+
+async function initUiTab() {
+  const info = await fetchUiAvailable();
+  applyUiAvailable(info);
+  if (info.available) {
+    _uiApplied = true;
+  } else {
+    // Not ready yet — retry every 2s for up to ~30s, then stop (page reload will recheck).
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (_uiApplied || ++tries > 15) { clearInterval(iv); return; }
+      pollUiAvailable();
+    }, 2000);
   }
   // Default tab: business if available, otherwise debug; localStorage takes precedence
   let preferred = null;
@@ -871,7 +1088,7 @@ async function initUiTab() {
     if (msg.type === "hello") {
       // Capability negotiation: the iframe declares capabilities, the parent returns granted
       const requested = new Set(msg.capabilities || []);
-      const supported = ["snapshot", "strategy", "decide", "details", "events"];
+      const supported = ["info", "snapshot", "strategy", "orders", "whisper", "decide", "details", "events"];
       _granted = new Set([...requested].filter(c => supported.includes(c)));
       return { type: "hello-ack", ok: true, granted: [..._granted] };
     }
@@ -883,8 +1100,11 @@ async function initUiTab() {
     }
     // Same-origin forward to broadcast /api/*
     const methodMap = {
+      info:     { path: "/api/info", method: "GET" },
       snapshot: { path: "/api/snapshot", method: "GET" },
       strategy: { path: "/api/strategy", method: "GET" },
+      orders:   { path: "/api/strategy/merge", method: "POST" },
+      whisper:  { path: "/api/whisper", method: "POST" },
       details:  { path: "/api/details", method: "GET" },
       events:   { path: "/api/events", method: "GET" },
       decide:   { path: "/api/decide", method: "POST" },
@@ -900,7 +1120,8 @@ async function initUiTab() {
   }
 
   // Push SSE updates to the UI iframe: poll /api/snapshot periodically and push
-  let _lastPush = 0;
+  let _lastPush = "";
+  let _lastPushAt = 0;
   setInterval(async () => {
     if (!_uiOrigin || _granted.size === 0) return;
     const frame = document.getElementById("business-frame");
@@ -911,20 +1132,30 @@ async function initUiTab() {
       const r = await fetch("/api/snapshot");
       const snap = await r.json();
       const sig = JSON.stringify(snap);
-      if (sig === _lastPush) return;
-      _lastPush = sig;
+      const now = Date.now();
+      // postMessage is fire-and-forget. A changed frame can be sent while the
+      // iframe is navigating or temporarily detached, so a signature-only
+      // de-duplication can lose the terminal frame forever. Re-emit the latest
+      // replacement snapshot once per second; changed real-time frames still
+      // flow at the 100 ms polling cadence.
+      if (sig === _lastPush && now - _lastPushAt < 1000) return;
       frame.contentWindow.postMessage({
         source: "aigenora-broadcast",
         type: "push",
         event: "snapshot",
         data: snap,
       }, _uiOrigin);
+      _lastPush = sig;
+      _lastPushAt = now;
     } catch (_) {}
-  }, 2000);
+  // Real-time protocol snapshots are overwritten rather than appended, so a 100ms
+  // bridge poll stays bounded and matches the reference RTS 10 Hz state stream.
+  }, 100);
 })();
 
 // Initial fetch
 (async () => {
+  await loadRuntimeInfo();
   const s = await fetch("/api/snapshot").then(r => r.json());
   renderSnapshot(s);
   const st = await fetch("/api/strategy").then(r => r.json());
@@ -1246,8 +1477,7 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                 if path == "/api/details":
                     return self._send_json(200, DetailLog(effective()).read_all())
                 if path == "/api/info":
-                    cur = effective()
-                    return self._send_json(200, {"root_dir": str(root_dir), "state_dir": str(cur)})
+                    return self._send_json(200, session_runtime_info(root_dir))
                 if path == "/api/ui-available":
                     return self._handle_ui_available()
                 if path.startswith("/ui/"):
@@ -1274,6 +1504,12 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                 if path == "/api/decide":
                     if not isinstance(body, dict):
                         return self._send_json(400, {"error": "decision must be a JSON object"})
+                    if session_runtime_info(root_dir).get("control_mode") == "autonomous":
+                        return self._send_json(409, {
+                            "ok": False,
+                            "reason": "control_mode_autonomous",
+                            "error": "direct decisions are disabled in autonomous mode",
+                        })
                     result = submit_decision(
                         str(cur), body,
                         origin="web",
@@ -1319,6 +1555,8 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                         return self._send_json(400, {"error": f"role must be one of {WhisperLog.VALID_ROLES}"})
                     if not text:
                         return self._send_json(400, {"error": "text must not be empty"})
+                    if len(text) > 2000:
+                        return self._send_json(400, {"error": "text exceeds 2000 chars"})
                     entry = WhisperLog(cur).append(
                         role, text,
                         origin="web",
@@ -1334,18 +1572,28 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                             from aigenora.proto.whisper_bridge import parse_whisper_to_intent, materialize_intent
                             # 读协议 DECISION_SCHEMA（而非只读 CHOICE_KEYWORDS）
                             schema = None
+                            protocol_whisper_parser = None
                             cur_match_key = "round"
                             cur_match_value = _current_round(cur)
+                            snapshot_context = SnapshotBus(cur).read() or {}
                             try:
                                 pd = resolve_protocol_dir(cur)
                                 if pd:
                                     from aigenora.proto.loader import load_hooks
                                     h = load_hooks(pd)
                                     schema = getattr(h, "DECISION_SCHEMA", None)
+                                    protocol_whisper_parser = getattr(h, "proto_parse_whisper_intent", None)
                                     if schema and schema.get("match_key"):
                                         cur_match_key = schema["match_key"]
                             except Exception:
                                 pass
+                            if cur_match_key == "tick":
+                                world = snapshot_context.get("world") if isinstance(snapshot_context, dict) else None
+                                tick_value = snapshot_context.get("tick") if isinstance(snapshot_context, dict) else None
+                                if tick_value is None and isinstance(world, dict):
+                                    tick_value = world.get("tick")
+                                if tick_value is not None:
+                                    cur_match_value = int(tick_value)
                             # 从 decision/state.json 读当前窗口
                             try:
                                 state_fp = Path(cur) / "decision" / "state.json"
@@ -1358,12 +1606,20 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                             except Exception:
                                 pass
                             ck = schema.get("choices") if schema else None
-                            intent = parse_whisper_to_intent(text, schema, choice_keywords=ck, match_key=cur_match_key, match_value=cur_match_value)
+                            intent = None
+                            if callable(protocol_whisper_parser):
+                                try:
+                                    intent = protocol_whisper_parser(text, snapshot_context)
+                                except Exception:
+                                    intent = None
+                            if intent is None:
+                                intent = parse_whisper_to_intent(text, schema, choice_keywords=ck, match_key=cur_match_key, match_value=cur_match_value)
                             if intent is not None:
                                 result = materialize_intent(
                                     intent, state_dir=str(cur), origin="whisper_bridge",
                                     agent_id=body.get("agent_id"), whisper_id=entry.get("id"),
                                     current_match_key=cur_match_key, current_match_value=cur_match_value,
+                                    schema=schema,
                                 )
                                 ack_status = result.get("ack_status", "unparsed")
                                 applied = result.get("applied")
@@ -1458,7 +1714,18 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
         def _handle_ui_available(self):
             ui = _ui_dir(root_dir)
             if ui is None:
-                return self._send_json(200, {"available": False})
+                runtime = session_runtime_info(root_dir)
+                rejected_source = _rejected_remote_legacy_source(root_dir)
+                payload = {
+                    "available": False,
+                    "ui_artifact": runtime.get("ui_artifact"),
+                }
+                if rejected_source:
+                    payload.update({
+                        "reason": "remote_ui_bridge_required",
+                        "rejected_source_kind": rejected_source,
+                    })
+                return self._send_json(200, payload)
             # Simply return the protocol name (if available in the snapshot) for tab display
             snap = {}
             try:
@@ -1474,6 +1741,7 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                 "ui_origin": ui_origin,
                 "legacy_mode": legacy_mode,
                 "protocol_name": snap.get("protocol_name") or snap.get("protocol_id") or "",
+                "ui_artifact": session_runtime_info(root_dir).get("ui_artifact"),
             })
 
         def _serve_ui_static(self, rel: str):
@@ -1777,7 +2045,7 @@ def serve(root_dir: Path, port: int = 0, open_browser: bool = True) -> None:
     if ui_origin:
         print(f"[aigenora session web] ui origin: {ui_origin}  (isolated origin)", flush=True)
     elif ui_dir is not None:
-        print(f"[aigenora session web] ui: legacy mode (same-origin sandbox)", flush=True)
+        print("[aigenora session web] ui: legacy mode (same-origin sandbox)", flush=True)
     if open_browser:
         try:
             webbrowser.open(main_origin)

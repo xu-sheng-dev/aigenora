@@ -19,6 +19,7 @@ _resolve_whisper_override。三者复用同一套解析逻辑，行为一致。
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -187,8 +188,6 @@ def parse_whisper_to_intent(
         schema = {**schema, "choices": choice_keywords}
     choices = schema.get("choices")
     value_field = schema.get("value_field") or ("choice" if choices else "bid")
-    numeric = schema.get("numeric", False)
-
     scope = detect_scope(text)
     target = detect_target_policy(text)
 
@@ -244,18 +243,23 @@ def materialize_intent(
     whisper_id: str | None = None,
     current_match_key: str | None = None,
     current_match_value: Any = None,
+    schema: dict | None = None,
 ) -> dict:
     """把 intent 落到 StrategyStore / DecisionBus / InterventionIntentStore。
 
     返回 {"ack_status": ..., "applied": ..., "detail": ...}
 
     分工规则：
-    - persist + 固定值 → StrategyStore（strategy_active）
+    - persist + 固定值 → StrategyStore（strategy_active），键用 schema.strategy_field
     - persist + policy → StrategyStore mode=policy（policy_active）
     - once + current → DecisionBus（decision_queued），目标窗口已 finalized 则 rejected_finalized
     - once + next + 目标可算(match_value+1) → future decision（decision_queued）
     - once + next + 策略(需窗口打开时算) → IntentStore（intent_queued）
     - once + future/跨局 → IntentStore（intent_queued）
+
+    schema（可选）：协议的 DECISION_SCHEMA。persist 固定值写入时用它声明的
+    ``strategy_field``（RPS=fixed、Weak=bid、Guess=number）做键，与各协议引擎消费侧
+    （``strat.get("fixed")`` 等）一致。缺省回退 value_field。详见根因修复注释。
     """
     from aigenora.proto.sdk import StrategyStore, DecisionBus
     from aigenora.proto.decide_gateway import submit_decision
@@ -264,11 +268,40 @@ def materialize_intent(
     target = intent.get("target_policy", "persist")
     value = intent.get("value")
     policy = intent.get("policy")
+    strategy_patch = intent.get("strategy_patch")
     mk = current_match_key or "round"
 
     # 持久策略/固定值 → StrategyStore
     if scope == "persist":
         strat = StrategyStore(state_dir)
+        if isinstance(strategy_patch, dict):
+            payload = {
+                str(key): val
+                for key, val in strategy_patch.items()
+                if str(key) != "_meta"
+            }
+            try:
+                encoded = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError):
+                return {"ack_status": "error", "applied": None, "detail": "strategy_patch_not_json"}
+            if len(encoded) > 131072:
+                return {"ack_status": "error", "applied": None, "detail": "strategy_patch_too_large"}
+            payload["_meta"] = {
+                "origin": origin,
+                "agent_id": agent_id,
+                "caused_by_whisper_id": whisper_id,
+            }
+            strat.merge(payload)
+            return {
+                "ack_status": "strategy_active",
+                "applied": {"type": "strategy", "payload": payload},
+                "detail": payload,
+            }
         if policy is not None:
             # 动态策略：mode=policy
             payload = dict(policy)
@@ -280,8 +313,14 @@ def materialize_intent(
             strat.merge(payload)
             return {"ack_status": "policy_active", "applied": {"type": "policy", "policy": policy.get("policy")}, "detail": payload}
         if value is not None:
-            payload = {"mode": "fixed", "_meta": {"origin": origin, "agent_id": agent_id, "caused_by_whisper_id": whisper_id}}
-            payload.update(value)
+            # 根因修复：持久固定值写入 schema 声明的 strategy_field，而非 value_field。
+            # 例：RPS value_field=choice 但引擎读 strat.get("fixed")，故须重映射到 fixed。
+            # 数字协议（bid/number）value_field 与 strategy_field 同名，重映射后行为不变。
+            value_field = (schema or {}).get("value_field") or ("choice" if value else "value")
+            strat_field = (schema or {}).get("strategy_field") or value_field
+            fixed_val = next(iter(value.values()))
+            payload = {"mode": "fixed", strat_field: fixed_val,
+                       "_meta": {"origin": origin, "agent_id": agent_id, "caused_by_whisper_id": whisper_id}}
             strat.merge(payload)
             return {"ack_status": "strategy_active", "applied": {"type": "strategy", "payload": payload}, "detail": payload}
         return {"ack_status": "unparsed", "applied": None, "detail": None}

@@ -3,15 +3,15 @@
 Three modes:
 - auto    : start the relay subprocess and open the browser automatically
 - headless: start the relay subprocess without opening a browser (print the URL for the user to open manually)
-- off     : do not start the relay subprocess (pure CLI) — default behavior
+- off     : do not start the relay subprocess (pure CLI)
 
 Priority (high -> low):
 1. CLI argument: --web {auto,headless,off} (mutually-exclusive aliases: --web-on / --no-web / --no-browser)
 2. Environment variable: AIGENORA_WEB
-3. Default value: off
+3. Control-aware default: human -> auto; autonomous/hybrid -> off
 
 --web-on is a convenience alias for --web auto (the common "I want the live web UI" entry point).
-The default is pure CLI (off); opt into the web UI explicitly via --web-on when a live broadcast is wanted.
+An explicit CLI or environment choice always overrides the control-aware default.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def normalize(value: str | None) -> WebMode | None:
     return None
 
 
-def resolve_web_mode(args) -> WebMode:
+def resolve_web_mode(args, *, control_mode: str | None = None) -> WebMode:
     """Resolve the final web mode by CLI > env > default.
 
     args is expected to come from argparse and may contain the following optional attributes:
@@ -55,4 +55,9 @@ def resolve_web_mode(args) -> WebMode:
     env = normalize(os.environ.get(ENV_VAR))
     if env is not None:
         return env
+    # Human-controlled daemon sessions need an actionable surface before the first
+    # decision window.  Explicit CLI/env choices above always win, so headless and
+    # CLI-only human operation remain available.
+    if control_mode == "human":
+        return "auto"
     return DEFAULT_MODE

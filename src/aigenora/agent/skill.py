@@ -401,22 +401,18 @@ _COACH_FIELD_BLOCK = """\
 ## Embedded Coach (v014-M2)
 
 <!-- The webui coach panel lets you talk tactics with your OWN agent CLI during a live game. -->
-<!-- Declare which agent CLI you use; the coach drives it via a command template. -->
+<!-- Declare which agent CLI you use. Built-in command templates exist for all choices. -->
 <!-- coach:user_agent: {target} -->
 <!-- Choices: claude-code | codex | opencode. If you remove this line, the coach falls back to -->
-<!-- the most recent `aigenora skill install --target`, then to claude-code. -->
+<!-- the most recent `aigenora skill install --target`, then the first installed supported CLI. -->
 <!-- Optional command-template overrides. Placeholders (replaced by the coach as single argv -->
-<!-- elements — never via a shell): {session_id}, {coach_skill_file}. When the template has no -->
-<!-- {prompt} placeholder the prompt is fed via STDIN (claude-code default; avoids the Windows .cmd -->
-<!-- shim corrupting multi-line argv). -->
+<!-- elements — never via a shell): {session_id}, {prompt}, {coach_skill_file}, -->
+<!-- {coach_output_file}. When the template has no {prompt} placeholder the prompt is fed via -->
+<!-- STDIN (the claude-code and Codex defaults do this to avoid Windows npm-shim corruption). -->
 <!-- IMPORTANT: your agent CLI loads its GLOBAL instruction file (~/.claude/CLAUDE.md for -->
 <!-- claude-code, ~/.codex for codex, opencode global config, ...) whose persona can overpower -->
-<!-- the coach role and make it ignore the injected game situation. The claude-code default below -->
-<!-- isolates it via --system-prompt-file (COACH_SKILL.md becomes the session system prompt, fully -->
-<!-- replacing the global file). For codex/opencode, override new_cmd/resume_cmd with your agent's -->
-<!-- "custom system-prompt / disable global config" flag — see SKILL.md "Embedded Coach". -->
-<!-- coach:new_cmd: claude --session-id {session_id} --system-prompt-file {coach_skill_file} -p -->
-<!-- coach:resume_cmd: claude --resume {session_id} --system-prompt-file {coach_skill_file} -p -->
+<!-- the coach role. Built-in claude-code and Codex templates isolate user configuration; if you -->
+<!-- override a command, preserve equivalent isolation. See UI-DEV.md "Embedded Coach". -->
 <!-- coach:timeout: 180 -->
 <!-- coach:max_context_events: 12 -->
 """

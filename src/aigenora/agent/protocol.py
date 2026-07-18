@@ -114,10 +114,7 @@ def fetch_protocol(client: RestClient, protocol_id: str, data_dir: str | None = 
         raise ValueError("protocol_id must be a 64-character lowercase SHA256 hex string")
 
     from aigenora.agent.protocol_ui import (
-        compute_manifest_hash,
-        fetch_ui_bundle,
-        materialize_bundle,
-        write_ui_sidecar,
+        install_ui_bundle,
     )
 
     # Prefer the bundle endpoint
@@ -154,26 +151,20 @@ def fetch_protocol(client: RestClient, protocol_id: str, data_dir: str | None = 
     # the secure default is to refuse. Only written when accept_ui=True (--accept-ui, or
     # PERSONAL.md accept_remote_ui=always).
     if ui_manifest_hash and accept_ui:
-        manifest_files = [
-            {
-                "path": f.get("path"),
-                "content_hash": f.get("content_hash"),
-                "size_bytes": f.get("size_bytes"),
-            }
-            for f in ui_files
-        ]
-        actual_manifest_hash = compute_manifest_hash(manifest_files)
-        if actual_manifest_hash != ui_manifest_hash:
-            raise RuntimeError(
-                f"ui manifest hash mismatch: declared {ui_manifest_hash}, got {actual_manifest_hash}"
-            )
-        from aigenora.agent.protocol_ui import read_ui_sidecar
+        from aigenora.agent.protocol_ui import has_usable_ui, read_ui_sidecar
         existing = read_ui_sidecar(out)
-        if not (existing and existing.get("ui_manifest_hash") == ui_manifest_hash):
-            materialize_bundle(out, ui_files)
-            write_ui_sidecar(
-                out, protocol_id=protocol_id, manifest_hash=ui_manifest_hash,
-                files=ui_files, source_server=source_server,
+        if not (
+            existing
+            and existing.get("ui_manifest_hash") == ui_manifest_hash
+            and has_usable_ui(out)
+        ):
+            install_ui_bundle(
+                out,
+                protocol_id=protocol_id,
+                manifest_hash=ui_manifest_hash,
+                ui_files=ui_files,
+                source_server=source_server,
+                source_kind="platform",
             )
     elif ui_manifest_hash:
         # Remote UI present but not accepted: spec.json was written, UI is not downloaded; notify the user
@@ -204,6 +195,11 @@ def prepare_protocol(client: RestClient, protocol_id: str, data_dir: str | None 
         return fetch_protocol(client, protocol_id, data_dir, accept_ui=accept_ui)
     if not (proto_dir / "hooks.py").exists():
         raise RuntimeError(f"hooks.py not found in protocol dir: {proto_dir}")
+    if accept_ui:
+        from aigenora.agent.protocol_ui import fetch_platform_ui, has_usable_ui, read_ui_sidecar
+        ui_sidecar = read_ui_sidecar(proto_dir) or {}
+        if not has_usable_ui(proto_dir) or ui_sidecar.get("source_kind") == "host_p2p":
+            fetch_platform_ui(client, protocol_id, proto_dir)
     return proto_dir, False
 
 

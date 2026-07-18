@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 from aigenora.agent.protocol import prepare_protocol
+from aigenora.control import HUMAN, control_mode_from_args, ensure_control_mode_supported
 from aigenora.agent.skeleton import assert_hooks_implemented
 from aigenora.agent._daemon import read_log_excerpt, terminate_process, wait_for_event, update_session_meta, write_session_meta
 from aigenora.engine.config import get_server
@@ -18,10 +21,12 @@ from aigenora.engine.keys import verify_raw
 from aigenora.engine.p2p import connect_by_ticket
 from aigenora.engine.rest import RestClient
 from aigenora.proto.engine import run_guest_async
+from aigenora.proto.loader import load_hooks
 from aigenora.proto.sdk import EventBus
 from aigenora.proto.session import SessionProof, close_session, new_session_nonce, report_result, sign_session, submit_session
 from aigenora.proto.spec_version import check_spec_version
 from aigenora.proto.validate import load_spec, validate_extra_args
+from aigenora.agent.protocol_ui_p2p import describe_local_ui, maybe_receive_host_ui
 
 
 def _ticket_from_post(post: dict[str, Any]) -> str:
@@ -49,6 +54,10 @@ def _resolve_state_dir(args) -> Path:
 def _run_daemon(args) -> int:
     state_dir = _resolve_state_dir(args)
     state_dir_str = str(state_dir)
+    control_mode = control_mode_from_args(args)
+    from aigenora.agent._web_mode import resolve_web_mode
+    web_mode = resolve_web_mode(args, control_mode=control_mode)
+    controller_required = control_mode == HUMAN and web_mode != "off"
 
     cmd = [sys.executable, "-m", "aigenora", "join",
            args.post_id,
@@ -58,11 +67,10 @@ def _run_daemon(args) -> int:
         cmd.extend(["--data-dir", str(Path(args.data_dir).resolve())])
     if args.server:
         cmd.extend(["--server", args.server])
-    daemon_flag = args.daemon
-    coach_flag = getattr(args, "coach", False) or daemon_flag
+    cmd.extend(["--control-mode", control_mode])
+    if controller_required:
+        cmd.append("--_controller-required")
     pace_val = getattr(args, "pace", 0) or 0
-    if coach_flag:
-        cmd.append("--coach")
     if pace_val > 0:
         cmd.extend(["--pace", str(pace_val)])
     hb_interval = getattr(args, "heartbeat_interval", 10.0)
@@ -71,6 +79,10 @@ def _run_daemon(args) -> int:
     cmd.extend(["--heartbeat-timeout", str(hb_timeout)])
     if getattr(args, "allow_skeleton_hooks", False):
         cmd.append("--allow-skeleton-hooks")
+    if getattr(args, "accept_ui", False):
+        cmd.append("--accept-ui")
+    if getattr(args, "accept_host_ui", False):
+        cmd.append("--accept-host-ui")
     if args.extra_args:
         cmd.extend(["--"] + args.extra_args)
 
@@ -79,6 +91,11 @@ def _run_daemon(args) -> int:
         "status": "starting",
         "post_id": args.post_id,
         "state_dir": state_dir_str,
+        "local_control_mode": control_mode,
+        "web_mode": web_mode,
+        "controller_required": controller_required,
+        "accept_platform_ui": bool(getattr(args, "accept_ui", False)),
+        "accept_host_ui_p2p": bool(getattr(args, "accept_host_ui", False)),
         "started_at": time.time(),
     }
     (state_dir / "session.json").write_text(json.dumps(session_meta, ensure_ascii=False), encoding="utf-8")
@@ -105,11 +122,20 @@ def _run_daemon(args) -> int:
         startup_data = startup_event.get("data") or {}
         session_id = str(startup_data.get("session_id") or "")
         protocol_dir = str(startup_data.get("protocol_dir") or "")
+        peer_control_mode = str(startup_data.get("peer_control_mode") or "")
+        ui_artifact = startup_data.get("ui_artifact")
+        ui_dir = str(startup_data.get("ui_dir") or "")
         if session_id:
             session_meta["session_id"] = session_id
         if protocol_dir:
             session_meta["protocol_dir"] = protocol_dir
-        if session_id or protocol_dir:
+        if peer_control_mode:
+            session_meta["peer_control_mode"] = peer_control_mode
+        if isinstance(ui_artifact, dict):
+            session_meta["ui_artifact"] = ui_artifact
+        if ui_dir:
+            session_meta["ui_dir"] = ui_dir
+        if session_id or protocol_dir or peer_control_mode or isinstance(ui_artifact, dict) or ui_dir:
             write_session_meta(state_dir, session_meta)
     else:
         exit_code = proc.poll()
@@ -151,26 +177,42 @@ def _run_daemon(args) -> int:
         return 1
 
     # Based on web_mode, decide whether to start the relay subprocess and whether to open a browser
-    from aigenora.agent._web_mode import resolve_web_mode
+    from aigenora.agent._controller import mark_controller_ready
     from aigenora.agent.web import spawn_broadcast
-    web_mode = resolve_web_mode(args)
-    session_meta["web_mode"] = web_mode
     bc = None
     if web_mode != "off":
         bc = spawn_broadcast(state_dir, open_browser=(web_mode == "auto"))
         if bc:
             session_meta["broadcast_pid"] = bc["pid"]
             session_meta["broadcast_url"] = bc["url"]
+            if controller_required:
+                mark_controller_ready(state_dir)
+        elif controller_required:
+            session_meta["status"] = "startup_failed"
+            session_meta["startup_error"] = "human Web controller failed to start"
+            write_session_meta(state_dir, session_meta)
+            terminate_process(proc)
+            print(json.dumps({
+                "status": "error",
+                "reason": "human Web controller failed to start",
+                "post_id": args.post_id,
+                "state_dir": state_dir_str,
+                "control_mode": control_mode,
+            }, ensure_ascii=False))
+            return 1
     write_session_meta(state_dir, session_meta)
 
     result = {
         "status": "joining",
         "post_id": args.post_id,
         "state_dir": state_dir_str,
+        "control_mode": control_mode,
         "web_mode": web_mode,
     }
     if session_id:
         result["session_id"] = session_id
+    if isinstance(session_meta.get("ui_artifact"), dict):
+        result["ui_artifact"] = session_meta["ui_artifact"]
     if bc:
         result["broadcast_url"] = bc["url"]
     print(json.dumps(result, ensure_ascii=False))
@@ -186,6 +228,7 @@ def run(args) -> int:
 
 
 async def _join(args) -> int:
+    control_mode = control_mode_from_args(args)
     kp = load_keys(args.data_dir)
     client = RestClient(get_server(args.server), kp)
     post = client.json("GET", f"/api/v1/invitations/{args.post_id}", expected={200})
@@ -199,7 +242,12 @@ async def _join(args) -> int:
         raise RuntimeError("invitation has no transport_binding_signature — possible MITM attack")
     canonical = transport_binding_canonical(post.get("public_key", ""), "iroh", ticket, proto_id)
     verify_raw(post.get("public_key", ""), canonical.encode("utf-8"), post["transport_binding_signature"])
-    proto_dir, created_hooks = prepare_protocol(client, proto_id, args.data_dir)
+    proto_dir, created_hooks = prepare_protocol(
+        client,
+        proto_id,
+        args.data_dir,
+        accept_ui=bool(getattr(args, "accept_ui", False)),
+    )
     # P3 fix (second Codex round consensus): go through assert_hooks_implemented uniformly so that
     # --allow-skeleton-hooks / AIGENORA_ALLOW_SKELETON_HOOKS behave identically on first fetch and
     # subsequent join. The exception is wrapped with context to preserve the "just fetched X" hint.
@@ -218,18 +266,31 @@ async def _join(args) -> int:
     spec = load_spec(proto_dir / "spec.json")
     check_spec_version(spec, reject_unknown=True)
     validate_extra_args(spec, args.extra_args)
+    ensure_control_mode_supported(load_hooks(proto_dir), control_mode)
     options = post.get("options") if isinstance(post.get("options"), dict) else {}
+    host_control_mode = post.get("host_control_mode") or "hybrid"
+    if host_control_mode not in ("autonomous", "hybrid", "human"):
+        host_control_mode = "hybrid"
     print(f"[join] protocol_dir: {proto_dir}")
 
-    coach = getattr(args, "coach", False)
     pace = getattr(args, "pace", 0) or 0
     state_base = getattr(args, "_state_dir", None)
     event_bus = EventBus(state_base) if state_base else None
 
     _, node, channel = await connect_by_ticket(ticket)
+    temporary_ui_root: Path | None = None
     try:
         nonce = new_session_nonce()
-        await channel.send({"_session_init": True, "guest_public_key": kp.public_key, "session_nonce": nonce})
+        session_init = {
+            "_session_init": True,
+            "guest_public_key": kp.public_key,
+            "session_nonce": nonce,
+            "guest_control_mode": control_mode,
+        }
+        accept_host_ui = bool(getattr(args, "accept_host_ui", False))
+        if accept_host_ui:
+            session_init["ui_capabilities"] = {"p2p_ui_v1": True}
+        await channel.send(session_init)
         proof_msg = await channel.recv()
         if proof_msg.get("_session_proof") is not True:
             raise RuntimeError("host did not return session proof")
@@ -238,11 +299,48 @@ async def _join(args) -> int:
             raise RuntimeError("session proof host_public_key does not match invitation")
         host_signature = proof_msg.get("host_signature", "")
         canonical_protocol_id = proof_msg.get("protocol_id") or proto_id
+        if canonical_protocol_id != proto_id:
+            raise RuntimeError("session proof protocol_id does not match invitation")
+        proof_host_mode = proof_msg.get("host_control_mode")
+        if proof_host_mode in ("autonomous", "hybrid", "human"):
+            host_control_mode = proof_host_mode
         verify_raw(
             host_public_key,
             session_canonical(args.post_id, host_public_key, kp.public_key, canonical_protocol_id, nonce).encode("utf-8"),
             host_signature,
         )
+        p2p_ui_root: Path | None = None
+        if accept_host_ui:
+            if state_base:
+                p2p_ui_root = Path(state_base) / "ui-artifact"
+            else:
+                temporary_ui_root = Path(tempfile.mkdtemp(prefix="aigenora-host-ui-"))
+                p2p_ui_root = temporary_ui_root
+        ui_artifact = await maybe_receive_host_ui(
+            channel,
+            offer=proof_msg.get("ui_offer"),
+            protocol_dir=proto_dir,
+            protocol_id=canonical_protocol_id,
+            host_public_key=host_public_key,
+            accept_host_ui=accept_host_ui,
+            install_dir=p2p_ui_root,
+        )
+        if ui_artifact is None:
+            ui_artifact = describe_local_ui(proto_dir)
+        active_ui_dir = None
+        if (
+            ui_artifact is not None
+            and ui_artifact.get("source_kind") == "host_p2p"
+            and p2p_ui_root is not None
+        ):
+            active_ui_dir = str((p2p_ui_root / "ui").resolve())
+        if ui_artifact is not None:
+            update_values: dict[str, Any] = {"ui_artifact": ui_artifact}
+            if active_ui_dir:
+                update_values["ui_dir"] = active_ui_dir
+            update_session_meta(state_base, **update_values)
+            if event_bus:
+                event_bus.emit("ui_artifact_ready", ui_artifact)
         guest_signature = sign_session(kp, args.post_id, host_public_key, kp.public_key, canonical_protocol_id, nonce)
         proof = SessionProof(
             post_id=args.post_id,
@@ -254,8 +352,12 @@ async def _join(args) -> int:
             guest_signature=guest_signature,
         )
         session_id = submit_session(client, proof)
-        await channel.send({"_session_ready": True, "session_id": session_id})
+        ready_payload = {"_session_ready": True, "session_id": session_id}
+        if ui_artifact is not None and ui_artifact.get("source_kind") == "host_p2p":
+            ready_payload["ui_artifact"] = ui_artifact
+        await channel.send(ready_payload)
         print(f"[join] session_id: {session_id}")
+        update_session_meta(state_base, peer_control_mode=host_control_mode)
         if event_bus:
             # Carry protocol_dir back to the daemon parent so its session.json records it
             # (mirrors host._run_daemon). Without this, web.resolve_protocol_dir cannot
@@ -264,10 +366,18 @@ async def _join(args) -> int:
                 "host_public_key": host_public_key,
                 "session_id": session_id,
                 "protocol_dir": str(proto_dir),
+                "local_control_mode": control_mode,
+                "peer_control_mode": host_control_mode,
+                **({"ui_artifact": ui_artifact} if ui_artifact is not None else {}),
+                **({"ui_dir": active_ui_dir} if active_ui_dir else {}),
             })
         try:
+            if getattr(args, "_controller_required", False) and state_base:
+                from aigenora.agent._controller import wait_for_controller_ready
+                await asyncio.to_thread(wait_for_controller_ready, state_base)
             result = await run_guest_async(proto_dir, channel, options=options, args=args.extra_args,
-                                  state_base=state_base, event_bus=event_bus, coach=coach, pace=pace,
+                                  state_base=state_base, event_bus=event_bus,
+                                  control_mode=control_mode, pace=pace,
                                   heartbeat_interval=getattr(args, "heartbeat_interval", 10.0),
                                   heartbeat_timeout=getattr(args, "heartbeat_timeout", 30.0),
                                   session_id=session_id, keypair=kp,
@@ -299,3 +409,5 @@ async def _join(args) -> int:
         return 0
     finally:
         await node.node().shutdown()
+        if temporary_ui_root is not None:
+            shutil.rmtree(temporary_ui_root, ignore_errors=True)

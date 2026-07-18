@@ -56,6 +56,10 @@ def _flow_contract(spec: dict[str, Any]) -> dict[str, Any]:
         contract_flow["mode"] = mode
         if mode == "simultaneous_round" and isinstance(flow.get("round"), dict):
             contract_flow["round"] = flow["round"]
+        elif mode == "authoritative_realtime" and isinstance(flow.get("realtime"), dict):
+            # Tick rate, input delay and command limits change observable game
+            # semantics.  Pin the complete validated object into protocol_id.
+            contract_flow["realtime"] = flow["realtime"]
     return contract_flow
 
 

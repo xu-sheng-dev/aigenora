@@ -86,14 +86,16 @@ DEFAULT_CMDS: dict[str, dict[str, str]] = {
         "new_cmd": "claude --session-id {session_id} --system-prompt-file {coach_skill_file} -p",
         "resume_cmd": "claude --resume {session_id} --system-prompt-file {coach_skill_file} -p",
     },
-    # 2b/2c: codex / opencode. Like claude, these CLIs read the user's GLOBAL instruction/config
-    # file (~/.codex, opencode global config), which pollutes the coach role the same way. There is
-    # no single cross-agent isolation flag, so these are UNISOLATED baselines: override
-    # new_cmd/resume_cmd in PERSONAL.md with your agent's "custom system-prompt / disable global
-    # config" flag. See SKILL.md "Embedded Coach" -> per-agent isolation guidance.
+    # 2b/2c: codex / opencode. Codex has validated config/rules isolation and real thread resume;
+    # OpenCode remains a portable baseline that custom installations may need to override.
     "codex": {
-        "new_cmd": "codex exec {prompt}",
-        "resume_cmd": "codex exec --resume {session_id} {prompt}",
+        # JSONL exposes the real Codex thread id, which is required by `exec resume`.
+        # The coach workspace is intentionally not a git repository, so skip that check;
+        # read-only sandboxing keeps an advisory coach from editing local files.  Feed the
+        # prompt through stdin (literal ``-``) because the Windows npm .cmd shim can silently
+        # truncate/corrupt a multi-line argv prompt while still exiting successfully.
+        "new_cmd": "codex exec --json --ignore-user-config --ignore-rules --skip-git-repo-check --sandbox read-only -o {coach_output_file} -",
+        "resume_cmd": "codex exec --sandbox read-only resume --json --ignore-user-config --ignore-rules --skip-git-repo-check -o {coach_output_file} {session_id} -",
     },
     "opencode": {
         "new_cmd": "opencode -p {prompt}",
@@ -101,8 +103,34 @@ DEFAULT_CMDS: dict[str, dict[str, str]] = {
     },
 }
 
+# Old installer-generated values are configuration defaults, not user intent.  Treating them as
+# custom commands pinned unavailable Claude installations and also preserved the former Codex
+# multi-line argv bug forever.  Genuine user commands (anything outside this known set) remain
+# authoritative even when their executable is a wrapper unknown to `_agent_is_available`.
+_LEGACY_DEFAULT_COMMANDS = frozenset(
+    {
+        "codex exec --json --ignore-user-config --ignore-rules --skip-git-repo-check --sandbox read-only -o {coach_output_file} {prompt}",
+        "codex exec --sandbox read-only resume --json --ignore-user-config --ignore-rules --skip-git-repo-check -o {coach_output_file} {session_id} {prompt}",
+    }
+)
+_BUILTIN_COMMANDS = frozenset(
+    command
+    for templates in DEFAULT_CMDS.values()
+    for command in templates.values()
+) | _LEGACY_DEFAULT_COMMANDS
+
+
+def _is_custom_coach_command(value: str | None) -> bool:
+    command = (value or "").strip()
+    return bool(command) and command not in _BUILTIN_COMMANDS
+
 # PERSONAL.md field regex: <!-- coach:<key>: <value> -->
 _PERSONAL_FIELD_RE = re.compile(r"<!--\s*coach:(\w+)\s*:\s*(.*?)\s*-->")
+_AGENT_BINARIES = {
+    "claude-code": "claude",
+    "codex": "codex",
+    "opencode": "opencode",
+}
 
 
 # ---------- config ----------
@@ -118,10 +146,15 @@ class CoachConfig:
     max_context_events: int = DEFAULT_MAX_CONTEXT_EVENTS
 
     def to_dict(self) -> dict[str, Any]:
+        try:
+            binary = shlex.split(self.new_cmd, posix=True)[0]
+        except (ValueError, IndexError):
+            binary = ""
         return {
             "user_agent": self.user_agent,
             "timeout": self.timeout,
             "max_context_events": self.max_context_events,
+            "available": bool(binary and _resolve_bin(binary)),
         }
 
 
@@ -152,11 +185,26 @@ def _resolve_personal_md() -> Path | None:
     return personal if personal.is_file() else None
 
 
+def _agent_is_available(user_agent: str) -> bool:
+    binary = _AGENT_BINARIES.get(user_agent)
+    return bool(binary and shutil.which(binary))
+
+
+def _select_available_agent(preferred: list[str]) -> str:
+    candidates: list[str] = []
+    for candidate in [*preferred, DEFAULT_USER_AGENT, "codex", "opencode"]:
+        if candidate in DEFAULT_CMDS and candidate not in candidates:
+            candidates.append(candidate)
+    return next((candidate for candidate in candidates if _agent_is_available(candidate)), candidates[0])
+
+
 def parse_personal_md(personal_path: str | Path | None) -> CoachConfig:
     """Parse coach:* fields from PERSONAL.md.
 
-    Fallback chain for user_agent: PERSONAL.md coach:user_agent -> most recent target in
-    ~/.aigenora/skill_targets.json -> DEFAULT_USER_AGENT (claude-code).
+    Selection order for user_agent: a usable PERSONAL.md coach:user_agent -> most recent
+    installed target in ~/.aigenora/skill_targets.json -> first available supported CLI.
+    If none is installed, DEFAULT_USER_AGENT is retained so the eventual error can name the
+    exact missing executable and remediation.
     Missing new_cmd/resume_cmd fall back to DEFAULT_CMDS[user_agent].
     """
     fields: dict[str, str] = {}
@@ -169,10 +217,16 @@ def parse_personal_md(personal_path: str | Path | None) -> CoachConfig:
         except OSError:
             pass
 
-    user_agent = fields.get("user_agent", "").strip()
-    if user_agent not in DEFAULT_CMDS:
-        targets = _read_tracker_targets()
-        user_agent = next((t for t in reversed(targets) if t in DEFAULT_CMDS), DEFAULT_USER_AGENT)
+    configured_agent = fields.get("user_agent", "").strip()
+    configured_new_cmd = fields.get("new_cmd", "").strip()
+    targets = [target for target in reversed(_read_tracker_targets()) if target in DEFAULT_CMDS]
+    if configured_agent in DEFAULT_CMDS and (
+        _agent_is_available(configured_agent) or _is_custom_coach_command(configured_new_cmd)
+    ):
+        user_agent = configured_agent
+    else:
+        preferred = [configured_agent] if configured_agent in DEFAULT_CMDS else []
+        user_agent = _select_available_agent([*preferred, *targets])
 
     defaults = DEFAULT_CMDS.get(user_agent, DEFAULT_CMDS[DEFAULT_USER_AGENT])
 
@@ -185,10 +239,20 @@ def parse_personal_md(personal_path: str | Path | None) -> CoachConfig:
         except (TypeError, ValueError):
             return default
 
+    def _command_field(key: str) -> str:
+        raw = fields.get(key, "").strip()
+        if not raw:
+            return defaults[key]
+        # Keep an actual override.  A known generated default is kept only when it already
+        # matches the selected backend; otherwise migrate it to that backend's current default.
+        if _is_custom_coach_command(raw) or raw == defaults[key]:
+            return raw
+        return defaults[key]
+
     return CoachConfig(
         user_agent=user_agent,
-        new_cmd=fields.get("new_cmd") or defaults["new_cmd"],
-        resume_cmd=fields.get("resume_cmd") or defaults["resume_cmd"],
+        new_cmd=_command_field("new_cmd"),
+        resume_cmd=_command_field("resume_cmd"),
         timeout=_int_field("timeout", DEFAULT_TIMEOUT),
         max_context_events=_int_field("max_context_events", DEFAULT_MAX_CONTEXT_EVENTS),
     )
@@ -197,7 +261,14 @@ def parse_personal_md(personal_path: str | Path | None) -> CoachConfig:
 # ---------- situation summarization (prompt injection, never symlink state_dir) ----------
 
 def summarize_snapshot(state_dir: str | Path) -> str:
-    """Compact one-line snapshot of the current game state for prompt injection."""
+    """Compact public game state for prompt injection.
+
+    Turn-based protocols mostly expose top-level round/score fields.  Authoritative
+    real-time protocols keep their useful tactical state under ``world`` and
+    ``realtime.transport`` instead, so include a bounded, public-only view of those
+    structures as well.  The summary deliberately omits arbitrary snapshot fields:
+    protocol snapshots can contain local/private data in other game families.
+    """
     try:
         snap = SnapshotBus(state_dir).read()
     except Exception:
@@ -205,16 +276,105 @@ def summarize_snapshot(state_dir: str | Path) -> str:
     if not isinstance(snap, dict) or not snap:
         return ""
     parts: list[str] = []
-    for k in ("phase", "role", "round", "score", "summary"):
+    for k in ("phase", "role", "round", "tick", "score", "summary", "host_alive", "guest_alive", "winner"):
         v = snap.get(k)
         if v not in (None, "", [], {}):
             parts.append(f"{k}={v}")
+
+    realtime = snap.get("realtime")
+    transport = realtime.get("transport") if isinstance(realtime, dict) else None
+    if isinstance(transport, dict):
+        transport_bits: list[str] = []
+        for key in (
+            "status",
+            "smoothed_rtt_ms",
+            "jitter_ms",
+            "command_lead_ticks",
+            "recommended_control",
+            "micro_suitable",
+        ):
+            value = transport.get(key)
+            if value not in (None, "", [], {}):
+                transport_bits.append(f"{key}={value}")
+        if transport_bits:
+            parts.append("transport(" + ", ".join(transport_bits) + ")")
+
+    world = snap.get("world")
+    if isinstance(world, dict):
+        # A few real-time hooks keep these only inside world rather than duplicating
+        # them at the snapshot root.
+        present = {part.split("=", 1)[0] for part in parts if "=" in part}
+        for key in ("tick", "host_alive", "guest_alive", "winner"):
+            value = world.get(key)
+            if key not in present and value not in (None, "", [], {}):
+                parts.append(f"{key}={value}")
+
+        tanks = world.get("tanks")
+        if isinstance(tanks, list):
+            unit_bits: list[str] = []
+            for tank in sorted(
+                (item for item in tanks if isinstance(item, dict)),
+                key=lambda item: str(item.get("id") or ""),
+            )[:12]:
+                tank_id = tank.get("id")
+                if not isinstance(tank_id, str) or not tank_id:
+                    continue
+                hp = tank.get("hp", "?")
+                x = tank.get("x", "?")
+                y = tank.get("y", "?")
+                facing = tank.get("facing", "?")
+                cooldown = tank.get("fire_cooldown", tank.get("cooldown", "?"))
+                unit_bits.append(
+                    f"{tank_id}[team={tank.get('team', '?')},hp={hp},pos=({x},{y}),"
+                    f"facing={facing},fire_cd={cooldown}]"
+                )
+            if unit_bits:
+                parts.append("units=" + " ".join(unit_bits))
+
+    plan = snap.get("tactical_plan")
+    if isinstance(plan, dict):
+        plan_view = {
+            key: plan[key]
+            for key in ("id", "source_text", "active_order_ids", "orders", "assumptions")
+            if key in plan
+        }
+        if plan_view:
+            parts.append(
+                "tactical_plan="
+                + json.dumps(plan_view, ensure_ascii=False, separators=(",", ":"))[:2000]
+            )
+
+    combat_events = snap.get("combat_events")
+    if isinstance(combat_events, list):
+        event_bits: list[str] = []
+        public_keys = (
+            "type",
+            "tank",
+            "team",
+            "owner",
+            "attacker",
+            "victim",
+            "victim_hp",
+            "winner",
+            "reason",
+            "pickup",
+            "kind",
+        )
+        for event in combat_events[-6:]:
+            if not isinstance(event, dict):
+                continue
+            view = {key: event[key] for key in public_keys if key in event}
+            if view:
+                event_bits.append(json.dumps(view, ensure_ascii=False, separators=(",", ":")))
+        if event_bits:
+            parts.append("recent_combat=" + " ".join(event_bits))
+
     le = snap.get("last_event")
     if isinstance(le, dict):
         s = le.get("summary")
         if s:
             parts.append(f"last={s}")
-    return ", ".join(parts)
+    return "; ".join(parts)[:6000]
 
 
 def summarize_events(state_dir: str | Path, max_events: int) -> str:
@@ -259,10 +419,12 @@ def build_cmd_list(
     prompt: str,
     coach_skill_text: str | None = None,
     coach_skill_file: str | None = None,
+    coach_output_file: str | None = None,
 ) -> list[str]:
     """Turn a PERSONAL.md command template into a list-form argv.
 
-    {session_id}, {prompt}, {coach_skill_text}, {coach_skill_file} are substituted AFTER
+    {session_id}, {prompt}, {coach_skill_text}, {coach_skill_file}, {coach_output_file}
+    are substituted AFTER
     shlex.split, as individual argv elements, so the prompt and skill text (which may contain
     shell metacharacters / newlines) are never re-interpreted by a shell. This is the injection
     guard (ADR-5 security). {coach_skill_file} is preferred over {coach_skill_text} on Windows,
@@ -279,12 +441,16 @@ def build_cmd_list(
             out.append(coach_skill_text)
         elif tok == "{coach_skill_file}" and coach_skill_file is not None:
             out.append(coach_skill_file)
+        elif tok == "{coach_output_file}" and coach_output_file is not None:
+            out.append(coach_output_file)
         else:
             repl = tok.replace("{session_id}", session_id).replace("{prompt}", prompt)
             if coach_skill_text is not None:
                 repl = repl.replace("{coach_skill_text}", coach_skill_text)
             if coach_skill_file is not None:
                 repl = repl.replace("{coach_skill_file}", coach_skill_file)
+            if coach_output_file is not None:
+                repl = repl.replace("{coach_output_file}", coach_output_file)
             out.append(repl)
     return out
 
@@ -303,6 +469,19 @@ def _resolve_bin(name: str) -> list[str] | None:
     if sys.platform == "win32" and resolved.lower().endswith((".cmd", ".bat")):
         return ["cmd", "/c", resolved]
     return [resolved]
+
+
+def _binary_not_found_message(name: str) -> str:
+    available = [agent for agent in _AGENT_BINARIES if _agent_is_available(agent)]
+    suffix = (
+        " Available supported backends: " + ", ".join(available) + "."
+        if available
+        else " No supported Agent CLI was detected."
+    )
+    return (
+        f"Coach backend executable '{name}' was not found on PATH.{suffix} "
+        "Install the selected CLI or set coach:user_agent / coach:new_cmd in PERSONAL.md."
+    )
 
 
 # ---------- independent SSE streamer ----------
@@ -451,7 +630,21 @@ class CoachWorker:
 
     def _current_session_id(self) -> str | None:
         with self._session_lock:
-            return self._read_session().get("session_id")
+            session = self._read_session()
+            if session.get("user_agent") != self._config.user_agent:
+                return None
+            value = session.get("session_id")
+            return value if isinstance(value, str) and value else None
+
+    def _persist_session_id(self, session_id: str) -> None:
+        with self._session_lock:
+            self._write_session(
+                {
+                    "session_id": session_id,
+                    "user_agent": self._config.user_agent,
+                    "created_ts": time.time(),
+                }
+            )
 
     def _ensure_new_session_id(self) -> str:
         """Generate (and persist) a fresh session-id for a NEW conversation."""
@@ -577,18 +770,29 @@ class CoachWorker:
         sid = self._current_session_id()
         is_resume = bool(sid)
         if not sid:
-            sid = self._ensure_new_session_id()
+            # Claude accepts a caller-provided session id. Codex creates its own thread
+            # id and reports it in JSONL; persist that id after the first successful turn.
+            sid = self._ensure_new_session_id() if "{session_id}" in self._config.new_cmd else ""
 
         template = self._config.resume_cmd if is_resume else self._config.new_cmd
+        output_file = self.workspace / f"coach-{turn_id}.last-message.md"
         cmd = build_cmd_list(
             template,
             session_id=sid,
             prompt=prompt,
             coach_skill_text=self._coach_skill_text or None,
             coach_skill_file=str(self.coach_skill_path),
+            coach_output_file=str(output_file),
         )
 
-        rc, err = self._run_streaming(turn_id, generation, cmd, prompt=prompt, template=template)
+        rc, err = self._run_streaming(
+            turn_id,
+            generation,
+            cmd,
+            prompt=prompt,
+            template=template,
+            output_file=output_file,
+        )
         if rc == 0:
             self.inbox.mark_done(turn_id)
             return  # _run_streaming already recorded the coach reply + coach_turn_done
@@ -596,21 +800,37 @@ class CoachWorker:
             # Reset/stop cancelled this turn; do not resurrect it as an error.
             return
         # Resume failed because the persisted session is gone (e.g. user cleared ~/.claude).
-        if is_resume and err and "No conversation found" in err and self._is_current_generation(generation):
+        session_missing = err and any(
+            marker in err.lower()
+            for marker in ("no conversation found", "session not found", "thread not found")
+        )
+        if is_resume and session_missing and self._is_current_generation(generation):
             self._clear_session()
-            new_sid = self._ensure_new_session_id()
+            new_sid = (
+                self._ensure_new_session_id()
+                if "{session_id}" in self._config.new_cmd
+                else ""
+            )
             cmd2 = build_cmd_list(
                 self._config.new_cmd,
                 session_id=new_sid,
                 prompt=prompt,
                 coach_skill_text=self._coach_skill_text or None,
                 coach_skill_file=str(self.coach_skill_path),
+                coach_output_file=str(output_file),
             )
             self.streamer.publish(
                 "coach_context_reset",
                 {"turn_id": turn_id, "reason": "session_lost", "ts": time.time()},
             )
-            rc2, err2 = self._run_streaming(turn_id, generation, cmd2, prompt=prompt, template=self._config.new_cmd)
+            rc2, err2 = self._run_streaming(
+                turn_id,
+                generation,
+                cmd2,
+                prompt=prompt,
+                template=self._config.new_cmd,
+                output_file=output_file,
+            )
             if rc2 != 0:
                 if not (rc2 == 130 and not self._is_current_generation(generation)):
                     self._fail(turn_id, err2 or "coach subprocess failed", generation=generation)
@@ -629,25 +849,34 @@ class CoachWorker:
         *,
         prompt: str | None = None,
         template: str = "",
+        output_file: Path | None = None,
     ) -> tuple[int, str]:
         """Popen the coach CLI, stream stdout line-by-line, record the reply.
 
         Returns (returncode, stderr_text). On success the coach reply is appended to the dialog
         and coach_turn_done is published. On failure the caller decides (retry-as-new or fail).
 
-        If `template` has no {prompt} placeholder, the prompt is fed via STDIN instead of argv
-        (claude-code on Windows: the .cmd shim corrupts multi-line argv and would drop the
-        situation/user-question text; -p with no arg reads the prompt from stdin).
+        If `template` has no {prompt} placeholder, the prompt is fed via STDIN instead of argv.
+        This is required for both claude-code and Codex npm shims on Windows: a multi-line argv
+        can be truncated while the CLI still exits successfully.  Their default templates use
+        stdin mode (Claude ``-p`` without an argument; Codex positional ``-``).
         """
         start = time.monotonic()
         timeout = max(5.0, float(self._config.timeout))
         uses_stdin_prompt = bool(prompt) and "{prompt}" not in template
+        if output_file is not None:
+            try:
+                output_file.unlink()
+            except FileNotFoundError:
+                pass
         # Resolve the binary: Windows .cmd/.bat shims (npm CLIs) cannot be run by CreateProcess
         # directly and CreateProcess ignores PATHEXT, so wrap with `cmd /c <full_path>`. When the
         # prompt is an argv element, list2cmdline quoting preserves injection safety.
-        resolved = _resolve_bin(cmd[0])
+        original_binary = cmd[0]
+        codex_json = self._config.user_agent == "codex" and "--json" in cmd
+        resolved = _resolve_bin(original_binary)
         if resolved is None:
-            return (127, "binary not found")
+            return (127, _binary_not_found_message(original_binary))
         cmd = resolved + cmd[1:]
         try:
             proc = subprocess.Popen(
@@ -662,7 +891,7 @@ class CoachWorker:
                 errors="replace",
             )
         except FileNotFoundError:
-            return (127, "binary not found")
+            return (127, _binary_not_found_message(original_binary))
         except OSError as exc:
             return (1, str(exc))
         # Feed the prompt via stdin (EOF on close) when the template has no {prompt} placeholder.
@@ -700,6 +929,8 @@ class CoachWorker:
         out_thread.start()
 
         collected: list[str] = []
+        structured_errors: list[str] = []
+        discovered_session_id: str | None = None
         timed_out = False
         stopped = False
         while True:
@@ -721,9 +952,31 @@ class CoachWorker:
                 continue
             if line is None:
                 break  # EOF
-            collected.append(line)
-            if self._is_current_generation(generation):
-                self.streamer.publish("coach_chunk", {"turn_id": turn_id, "text": line})
+            if codex_json:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    structured_errors.append(line.strip())
+                    continue
+                if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
+                    discovered_session_id = event["thread_id"]
+                    continue
+                if event.get("type") == "error":
+                    message = event.get("message") or event.get("error")
+                    if message:
+                        structured_errors.append(str(message))
+                    continue
+                item = event.get("item") if event.get("type") == "item.completed" else None
+                chunk = item.get("text") if isinstance(item, dict) and item.get("type") == "agent_message" else None
+                if not isinstance(chunk, str) or not chunk:
+                    continue
+                collected.append(chunk)
+                if self._is_current_generation(generation):
+                    self.streamer.publish("coach_chunk", {"turn_id": turn_id, "text": chunk})
+            else:
+                collected.append(line)
+                if self._is_current_generation(generation):
+                    self.streamer.publish("coach_chunk", {"turn_id": turn_id, "text": line})
 
         try:
             proc.wait(timeout=5.0)
@@ -745,9 +998,25 @@ class CoachWorker:
         if timed_out:
             return (124, "timeout")
         if proc.returncode != 0:
-            return (proc.returncode, err)
+            return (proc.returncode, err or "\n".join(structured_errors).strip())
 
-        reply = "".join(collected).strip()
+        reply = ""
+        if codex_json and output_file is not None and output_file.is_file():
+            try:
+                reply = output_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                reply = ""
+        if not reply:
+            reply = ("\n".join(collected) if codex_json else "".join(collected)).strip()
+        if output_file is not None:
+            try:
+                output_file.unlink()
+            except OSError:
+                pass
+        if not reply:
+            return (1, err or "\n".join(structured_errors).strip() or "coach backend returned no response")
+        if discovered_session_id:
+            self._persist_session_id(discovered_session_id)
         sid = self._current_session_id()
         self.dialog.append("coach", reply, turn_id=turn_id, session_id=sid)
         self.streamer.publish(

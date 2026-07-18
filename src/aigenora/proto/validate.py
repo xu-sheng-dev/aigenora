@@ -176,6 +176,8 @@ def _validate_field_value(field: dict[str, Any], value: Any, key: str) -> list[s
             errors.append(f"{key}: expected ot_blob <= {max_len} UTF-8 bytes")
     elif ftype == "array":
         errors.extend(_validate_array_field(field, value, key))
+    elif ftype == "json":
+        errors.extend(_validate_json_field(field, value, key))
     else:
         errors.append(f"{key}: unsupported field type {ftype!r}")
     return errors
@@ -216,6 +218,40 @@ def _validate_array_field(field: dict[str, Any], value: Any, key: str) -> list[s
     return errors
 
 
+def _validate_json_field(field: dict[str, Any], value: Any, key: str) -> list[str]:
+    """Validate a bounded structured JSON field.
+
+    Real-time protocols exchange world snapshots and command objects whose shape is
+    owned by the protocol hook.  The generic message validator still enforces the
+    outer container type, JSON serializability, finite numbers and a byte limit so a
+    peer cannot bypass the transport envelope with an unbounded payload.
+    """
+    errors: list[str] = []
+    container = field.get("container", "any")
+    if container == "object" and not isinstance(value, dict):
+        return [f"{key}: expected JSON object"]
+    if container == "array" and not isinstance(value, list):
+        return [f"{key}: expected JSON array"]
+    if container not in ("any", "object", "array"):
+        return [f"{key}: json container must be any, object, or array"]
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return [f"{key}: expected finite JSON value"]
+    max_total = field.get("max_total_bytes", 1048576)
+    if not isinstance(max_total, int) or isinstance(max_total, bool) or max_total < 1:
+        errors.append(f"{key}: json max_total_bytes must be a positive integer")
+    elif len(encoded) > max_total:
+        errors.append(f"{key}: JSON payload {len(encoded)} bytes exceeds max_total_bytes {max_total}")
+    return errors
+
+
 def validate_options(spec: dict[str, Any], options: dict[str, Any]) -> None:
     params = spec.get("parameters") or {}
     if not isinstance(params, dict):
@@ -236,6 +272,10 @@ def validate_options(spec: dict[str, Any], options: dict[str, Any]) -> None:
         elif ptype == "enum":
             if not isinstance(value, str) or value not in schema.get("values", []):
                 errors.append(f"{key}: invalid enum")
+        elif ptype == "text":
+            max_len = schema.get("max_length", 2000)
+            if not isinstance(value, str) or len(value.encode("utf-8")) > max_len:
+                errors.append(f"{key}: expected text <= {max_len} UTF-8 bytes")
         elif ptype == "table":
             _validate_table(value, schema, key, errors)
     if errors:
@@ -322,6 +362,7 @@ def _validate_table_node(value: Any, node_schema: dict[str, Any], path: str, err
 # v016 adds "mental_poker" (layered AEAD + Blind-RSA token OT fair-dealing engine).
 IMPLEMENTED_FLOW_MODES: tuple[str, ...] = (
     "session_loop", "free", "request_response", "simultaneous_round", "mental_poker",
+    "authoritative_realtime",
 )
 
 # repeat field values allowed at the P1 stage (see docs/design/flow-modes.md §3 and the P1 design).
@@ -376,6 +417,8 @@ def validate_flow(spec: dict[str, Any]) -> None:
     mode = flow.get("mode") if isinstance(flow.get("mode"), str) else None
     if mode == "simultaneous_round":
         _validate_simultaneous_round(flow)
+    elif mode == "authoritative_realtime":
+        _validate_authoritative_realtime(flow)
     phases = flow.get("phases")
     if phases is None:
         return
@@ -406,6 +449,53 @@ def _validate_simultaneous_round(flow: dict[str, Any]) -> None:
         raise ValidationError("flow.round.value_type_ref must be a non-empty string")
 
 
+def _validate_authoritative_realtime(flow: dict[str, Any]) -> None:
+    """Validate Host-authoritative real-time transport settings.
+
+    These values affect wire timing and command acceptance, so they are part of the
+    protocol contract rather than local preferences.
+    """
+    realtime = flow.get("realtime")
+    if not isinstance(realtime, dict):
+        raise ValidationError(
+            "flow.realtime must be an object when mode=authoritative_realtime"
+        )
+    allowed = {
+        "tick_rate_hz",
+        "input_delay_ticks",
+        "snapshot_every_ticks",
+        "max_command_lead_ticks",
+        "max_commands_per_frame",
+        "disconnect_policy",
+    }
+    unknown = sorted(set(realtime) - allowed)
+    if unknown:
+        raise ValidationError(f"flow.realtime has unknown fields: {unknown!r}")
+    integer_ranges = {
+        "tick_rate_hz": (1, 60),
+        "input_delay_ticks": (1, 120),
+        "snapshot_every_ticks": (1, 60),
+        "max_command_lead_ticks": (1, 600),
+        "max_commands_per_frame": (1, 1024),
+    }
+    for key, (minimum, maximum) in integer_ranges.items():
+        value = realtime.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValidationError(f"flow.realtime.{key} must be an integer")
+        if value < minimum or value > maximum:
+            raise ValidationError(
+                f"flow.realtime.{key} must be between {minimum} and {maximum}"
+            )
+    if realtime["max_command_lead_ticks"] < max(1, realtime["input_delay_ticks"]):
+        raise ValidationError(
+            "flow.realtime.max_command_lead_ticks must be >= input_delay_ticks"
+        )
+    if realtime.get("disconnect_policy") not in ("abort", "continue"):
+        raise ValidationError(
+            "flow.realtime.disconnect_policy must be 'abort' or 'continue'"
+        )
+
+
 def validate_timing(spec: dict[str, Any]) -> None:
     """Validate the spec.timing field (v004 round timing mechanism)."""
     timing = spec.get("timing")
@@ -428,4 +518,3 @@ def validate_timing(spec: dict[str, Any]) -> None:
         errors.append("timing.max_think_seconds must be >= timing.min_think_seconds")
     if errors:
         raise ValidationError("; ".join(errors))
-
