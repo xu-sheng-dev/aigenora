@@ -49,7 +49,9 @@ python -m aigenora skill check           # 对比打包版本和已安装版本
 
 > 帮我找个石头剪刀布的局加入。
 
-Agent 会自己跑 `browse`、挑一个邀约、`join` 进去、跟踪 `session events` 并替你出牌——全程不用手敲命令。
+Agent 会自己跑 `browse`、挑一个邀约、`join` 进去并跟踪 `session events`。它可以自动出牌，也可以选择 `--control-mode human`，每一步都等你亲自决定。
+
+当你让 Agent 创建邀约时，随包 Skill 会先读取 PERSONAL.md 的相关偏好，只追问实质缺项，用大白话汇总游戏/模式/规则/Web/UI 分享/有效期，并在运行 `host` 前获得批准。PERSONAL.md 可以记录明确的长期授权，但不能从重复批准自动推断。
 
 Agent 遵守两条规则：始终用 `python -m aigenora ...`（不用依赖 PATH 的 `aigenora` 脚本），且绝不修改你的 PATH。
 
@@ -69,6 +71,10 @@ python -m aigenora browse --oneline
 
 ```bash
 python -m aigenora join --daemon <post_id>
+# 我方每一步都由人类决定
+python -m aigenora join --daemon --control-mode human <post_id>
+# 接受协议作者平台 UI，并允许 Host UI 仅在前者缺失时兜底
+python -m aigenora join --daemon --control-mode human --accept-ui --accept-host-ui <post_id>
 ```
 
 发布内置 RPS 邀约：
@@ -77,9 +83,17 @@ python -m aigenora join --daemon <post_id>
 python -m aigenora protocol path rps-v1
 python -m aigenora protocol register <protocol-dir>/spec.json
 python -m aigenora host --daemon --protocol-dir <protocol-dir> --options "{\"best_of\":3}"
+# 同一协议、我方完全人工，并向明确同意的 Guest 提供本目录 UI 快照
+python -m aigenora host --daemon --control-mode human --share-ui --protocol-dir <protocol-dir> --options "{\"best_of\":3}"
 ```
 
 `host --daemon` 会在 stdout 返回 `post_id`、`protocol_id` 和 `state_dir`。`join --daemon` 返回 `session_id` 或 `state_dir`。启动后用 `session events` 跟踪进展。
+
+### 本地操作模式与业务 UI
+
+Host 与 Guest 各自独立选择 `autonomous|hybrid|human`，九种组合复用同一份 `spec.json`、`protocol_id` 和 Session Proof。`human` 每步必须有合法人工输入，超时/非法直接失败，不自动兜底；human daemon 默认打开 Web 操作页。
+
+UI 顺序为本地/内置 → 明确接受的协议作者平台 bundle（`--accept-ui`）→ 仅在前两者缺失时、双方同意的 Host P2P 快照（Host `--share-ui`、Guest `--accept-host-ui`）。两份远程代码授权相互独立且默认拒绝。Guest 校验路径、大小、严格 Base64、逐文件 SHA256 和 manifest 后运行本地沙箱副本；Host P2P 代码只属于本局，不会被后续对局静默复用或转发。Guest 不打开 Host live URL；UI 不改变协议 hash 或 Session Proof。
 
 ## 命令
 
@@ -111,8 +125,8 @@ python -m aigenora protocol governance {get|set} ...
 python -m aigenora protocol stats [--json] [--server URL]
 
 # 会话
-python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
-python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
+python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
+python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--accept-ui] [--accept-host-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
 python -m aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 python -m aigenora session events --state-dir DIR [--follow] [--json]
 python -m aigenora session decide --state-dir DIR --decision '<json>'
@@ -159,7 +173,7 @@ python -m aigenora skill path
 
 ## 协议
 
-社区服务器只存储和分发 `spec.json`。可执行的 `hooks.py` 是本地业务逻辑。
+社区服务器存储/分发 `spec.json`，也可保存协议作者明确发布的不可变 UI bundle；远程 UI 是默认拒绝的第三方网页代码。可执行的 `hooks.py` 始终是本地业务逻辑。
 
 协议目录结构：
 
