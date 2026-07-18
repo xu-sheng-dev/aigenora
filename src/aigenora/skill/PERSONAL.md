@@ -26,29 +26,41 @@
 ### Web UI Launch Mode
 
 <!-- Behavior preference for the broadcast service when running in daemon mode (host --daemon / join --daemon). -->
-<!-- Values: off (do not spawn broadcast, default), auto (spawn broadcast + open browser), headless (spawn broadcast but no browser) -->
+<!-- Values: off (do not spawn broadcast), auto (spawn broadcast + open browser), headless (spawn broadcast but no browser) -->
 <!-- After reading this, the user-Agent should append the corresponding flag when invoking host/join: -->
-<!--   off      → no extra flag (default) or --no-web / --web off -->
+<!--   off      → --no-web or --web off -->
 <!--   auto     → --web-on      or --web auto -->
 <!--   headless → --no-browser  or --web headless -->
 <!-- Example: User wants a visual live page every time -->
 <!-- web_ui: auto -->
-<!-- Example: User wants pure CLI, no web broadcast at all (this is the default) -->
+<!-- Example: User wants pure CLI, no web broadcast at all -->
 <!-- web_ui: off -->
 <!-- WARNING — Agent behavior when this field is absent: see SKILL.md "Agent Decision Rules". -->
-<!--   In short: default is off (pure CLI); check context → infer from environment → -->
+<!--   In short: human daemon defaults to auto; autonomous/hybrid default to off. Then check context/environment → -->
 <!--   ask once "want to open it?" if unclear → 2 consecutive identical choices are -->
 <!--   treated as a long-term preference and appended here (this field only). -->
 
-### Remote Protocol UI Acceptance
+### Platform-Published Remote Protocol UI
 
-<!-- Whether to accept a protocol author's distributed UI bundle (third-party web code; trojan risk). -->
+<!-- Whether to accept an immutable UI bundle published by the protocol author to the community platform (third-party web code; trojan risk). -->
 <!-- Values: ask (default, ask the human user each time), always (accept automatically), never (never accept; use CLI or self-built UI) -->
 <!-- When the user makes a first explicit choice, the Agent persists it here (this field only). -->
 <!-- Example: User trusts the community and accepts all published UI -->
 <!-- accept_remote_ui: always -->
 <!-- Example: User is security-cautious and never accepts third-party UI -->
 <!-- accept_remote_ui: never -->
+
+### Host P2P UI Acceptance
+
+<!-- When neither local nor platform UI is available, whether to obtain a UI snapshot from this match's Host over P2P. This is riskier than platform-published UI and is a separate decision. -->
+<!-- Values: ask (default, ask when actually useful), always (allow P2P fallback automatically), never (never accept Host UI) -->
+<!-- accept_host_ui_p2p: ask -->
+
+### Share Local UI with Guests
+
+<!-- As Host, whether to use --share-ui to offer local protocol_dir/ui/ to Guests that explicitly accept it. -->
+<!-- Values: ask (default, confirm while preparing the invitation), always (share whenever UI exists), never (never share) -->
+<!-- share_ui_with_guests: ask -->
 
 ## Protocol Preferences
 
@@ -65,6 +77,26 @@
 ### Default Profiles
 
 <!-- Example: RPS always uses standard profile -->
+
+### Invitation Setup and Confirmation Preferences
+
+<!-- These fields control hosting an invitation with an existing protocol. Do not confuse them with creating a new protocol below. -->
+<!-- Missing fields: ask-material (default; ask only about omissions that change intent) / infer-preferences (prefer established preferences). -->
+<!-- invitation_setup_mode: ask-material -->
+
+<!-- Parameter authority: confirm-all (default; Agent only organizes) / agent-choose-defaults (Agent may choose routine defaults such as rounds and TTL). -->
+<!-- invitation_parameter_authority: confirm-all -->
+
+<!-- Final approval: always (default; show the plain-language confirmation card and wait) / standing-authorized (an explicit standing authorization already exists). -->
+<!-- standing-authorized must come from explicit user authorization; never infer it from repeated approvals. -->
+<!-- invitation_final_approval: always -->
+
+<!-- Common invitation defaults; record only genuinely stable preferences. -->
+<!-- default_control_mode: human -->
+<!-- default_invitation_type: supply -->
+<!-- default_invitation_ttl_minutes: 30 -->
+<!-- default_share_ui: false -->
+<!-- invitation_defaults_by_protocol: {"rock-paper-scissors":{"best_of":3}} -->
 
 ### Protocol Creation Preferences
 

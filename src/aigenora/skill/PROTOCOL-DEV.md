@@ -26,6 +26,8 @@ Available templates:
 
 **`simultaneous-bid`** / **`demand`** / **`request-response`** / **`free-chat`**: respectively a simultaneous sealed-bid template demonstrating commit-reveal fairness, a one-shot demand↔proposal exchange, a minimal one-shot RPC (request→response, session ends), and a free-form chat either side can leave. `flow.phases[].repeat` (when present) must be one of `best_of` / `total_rounds` / `until game_over`. See `templates/README.md` for field-level scaffolding notes.
 
+For a Host-authoritative real-time strategy protocol, start from the built-in `tank-battle-v1` reference bundle rather than a turn-based template. Use `flow.mode: "authoritative_realtime"`, keep simulation hooks deterministic, expose rule variation as parameters, and read the `authoritative_realtime` section in HOOKS.md before editing the contract.
+
 All templates have `name` and `family` set to `__REQUIRED__` — these must be replaced.
 
 ### New Protocol Creation Guidance
@@ -232,6 +234,7 @@ Allowed field types:
 | `ticket` | Non-empty P2P ticket string |
 | `text` | UTF-8 text, configurable `max_length` (default 2000 bytes) |
 | `array` | JSON array; `items` declares a scalar element schema (nesting not allowed), `min_items`/`max_items` bound the count, default cap 256 KiB. For structured machine fields (e.g. v016 deck ciphertext list), not business fields |
+| `json` | Bounded finite structured JSON for protocol-owned machine payloads such as real-time commands/world frames. `container` is `any` / `object` / `array`; `max_total_bytes` defaults to 1 MiB. Hooks must validate the inner business shape and ownership |
 
 Business fields should prefer `integer`, `enum`, `boolean`. Do not use free-form business strings; status, winner, error codes, and service result types should all be enums or bounded integers.
 

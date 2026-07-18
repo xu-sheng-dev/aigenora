@@ -4,11 +4,11 @@
 
 ## Hooks Engine Contract (Must Read)
 
-`spec.flow.mode` determines which engine is used. Hook interfaces come in two layers: **generic lifecycle hooks** (shared by all engines, the foundation) + **engine-specific hooks** (added by only some engines on top of the generic ones).
+`spec.flow.mode` determines which engine is used. Hook interfaces come in two layers: **generic lifecycle hooks** (used by the ordinary handshake engines) + **engine-specific hooks** (used when an engine owns more of the lifecycle).
 
 ### Generic Lifecycle Hooks (foundation for all engines)
 
-Regardless of flow.mode, Host/Guest message exchange is carried by this set of hooks (full signatures in the hooks.py section below):
+`session_loop` and `request_response` carry Host/Guest business exchange through this full set. Specialized engines may use only `proto_init` / `proto_host_metadata` and their mode-specific hooks (full signatures in the hooks.py section below):
 
 | Method | Role | Responsibility |
 |---|---|---|
@@ -30,6 +30,7 @@ Regardless of flow.mode, Host/Guest message exchange is carried by this set of h
 | `simultaneous_round` | engine owns commit-reveal | `proto_round_value` + `proto_round_judge` (+optional pure) | RPS / Coin Flip |
 | `free` | bidirectional free messages | `proto_on_message` / `proto_on_send` / `proto_on_end` | human-chat |
 | `mental_poker` | engine owns fair dealing | `proto_mp_*` (5 hooks, see Card Games) | Crazy Eights / Briscola |
+| `authoritative_realtime` | Host owns fixed tick; Guest queues future commands | `proto_realtime_*` (7 hooks) | Tank Battle |
 
 > There is no engine named `sequential_turn`. Turn-based games are built on `session_loop` (generic hooks driving a ping-pong loop) — e.g. Guess Number has the Host judge each guess via `proto_host_handle` and the Guest re-guess via `proto_guest_handle`.
 
@@ -211,6 +212,8 @@ The sender coroutine consumes two input sources concurrently:
 
 Any source feeds into the same queue; messages are validated against spec, sent through `channel.send(msg)`, then `proto_on_send(msg)` is called so hooks can write `snapshot.messages` / `details.jsonl`. `/quit` triggers `end` and exits.
 
+The state directory may become visible to the Web before the P2P handshake finishes. Complete records already appended to `inbox.jsonl` are drained in order before the receiver starts, so a peer's immediate `/quit` cannot discard them. A final record without a newline is treated as still being written and its offset is retried on the next poll.
+
 ### mental_poker (fair-dealing card games)
 
 Card games with hidden hands + a shared deck use `flow.mode: "mental_poker"`. The engine owns the two-layer encrypted deck + OT private reveal + end-game audit (cryptographic mechanism in the "Card Games & Mental Poker" section); hooks only supply business material and per-turn intent:
@@ -224,6 +227,67 @@ Card games with hidden hands + a shared deck use `flow.mode: "mental_poker"`. Th
 | `proto_mp_validate_play(state, who, play_msg)` | Validate a peer's play against game rules (default accepts all; real games override) |
 
 > Crazy Eights / Briscola are built-in samples; to write a new card game, model your hooks on theirs.
+
+### Local Control-Mode Capability (v020)
+
+Control mode is not a `spec.json` field and never enters `protocol_id`. One hooks implementation may declare its locally supported modes:
+
+```python
+CONTROL_MODES = ("autonomous", "hybrid", "human")
+```
+
+Without a declaration, only `autonomous` and `hybrid` are supported. `BaseProtocolHooks.proto_init(..., decision_config=...)` stores the normalized `control_mode` in local state and the snapshot. Business hooks must obtain actions under this contract:
+
+- `autonomous`: use strategy/algorithm only; never wait on DecisionBus.
+- `hybrid`: accept an explicit in-window override first, then use the existing automatic strategy/fallback when none arrives.
+- `human`: await a strict explicit action for every local action; timeout, absence, or invalid input must raise and abort, never invoke a random/strategy picker.
+
+Human-capable hooks must publish current `legal_actions`, validate the choice, then translate it into the unchanged Protocol message. Setup secrets, draw, pass, and forced pass are actions too. Card games use the mental-poker local action adapter, and snapshots expose only the local hand—never peer hidden cards. Continuously ticking modes such as `authoritative_realtime` must not block on human input; do not declare `human` until a non-blocking micro-input queue exists.
+
+### authoritative_realtime (Host-authoritative RTS)
+
+Use this mode for deterministic public-world games that must keep moving even when the Guest is late. Host advances a protocol-bound fixed tick and sends every authoritative frame; Guest submits commands for future ticks and never blocks Host progress. Live Guest work is limited to cheap frame/hash-chain checks. Full frame and command streams are retained for optional post-game audit.
+
+Required `flow` shape:
+
+```json
+{
+  "mode": "authoritative_realtime",
+  "realtime": {
+    "tick_rate_hz": 10,
+    "input_delay_ticks": 3,
+    "snapshot_every_ticks": 1,
+    "max_command_lead_ticks": 30,
+    "max_commands_per_frame": 64,
+    "disconnect_policy": "abort"
+  }
+}
+```
+
+| Method | Responsibility |
+|---|---|
+| `proto_realtime_initial_state()` | Host returns deterministic tick-0 public state |
+| `proto_realtime_commands(state, target_tick)` | Local Agent compiles persistent macro intent and/or short-lived micro overrides into owned-unit commands |
+| `proto_realtime_transport_update(profile)` | Optional local callback with measured RTT, jitter, adaptive lead and recommended `micro`/`macro` control; never shared rules |
+| `proto_realtime_validate_commands(side, commands, state, target_tick)` | Enforce ownership, shape and deterministic normalization |
+| `proto_realtime_step(state, tick, commands)` | Host returns `{"state": ..., "events": [...], "outcome": "none|host|guest|draw"}` |
+| `proto_realtime_snapshot(state, frame)` | Return the Web/observer snapshot patch |
+| `proto_realtime_audit_outcome(frame)` | Optional terminal-condition audit after the final frame; never changes live outcome |
+
+State and commands must be finite canonical JSON. Prefer integer/fixed-point simulation values. Do not read wall-clock time, random global state or network data from `proto_realtime_step`; all rule-affecting inputs belong in the protocol bundle or match options so `ruleset_hash` / `match_config_hash` bind them before tick 0.
+
+The P2P heartbeat channel performs a bounded RTT probe before Guest joins and publishes the local
+profile under `snapshot.realtime.transport`. Command lead is derived from RTT plus jitter and
+clamped by `max_command_lead_ticks`; this keeps future commands valid under ordinary delay without
+changing the deterministic match contract. Low-latency links may use per-tick micro input, while
+higher-latency links should prefer persistent macro orders. A hook can support both at once: a
+short-lived `micro_commands` override controls named units for a declared expiry tick and the
+remaining units continue executing macro orders.
+
+Do not invoke an LLM per tick. Persist human/LLM intent as macro strategy and have
+`proto_realtime_commands` convert it to bounded local micro actions. The Tank Battle reference
+bundle is the executable example, including `move_to`, multi-waypoint `patrol`, targeted
+`attack_unit`, and opportunistic fire while moving.
 
 ### Decision Latency Budget (Important)
 
@@ -263,7 +327,11 @@ When diagnosing `peer_unresponsive`, look at this side's hook decision_origin fi
 3. On the next decision point, the engine's `await_latest_decision` picks up the injected value (tagged `caused_by_whisper_id`) and the hook returns it as this round's `guided` decision.
 4. The red line is unchanged: the injected value must still be within the spec-allowed range; the engine validates it the same way as any other decision source.
 
+For domain-specific language, a protocol may override the synchronous pure function `proto_parse_whisper_intent(text, context=None)`. It returns the same intent shape as the generic Whisper parser. A persistent intent may additionally return a finite-JSON `strategy_patch` whose serialized size is at most 128 KiB; `materialize_intent` merges it atomically into StrategyStore. The Web endpoint accepts at most 2,000 characters. The parser must not access the network, invoke an LLM, mutate state, or read nondeterministic external inputs. Return `None` when unrecognized so the generic parser can take over.
+
 Use this when the human wants to override a `random`/`auto` pick at a critical moment (e.g. "play paper" in RPS) without stopping the match.
+
+That is a `hybrid` override, not strict `human`. Strict human play uses `--control-mode human` plus explicit DecisionBus actions; the Web UI does not offer strategy/whisper delegation in that mode.
 
 
 ### Pristine Skeleton Detection
@@ -407,7 +475,7 @@ decision = store.read_decision()
 The built-in RPS (v004 standard) uses `decision.mode = "auto"` and **does not accept `extra_args`**: never append `rock` / `paper` / `scissors` (or any choice value) after `join` / `host`. The client rejects them before the P2P handshake. Choices are decided inside hooks:
 
 - To fix a sequence: write `<state_dir>/strategy/strategy.json` (e.g. `{"mode":"fixed","fixed":"rock"}` or `{"mode":"seq","sequence":["rock","paper","scissors"]}`), read by `StrategyStore`.
-- To intervene manually in real time: launch with `--coach`, then submit decisions via `aigenora session decide --state-dir <dir> --decision '{"round":1,"choice":"rock"}'`.
+- For a temporary human intervention, keep local `hybrid` (the default) and submit an override with `aigenora session decide --state-dir <dir> --decision '{"round":1,"choice":"rock"}'`. Use `--control-mode human` when every action must come from the person.
 
 The legacy RPS (v1 deprecated) allowed `extra_args` such as `rock` directly; v004 dropped this. The note is kept here to prevent agents from copying the old pattern. Whether other protocols integrate StrategyStore depends on their own `hooks.py`; do not assume all built-in protocols support real-time strategy files.
 

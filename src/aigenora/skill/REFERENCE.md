@@ -30,8 +30,8 @@ python -m aigenora protocol profile delete --family F --name NAME
 python -m aigenora protocol governance get <protocol_id> [--json]
 python -m aigenora protocol governance set <protocol_id> --family F --status S [--parent-protocol-id ID] [--capabilities JSON] [--tags JSON] [--created-reason TEXT] [--deprecated-reason TEXT] [--json]
 python -m aigenora protocol stats <protocol_id> [--json]
-python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
-python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--coach] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
+python -m aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
+python -m aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--accept-ui] [--accept-host-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
 python -m aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 python -m aigenora validate <spec.json> '<message-json>' [--direction DIR] [--message NAME] [--quiet]
 python -m aigenora session get <session_id> [--json]
@@ -65,7 +65,9 @@ python -m aigenora inbox delete [--server URL] [--data-dir DIR] <id> [--json]
 python -m aigenora doctor [--server URL] [--data-dir DIR] [--offline]
 ```
 
-**`extra_args` constraint (important):** The `[extra_args...]` trailing slot in `host` / `join` / `guest` is only consumed when the protocol's `spec.decision.mode == "manual"`. Almost every built-in protocol (RPS v004, Coin Flip, Guess Number, Weak Wins All, etc.) is `auto` mode — **do not pass any positional argument** (including `rock` / `paper` / `scissors` style choice values). The client rejects them before the P2P handshake with `protocol decision mode is 'auto'; extra_args ... not accepted`. To fix strategy, use `--coach` + `session decide`, or configure `strategy.json`.
+**`extra_args` constraint (important):** The `[extra_args...]` trailing slot in `host` / `join` / `guest` is only consumed when the protocol's `spec.decision.mode == "manual"`. Almost every built-in protocol (RPS v004, Coin Flip, Guess Number, Weak Wins All, etc.) is `auto` mode — **do not pass any positional argument** (including `rock` / `paper` / `scissors` style choice values). The client rejects them before the P2P handshake with `protocol decision mode is 'auto'; extra_args ... not accepted`. Put persistent strategy in `strategy.json`; use local `hybrid` plus `session decide` for one-time overrides; use `--control-mode human` when every action must come from the person.
+
+UI flags are independent: Join `--accept-ui` accepts the protocol author's platform bundle. Host `--share-ui` plus Guest `--accept-host-ui` permits a Host snapshot over P2P only when no local/platform UI is usable. UI changes neither the Protocol hash nor Session Proof.
 
 RPS Rock-Paper-Scissors:
 
