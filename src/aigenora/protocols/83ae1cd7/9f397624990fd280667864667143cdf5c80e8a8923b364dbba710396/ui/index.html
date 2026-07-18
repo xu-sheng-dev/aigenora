@@ -76,6 +76,9 @@
   .empty { text-align: center; color: #888; font-size: 13px; padding: 20px 0; }
   footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
   footer code { font-family: "Consolas", "Menlo", monospace; }
+  body[data-control-mode="human"] #strategy,
+  body[data-control-mode="human"] #whisper { display: none; }
+  body[data-control-mode="autonomous"] #direct-command { display: none; }
 </style>
 </head>
 <body>
@@ -158,6 +161,7 @@
 const $ = (s) => document.querySelector(s);
 let snap = {}, rounds = [], whispers = [];
 let myRole = null;
+let controlMode = "autonomous";
 
 function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
 function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
@@ -181,7 +185,7 @@ function renderSnapshot(s) {
   if (phase === "game_over") { phaseTag.textContent = "game over"; phaseTag.className = "tag over"; }
   else if (phase === "waiting_peer") { phaseTag.textContent = "waiting"; phaseTag.className = "tag waiting"; }
   else { phaseTag.textContent = phase; phaseTag.className = "tag"; }
-  $("#meta").textContent = `Weak Wins All · ${myRole || "?"} · ${phase}`;
+  $("#meta").textContent = `Weak Wins All · ${controlMode} · ${myRole || "?"} · ${phase}`;
   if (phase === "game_over") {
     const st = snap.last_event?.structured || {};
     const w = st.game_winner || "none";
@@ -197,7 +201,7 @@ function updateDirectCommand() {
   const cmdHint = $("#cmd-hint");
   const input = $("#bid-input");
   const btn = $("#bid-submit");
-  const enable = timing && timing.match_key === "round" && phase !== "game_over";
+  const enable = controlMode !== "autonomous" && timing && timing.match_key === "round" && phase !== "game_over";
   input.disabled = !enable;
   btn.disabled = !enable;
   const rem = myRemaining();
@@ -324,6 +328,7 @@ es.addEventListener("detail", e => pushEvent(JSON.parse(e.data)));
 es.onerror = () => {};
 
 (async () => {
+  try { const info = await fetch("/api/info").then(r=>r.json()); controlMode = info.control_mode || controlMode; myRole = info.role || myRole; document.body.dataset.controlMode = controlMode; } catch(e) {}
   try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
   try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
   try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}

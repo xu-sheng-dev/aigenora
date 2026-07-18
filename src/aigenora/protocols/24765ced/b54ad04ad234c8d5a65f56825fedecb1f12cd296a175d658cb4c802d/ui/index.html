@@ -1,0 +1,1812 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="application-name" content="Aigenora Tank Battle">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Aigenora · Armored Command</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #d8e0d1;
+      --muted: #7d897d;
+      --paper: #10140f;
+      --panel: #171c15;
+      --line: #354031;
+      --acid: #d7ff47;
+      --host: #ff5b3b;
+      --guest: #4ed9ff;
+      --warn: #ffc857;
+      --shadow: rgba(0, 0, 0, .58);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: Georgia, "Noto Serif SC", serif;
+      background:
+        linear-gradient(rgba(215, 255, 71, .022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(215, 255, 71, .022) 1px, transparent 1px),
+        #10140f;
+      background-size: 28px 28px;
+    }
+
+    button, input, select { font: inherit; }
+
+    .shell {
+      display: grid;
+      grid-template-rows: 56px minmax(0, 1fr) 34px;
+      height: 100vh;
+      min-height: 390px;
+      animation: boot .42s ease-out both;
+    }
+
+    @keyframes boot {
+      from { opacity: 0; transform: scale(.992); filter: saturate(.2); }
+      to { opacity: 1; transform: none; filter: none; }
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 20, 15, .94);
+      box-shadow: 0 8px 24px var(--shadow);
+      z-index: 3;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      white-space: nowrap;
+    }
+
+    .brand strong {
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: 22px;
+      font-weight: 400;
+      letter-spacing: .12em;
+      color: var(--acid);
+    }
+
+    .brand span, .eyebrow, .mono {
+      font-family: Consolas, "Courier New", monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .brand span { color: var(--muted); font-size: 12px; }
+
+    .scoreline {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(12px, 4vw, 50px);
+      min-width: 0;
+    }
+
+    .force {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: Consolas, monospace;
+      font-size: 14px;
+    }
+
+    .force b { font-size: 22px; color: white; }
+    .force.host { color: var(--host); }
+    .force.guest { color: var(--guest); }
+
+    .tick {
+      min-width: 96px;
+      padding: 5px 12px;
+      border: 1px solid var(--line);
+      text-align: center;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      color: var(--muted);
+      background: #0b0e0a;
+    }
+
+    .tick b { color: var(--acid); font-size: 17px; }
+
+    .link-state {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font: 12px Consolas, monospace;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .lamp {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #6e3d31;
+      box-shadow: 0 0 0 3px rgba(255, 91, 59, .08);
+    }
+
+    .connected .lamp {
+      background: var(--acid);
+      box-shadow: 0 0 14px rgba(215, 255, 71, .7);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(420px, 1fr) 318px;
+      min-height: 0;
+    }
+
+    .map-stage {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(80, 96, 70, .12), transparent 62%),
+        #090c09;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+
+    .map-caption {
+      position: absolute;
+      left: 14px;
+      bottom: 12px;
+      display: flex;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .chip {
+      padding: 4px 7px;
+      border: 1px solid rgba(216, 224, 209, .18);
+      background: rgba(9, 12, 9, .82);
+      color: var(--muted);
+      font: 11px Consolas, monospace;
+      letter-spacing: .05em;
+    }
+
+    .victory {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      background: rgba(8, 10, 7, .72);
+      backdrop-filter: blur(3px);
+      z-index: 2;
+    }
+
+    .victory.show { display: grid; }
+
+    .victory-card {
+      padding: 26px 40px;
+      border: 1px solid var(--acid);
+      background: #11160f;
+      text-align: center;
+      box-shadow: 12px 12px 0 rgba(215, 255, 71, .08);
+    }
+
+    .victory-card .eyebrow { color: var(--muted); font-size: 12px; }
+    .victory-card h2 { margin: 6px 0 0; color: var(--acid); font: 36px Impact, sans-serif; letter-spacing: .08em; }
+
+    aside {
+      display: grid;
+      grid-template-rows: auto auto minmax(110px, 1fr);
+      min-height: 0;
+      border-left: 1px solid var(--line);
+      background: rgba(23, 28, 21, .96);
+      box-shadow: -14px 0 32px rgba(0, 0, 0, .24);
+      overflow: auto;
+    }
+
+    .section { padding: 13px 14px; border-bottom: 1px solid var(--line); }
+    .section:last-child { border-bottom: 0; }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 9px;
+    }
+
+    .section-title h3 {
+      margin: 0;
+      color: var(--acid);
+      font: 13px Consolas, monospace;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .section-title span { color: var(--muted); font: 11px Consolas, monospace; }
+
+    .orders {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .order-btn {
+      position: relative;
+      min-height: 38px;
+      border: 1px solid #46513f;
+      background: #11160f;
+      color: var(--ink);
+      cursor: pointer;
+      font: 13px Consolas, monospace;
+      letter-spacing: .04em;
+      transition: border-color .15s, color .15s, transform .15s, background .15s;
+    }
+
+    .order-btn:hover, .order-btn.active {
+      border-color: var(--acid);
+      color: var(--acid);
+      background: rgba(215, 255, 71, .05);
+      transform: translateY(-1px);
+    }
+
+    .order-btn:active { transform: translateY(1px); }
+
+    .natural-order {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    input, select {
+      min-width: 0;
+      border: 1px solid #46513f;
+      outline: 0;
+      background: #0c100b;
+      color: var(--ink);
+      padding: 8px 9px;
+      font: 12px Consolas, monospace;
+    }
+
+    input:focus, select:focus { border-color: var(--acid); }
+
+    .send-btn {
+      border: 0;
+      background: var(--acid);
+      color: #11150e;
+      padding: 0 12px;
+      cursor: pointer;
+      font: 700 12px Consolas, monospace;
+    }
+
+    .unit-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+
+    .event-log {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 7px;
+      padding: 5px 0;
+      border-bottom: 1px dashed rgba(126, 137, 125, .22);
+      font: 11px Consolas, monospace;
+      color: var(--muted);
+    }
+
+    .event b { color: var(--warn); font-weight: 400; }
+    .event.destroyed b, .event.game_over b { color: var(--host); }
+
+    footer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-top: 1px solid var(--line);
+      background: #0c100b;
+      color: var(--muted);
+      font: 11px Consolas, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    #toast { color: var(--acid); overflow: hidden; text-overflow: ellipsis; }
+    #receipt { overflow: hidden; text-overflow: ellipsis; }
+
+    @media (max-width: 850px) {
+      main { grid-template-columns: minmax(0, 1fr) 270px; }
+      .brand span, .link-state span { display: none; }
+      aside { font-size: 90%; }
+    }
+
+    @media (max-width: 650px) {
+      .shell { grid-template-rows: 44px minmax(0, 1fr) 26px; }
+      header { gap: 7px; padding: 0 8px; }
+      .brand strong { font-size: 15px; }
+      .force { font-size: 9px; }
+      .force b { font-size: 13px; }
+      .tick { min-width: 62px; padding: 3px 5px; }
+      main { grid-template-columns: 1fr; grid-template-rows: minmax(230px, 1fr) 190px; }
+      aside { grid-template-columns: 1.25fr 1fr; grid-template-rows: 1fr; border-left: 0; border-top: 1px solid var(--line); }
+      aside .section { overflow: auto; border-right: 1px solid var(--line); }
+      aside .section:last-child { display: none; }
+    }
+
+    /* Command Deck 2.0 — a modern C4ISR map, not a miniature retro HUD. */
+    :root {
+      --ink: #edf4eb;
+      --muted: #91a198;
+      --paper: #070b0b;
+      --panel: #0d1413;
+      --panel-raised: #121d1a;
+      --line: rgba(174, 198, 181, .19);
+      --line-strong: rgba(193, 219, 199, .34);
+      --acid: #d9ff68;
+      --host: #ff6b4e;
+      --guest: #52d9ff;
+      --warn: #f3bd59;
+      --shadow: rgba(0, 0, 0, .48);
+      --display: "Bahnschrift Condensed", "DIN Condensed", "Noto Sans SC", sans-serif;
+      --body: "Bahnschrift", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+      --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    }
+
+    html, body { min-width: 320px; background: var(--paper); }
+
+    body {
+      font-family: var(--body);
+      background:
+        radial-gradient(circle at 18% -10%, rgba(82, 217, 255, .07), transparent 34%),
+        radial-gradient(circle at 90% 110%, rgba(217, 255, 104, .06), transparent 38%),
+        #070b0b;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .14;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.14'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+      z-index: 20;
+    }
+
+    button, input, select, textarea { font-family: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--acid);
+      outline-offset: 2px;
+    }
+
+    .shell {
+      grid-template-rows: 70px minmax(0, 1fr) 38px;
+      gap: 10px;
+      min-height: 520px;
+      padding: 10px;
+      background: transparent;
+    }
+
+    header {
+      position: relative;
+      grid-template-columns: minmax(220px, 1fr) auto minmax(190px, 1fr);
+      gap: 24px;
+      padding: 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(18, 29, 26, .98), rgba(10, 16, 15, .98));
+      box-shadow: 0 16px 44px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .035);
+    }
+
+    header::after {
+      content: "";
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: -1px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(217,255,104,.7), transparent);
+      opacity: .35;
+    }
+
+    .brand { align-items: center; gap: 12px; }
+
+    .brand-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 1px solid rgba(217, 255, 104, .44);
+      clip-path: polygon(18% 0, 100% 0, 100% 82%, 82% 100%, 0 100%, 0 18%);
+      color: var(--acid);
+      background: rgba(217, 255, 104, .06);
+      font: 700 18px var(--display);
+    }
+
+    .brand-copy { display: grid; gap: 1px; }
+
+    .brand strong {
+      color: var(--ink);
+      font: 650 21px/1 var(--display);
+      letter-spacing: .08em;
+    }
+
+    .brand span {
+      color: var(--muted);
+      font: 11px/1.3 var(--mono);
+      letter-spacing: .14em;
+    }
+
+    .scoreline { gap: 12px; }
+
+    .force {
+      min-width: 118px;
+      display: grid;
+      grid-template-columns: auto auto;
+      align-items: center;
+      justify-content: center;
+      gap: 3px 9px;
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(2, 7, 7, .46);
+      font: 700 11px var(--mono);
+      letter-spacing: .1em;
+    }
+
+    .force b { grid-row: span 2; font: 650 29px/1 var(--display); }
+    .force small { color: var(--muted); font: 9px var(--mono); letter-spacing: .08em; }
+    .force.host { border-color: rgba(255, 107, 78, .3); }
+    .force.guest { border-color: rgba(82, 217, 255, .3); }
+
+    .tick {
+      min-width: 116px;
+      padding: 8px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: 10px var(--mono);
+      letter-spacing: .13em;
+    }
+
+    .tick b { display: block; margin-top: 2px; color: var(--ink); font: 650 25px/1 var(--display); letter-spacing: .04em; }
+
+    .link-state {
+      justify-self: end;
+      min-width: 164px;
+      justify-content: flex-end;
+      color: var(--muted);
+      font: 11px var(--mono);
+      letter-spacing: .08em;
+    }
+
+    .phase-pill {
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--warn);
+      background: rgba(243, 189, 89, .055);
+    }
+
+    main {
+      grid-template-columns: minmax(0, 1fr) clamp(350px, 29vw, 420px);
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .map-stage {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(rgba(217,255,104,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(217,255,104,.018) 1px, transparent 1px),
+        radial-gradient(circle at center, rgba(34, 55, 47, .32), rgba(4, 8, 8, .96) 72%);
+      background-size: 32px 32px, 32px 32px, auto;
+      box-shadow: inset 0 0 70px rgba(0, 0, 0, .48), 0 18px 50px rgba(0,0,0,.2);
+    }
+
+    .map-stage::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.02);
+    }
+
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #terrain { pointer-events: none; }
+    #battlefield { z-index: 1; touch-action: none; }
+
+    .map-toolbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .map-toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(7, 11, 11, .84);
+      box-shadow: 0 8px 28px rgba(0,0,0,.3);
+      backdrop-filter: blur(12px);
+      pointer-events: auto;
+    }
+
+    .map-tool {
+      min-width: 34px;
+      height: 30px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font: 700 13px var(--mono);
+    }
+
+    .map-tool:hover { color: var(--acid); background: rgba(217,255,104,.08); }
+    #zoom-label { min-width: 48px; text-align: center; color: var(--ink); font: 11px var(--mono); }
+
+    .map-caption { left: 14px; bottom: 14px; z-index: 3; flex-wrap: wrap; }
+
+    .chip {
+      padding: 6px 9px;
+      border-color: var(--line);
+      border-radius: 6px;
+      background: rgba(7, 11, 11, .84);
+      color: var(--muted);
+      font: 11px var(--mono);
+      backdrop-filter: blur(9px);
+    }
+
+    .map-hint {
+      color: var(--muted);
+      font: 11px var(--body);
+      padding: 0 8px;
+    }
+
+    aside {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line-strong) transparent;
+    }
+
+    .section {
+      padding: 15px;
+      border: 1px solid var(--line) !important;
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(18,29,26,.98), rgba(10,16,15,.98));
+      box-shadow: 0 15px 42px rgba(0,0,0,.22), inset 0 1px rgba(255,255,255,.025);
+    }
+
+    .section-title { margin-bottom: 12px; }
+
+    .section-title h3 {
+      color: var(--ink);
+      font: 650 16px var(--display);
+      letter-spacing: .08em;
+    }
+
+    .section-title span { color: var(--muted); font: 10px var(--mono); letter-spacing: .06em; }
+
+    .orders { gap: 8px; }
+
+    .order-btn {
+      min-height: 58px;
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 9px;
+      border-color: var(--line);
+      border-radius: 8px;
+      background: rgba(4, 9, 8, .55);
+      text-align: left;
+      font-family: var(--body);
+      letter-spacing: 0;
+    }
+
+    .order-icon {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--acid);
+      font: 700 15px var(--mono);
+    }
+
+    .order-btn b { display: block; color: var(--ink); font: 650 13px var(--body); }
+    .order-btn small { display: block; margin-top: 2px; color: var(--muted); font: 10px var(--body); }
+    .order-btn:hover, .order-btn.active { border-color: rgba(217,255,104,.55); background: rgba(217,255,104,.075); }
+    .order-btn:disabled, .send-btn:disabled, input:disabled, textarea:disabled, select:disabled { opacity: .42; cursor: not-allowed; }
+
+    .natural-order {
+      grid-template-columns: minmax(0, 1fr) 72px;
+      align-items: stretch;
+      margin-top: 10px;
+    }
+
+    input, textarea, select {
+      min-height: 40px;
+      border-color: var(--line);
+      border-radius: 7px;
+      background: rgba(2, 7, 7, .62);
+      color: var(--ink);
+      padding: 9px 10px;
+      font: 12px/1.45 var(--body);
+    }
+
+    textarea { min-height: 72px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { border-color: rgba(217,255,104,.66); }
+
+    .send-btn {
+      border-radius: 7px;
+      background: var(--acid);
+      color: #10160e;
+      font: 750 12px var(--body);
+      transition: transform .15s, filter .15s;
+    }
+
+    .send-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+    .plan-preview {
+      display: none;
+      gap: 7px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid rgba(217,255,104,.25);
+      border-radius: 8px;
+      background: rgba(217,255,104,.045);
+    }
+
+    .plan-preview.show { display: grid; }
+    .plan-preview strong { color: var(--acid); font: 650 12px var(--body); }
+    .plan-preview ol { display: grid; gap: 4px; margin: 0; padding-left: 20px; color: var(--muted); font: 11px/1.4 var(--body); }
+
+    .unit-roster {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+
+    .unit-card {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(2, 7, 7, .48);
+      color: var(--ink);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .unit-card:hover, .unit-card.selected { border-color: var(--acid); background: rgba(217,255,104,.06); }
+    .unit-badge { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; background: rgba(82,217,255,.1); color: var(--guest); font: 700 11px var(--mono); }
+    [data-role="host"] .unit-badge { color: var(--host); background: rgba(255,107,78,.1); }
+    .unit-card b { display: block; overflow: hidden; text-overflow: ellipsis; font: 650 12px var(--mono); }
+    .unit-card small { color: var(--muted); font: 10px var(--body); }
+
+    .unit-row { grid-template-columns: 1fr 1.15fr 64px; }
+
+    .event-section { flex: 1 0 190px; min-height: 190px; }
+    .event-log { overflow: auto; padding-right: 4px; }
+
+    .event {
+      grid-template-columns: 58px 1fr;
+      gap: 9px;
+      padding: 8px 0;
+      border-bottom-color: rgba(174,198,181,.12);
+      font: 11px var(--mono);
+    }
+
+    .event b { color: var(--ink); font-family: var(--body); }
+
+    footer {
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(10, 16, 15, .92);
+      font: 11px var(--mono);
+    }
+
+    #toast { font-family: var(--body); font-size: 12px; }
+
+    .victory {
+      z-index: 8;
+      pointer-events: none;
+      background: radial-gradient(circle at center, rgba(8,16,13,.16), rgba(2,7,6,.42));
+      backdrop-filter: saturate(.82);
+    }
+
+    .victory-card {
+      width: min(480px, calc(100% - 34px));
+      padding: 28px;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(20,31,27,.98), rgba(8,14,13,.98));
+      box-shadow: 0 28px 90px rgba(0,0,0,.52), 0 0 0 1px rgba(217,255,104,.06) inset;
+    }
+
+    .victory-card .eyebrow { color: var(--acid); font: 11px var(--mono); letter-spacing: .16em; }
+    .victory-card h2 { margin: 8px 0 6px; color: var(--ink); font: 650 46px/1 var(--display); }
+    .victory-summary { margin: 0; color: var(--muted); font: 14px/1.55 var(--body); }
+    .victory-rule { width: 54px; height: 3px; margin: 17px auto; border: 0; background: var(--acid); }
+    .victory-note { color: var(--muted); font: 11px var(--mono); }
+
+    @media (max-width: 1100px) {
+      header { grid-template-columns: minmax(170px, 1fr) auto auto; gap: 10px; }
+      .brand span { display: none; }
+      .force { min-width: 92px; padding-inline: 8px; }
+      main { grid-template-columns: minmax(0, 1fr) 340px; }
+    }
+
+    @media (max-width: 820px) {
+      .shell { grid-template-rows: 62px minmax(0, 1fr) 34px; min-height: 600px; padding: 7px; gap: 7px; }
+      header { grid-template-columns: auto 1fr auto; padding: 0 10px; }
+      .brand-mark { width: 31px; height: 31px; }
+      .brand strong { font-size: 16px; }
+      .scoreline { gap: 5px; }
+      .force { min-width: 70px; border: 0; background: transparent; }
+      .force b { font-size: 23px; }
+      .force small, .force > span { display: none; }
+      .tick { min-width: 74px; }
+      .link-state { min-width: 0; }
+      .link-state span { display: none; }
+      main { grid-template-columns: 1fr; grid-template-rows: minmax(330px, 1.2fr) minmax(280px, .8fr); }
+      aside { display: grid; grid-template-columns: 1.2fr 1fr; grid-template-rows: auto auto; }
+      aside .section { overflow: visible; }
+      aside .section:last-child { display: block; }
+      .event-section { grid-column: 1 / -1; max-height: 210px; }
+    }
+
+    @media (max-width: 560px) {
+      .shell { min-height: 660px; }
+      header { grid-template-columns: auto 1fr; }
+      .brand-copy { display: none; }
+      .link-state { position: absolute; right: 12px; top: 12px; }
+      .scoreline { justify-content: center; }
+      main { grid-template-rows: minmax(300px, 52vh) minmax(330px, 1fr); }
+      aside { display: flex; }
+      .orders { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .map-hint { display: none; }
+      .map-caption .chip:nth-child(2) { display: none; }
+      footer #receipt { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <div class="brand-copy"><strong>Armored Command</strong><span>Aigenora / Live Operations</span></div>
+      </div>
+      <div class="scoreline">
+        <div class="force host"><span>HOST</span><b id="host-alive">—</b><small id="host-status">STANDBY</small></div>
+        <div class="tick">AUTH TICK <b id="tick">0000</b></div>
+        <div class="force guest"><span>GUEST</span><b id="guest-alive">—</b><small id="guest-status">STANDBY</small></div>
+      </div>
+      <div class="link-state" id="link-state"><span class="phase-pill" id="battle-phase">STANDBY</span><i class="lamp"></i><span id="link-label">BRIDGE OFFLINE</span></div>
+    </header>
+
+    <main>
+      <section class="map-stage" id="map-stage">
+        <canvas id="terrain" aria-hidden="true"></canvas>
+        <canvas id="battlefield" aria-label="Live tank battle map"></canvas>
+        <div class="map-toolbar">
+          <div class="map-toolbar-group">
+            <span class="map-hint">Scroll to zoom · Drag to pan · Click a tank to select</span>
+          </div>
+          <div class="map-toolbar-group" aria-label="Map zoom">
+            <button class="map-tool" id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+            <span id="zoom-label">100%</span>
+            <button class="map-tool" id="zoom-in" title="Zoom in" aria-label="Zoom in">＋</button>
+            <button class="map-tool" id="zoom-reset" title="Fit map">FIT</button>
+          </div>
+        </div>
+        <div class="map-caption">
+          <span class="chip" id="role-chip">ROLE —</span>
+          <span class="chip" id="rules-chip">AWAITING BATTLEFIELD DATA</span>
+          <span class="chip" id="network-chip" title="Local P2P latency and recommended control style">RTT — · MACRO SAFE</span>
+          <span class="chip" id="selected-chip">NO UNIT SELECTED</span>
+        </div>
+        <div class="victory" id="victory">
+          <div class="victory-card">
+            <div class="eyebrow">AUTHORITATIVE OUTCOME · FINAL</div>
+            <h2 id="victory-text">Battle Complete</h2>
+            <p class="victory-summary" id="victory-summary">The final frame is confirmed and the battlefield is locked.</p>
+            <hr class="victory-rule">
+            <div class="victory-note">This match will not restart automatically · The final battlefield remains inspectable</div>
+          </div>
+        </div>
+      </section>
+
+      <aside>
+        <section class="section">
+          <div class="section-title"><h3>Force Orders</h3><span>PERSISTS FOR 60 SECONDS</span></div>
+          <div class="orders">
+            <button class="order-btn" data-order="assault"><span class="order-icon">↑</span><span><b>Frontal Assault</b><small>Pressure the enemy line</small></span></button>
+            <button class="order-btn" data-order="surround"><span class="order-icon">◎</span><span><b>Encircle</b><small>Build crossfire from multiple axes</small></span></button>
+            <button class="order-btn" data-order="flank_left"><span class="order-icon">↖</span><span><b>Left Flank</b><small>Advance along the friendly left</small></span></button>
+            <button class="order-btn" data-order="flank_right"><span class="order-icon">↗</span><span><b>Right Flank</b><small>Advance along the friendly right</small></span></button>
+            <button class="order-btn" data-order="defend"><span class="order-icon">◇</span><span><b>Depth Defense</b><small>Consolidate and return fire</small></span></button>
+            <button class="order-btn" data-order="retreat"><span class="order-icon">↓</span><span><b>Orderly Retreat</b><small>Break contact and return to base</small></span></button>
+          </div>
+          <div class="natural-order">
+            <textarea id="natural-input" maxlength="2000" placeholder="Try: G0 move to (12,20) and fire on contact; G1 patrol between (8,22) and (14,22); G2 attack tank H0"></textarea>
+            <button class="send-btn" id="natural-send">PARSE<br>ORDER</button>
+          </div>
+          <div class="plan-preview" id="plan-preview" aria-live="polite"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><h3>Unit Orders</h3><span>CLICK THE MAP TO SELECT</span></div>
+          <div class="unit-roster" id="unit-roster"><span class="map-hint">AWAITING FRIENDLY UNITS</span></div>
+          <div class="unit-row">
+            <select id="unit-select"><option value="">Select a friendly tank</option></select>
+            <select id="unit-order">
+              <option value="assault">Autonomous assault</option>
+              <option value="flank_left">Flank left</option>
+              <option value="flank_right">Flank right</option>
+              <option value="defend">Defend position</option>
+              <option value="retreat">Return to base</option>
+              <option value="hold">Hold position</option>
+            </select>
+            <button class="send-btn" id="unit-send">APPLY</button>
+          </div>
+        </section>
+
+        <section class="section event-section">
+          <div class="section-title"><h3>Battle Log</h3><span id="event-count">0 EVENTS</span></div>
+          <div class="event-log" id="event-log"><div class="event"><span>----</span><b>AWAITING REAL-TIME FRAME</b></div></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer>
+      <span id="toast">COMMAND LINK INITIALIZING</span>
+      <span id="receipt">NO COMMAND RECEIPT</span>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var SCALE = 1000;
+  var PARENT_ORIGIN = new URLSearchParams(window.location.search).get("parent") || window.location.origin;
+  var pending = Object.create(null);
+  var latestSnapshot = null;
+  var latestWorld = null;
+  var previousWorld = null;
+  var receivedAt = 0;
+  var selectedUnit = "";
+  var bridgeReady = false;
+  var eventKeys = new Set();
+  var events = [];
+  var matchStartedAt = null;
+  var currentMatchId = null;
+  var terminalMatchId = null;
+  var transform = null;
+  var camera = { zoom: 1, panX: 0, panY: 0 };
+  var terrainKey = "";
+  var pointerDrag = null;
+
+  var terrainCanvas = document.getElementById("terrain");
+  var terrainCtx = terrainCanvas.getContext("2d");
+  var canvas = document.getElementById("battlefield");
+  var ctx = canvas.getContext("2d");
+
+  function sendToParent(message) {
+    window.parent.postMessage(Object.assign({ source: "aigenora-ui" }, message), PARENT_ORIGIN);
+  }
+
+  function request(method, body) {
+    return new Promise(function (resolve, reject) {
+      var id = "rt_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      var timer = setTimeout(function () {
+        delete pending[id];
+        reject(new Error("bridge request timeout"));
+      }, 5000);
+      pending[id] = function (response) {
+        clearTimeout(timer);
+        resolve(response);
+      };
+      sendToParent({ type: "request", id: id, method: method, body: body });
+    });
+  }
+
+  function setConnection(connected, label) {
+    bridgeReady = connected;
+    document.getElementById("link-state").classList.toggle("connected", connected);
+    document.getElementById("link-label").textContent = label;
+  }
+
+  window.addEventListener("message", function (event) {
+    if (event.origin !== PARENT_ORIGIN) return;
+    var data = event.data || {};
+    if (data.source !== "aigenora-broadcast") return;
+    if (data.type === "hello-ack") {
+      setConnection(true, "LIVE BRIDGE");
+      document.getElementById("toast").textContent = "REAL-TIME COMMAND LINK ESTABLISHED";
+      request("snapshot").then(function (response) {
+        if (response.ok) applySnapshot(response.data);
+      }).catch(showError);
+      return;
+    }
+    if (data.type === "response") {
+      var callback = pending[data.id];
+      if (callback) {
+        delete pending[data.id];
+        callback(data);
+      }
+      return;
+    }
+    if (data.type === "push" && data.event === "snapshot") {
+      applySnapshot(data.data);
+    }
+  });
+
+  function resetMatchState() {
+    previousWorld = null;
+    latestWorld = null;
+    terminalMatchId = null;
+    selectedUnit = "";
+    eventKeys = new Set();
+    events = [];
+    terrainKey = "";
+    camera = { zoom: 1, panX: 0, panY: 0 };
+    document.body.classList.remove("is-terminal");
+    document.getElementById("event-log").innerHTML = '<div class="event"><span>----</span><b>NO ENGAGEMENTS YET</b></div>';
+    document.getElementById("event-count").textContent = "0 EVENTS";
+    document.getElementById("receipt").textContent = "NO COMMAND RECEIPT";
+    document.getElementById("selected-chip").textContent = "NO UNIT SELECTED";
+    document.getElementById("plan-preview").classList.remove("show");
+    document.getElementById("zoom-label").textContent = "100%";
+  }
+
+  function snapshotMatchKey(snapshot) {
+    if (snapshot.match_id != null) return "id:" + String(snapshot.match_id);
+    if (snapshot.started_at != null) return "start:" + String(snapshot.started_at);
+    return null;
+  }
+
+  function applySnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    var world = snapshot.world;
+    if (world && typeof world === "object") {
+      var startedAt = snapshot.started_at == null ? null : snapshot.started_at;
+      var incomingMatchId = snapshotMatchKey(snapshot);
+      var newMatch = !!(currentMatchId && incomingMatchId && incomingMatchId !== currentMatchId);
+      if (newMatch) {
+        resetMatchState();
+      }
+      if (incomingMatchId) currentMatchId = incomingMatchId;
+      // Push and initial-request responses can race. A lower tick from the same match
+      // is stale evidence, never proof that a rematch started.
+      if (!newMatch && latestWorld && Number(world.tick) < Number(latestWorld.tick)) return;
+      if (!newMatch && terminalMatchId && !world.game_over) return;
+      if (startedAt !== null) matchStartedAt = startedAt;
+      latestSnapshot = snapshot;
+      if (!latestWorld || world.tick !== latestWorld.tick) {
+        previousWorld = latestWorld;
+        latestWorld = world;
+        receivedAt = performance.now();
+        collectEvents(snapshot.combat_events || world.events || [], world.tick);
+      }
+      if (world.game_over) terminalMatchId = currentMatchId || "terminal";
+      updateHud(snapshot, world);
+      updateUnitSelect(world, snapshot.role);
+      if (snapshot.tactical_plan) renderPlan(snapshot.tactical_plan);
+    }
+  }
+
+  function updateHud(snapshot, world) {
+    document.getElementById("tick").textContent = String(world.tick || 0).padStart(4, "0");
+    document.getElementById("host-alive").textContent = world.host_alive;
+    document.getElementById("guest-alive").textContent = world.guest_alive;
+    document.getElementById("host-status").textContent = "ALIVE / " + ((world.rules || {}).team_size || "?");
+    document.getElementById("guest-status").textContent = "ALIVE / " + ((world.rules || {}).team_size || "?");
+    document.getElementById("role-chip").textContent = "ROLE " + String(snapshot.role || "—").toUpperCase();
+    var rules = world.rules || {};
+    document.getElementById("rules-chip").textContent =
+      (rules.team_size || "?") + "v" + (rules.team_size || "?") +
+      " · FF " + (rules.friendly_fire ? "ON" : "OFF") +
+      " · PICKUP " + String(rules.pickup_mode || "none").toUpperCase();
+    var transport = snapshot.realtime && snapshot.realtime.transport;
+    var networkChip = document.getElementById("network-chip");
+    if (transport && transport.status === "measured") {
+      var rtt = transport.smoothed_rtt_ms == null ? transport.rtt_ms : transport.smoothed_rtt_ms;
+      networkChip.textContent = "RTT " + Math.round(Number(rtt || 0)) + " MS · " +
+        String(transport.recommended_control || "macro").toUpperCase();
+      networkChip.title = transport.reason || "Local P2P latency and recommended control style";
+    } else {
+      networkChip.textContent = "RTT — · MACRO SAFE";
+    }
+    var ack = snapshot.realtime && snapshot.realtime.last_command_ack;
+    if (ack) {
+      document.getElementById("receipt").textContent =
+        "CMD #" + ack.seq + " → T" + ack.target_tick + " · " + String(ack.status).toUpperCase() +
+        " @ HOST T" + ack.received_at_tick;
+    }
+    var victory = document.getElementById("victory");
+    victory.classList.toggle("show", !!world.game_over);
+    document.body.classList.toggle("is-terminal", !!world.game_over);
+    document.getElementById("battle-phase").textContent = world.game_over ? "FINAL" : "LIVE COMBAT";
+    document.querySelectorAll(".order-btn, #natural-input, #natural-send, #unit-order, #unit-send").forEach(function (control) {
+      control.disabled = !!world.game_over;
+    });
+    if (world.game_over) {
+      var labels = { host: "HOST VICTORY", guest: "GUEST VICTORY", draw: "DRAW" };
+      document.getElementById("victory-text").textContent = labels[world.winner] || "BATTLE COMPLETE";
+      var finalEvent = (world.events || []).find(function (item) { return item.type === "game_over"; }) || {};
+      var reason = finalEvent.reason === "tick_limit" ? "SIMULATION LIMIT REACHED" : "ONE ARMORED FORCE ELIMINATED";
+      document.getElementById("victory-summary").textContent =
+        "T" + String(world.tick).padStart(4, "0") + " · " + reason + " · " +
+        "HOST " + world.host_alive + " : " + world.guest_alive + " GUEST";
+    }
+  }
+
+  function updateUnitSelect(world, role) {
+    var select = document.getElementById("unit-select");
+    var own = world.tanks.filter(function (tank) {
+      return tank.team === role && tank.hp > 0;
+    });
+    var ids = own.map(function (tank) { return tank.id; });
+    var signature = ids.join("|");
+    if (select.dataset.signature !== signature) {
+      select.dataset.signature = signature;
+      select.innerHTML = '<option value="">Select a friendly tank</option>' + ids.map(function (id) {
+        return '<option value="' + id + '">' + id.toUpperCase() + '</option>';
+      }).join("");
+    }
+    if (selectedUnit && ids.indexOf(selectedUnit) < 0) selectedUnit = "";
+    if (ids.indexOf(selectedUnit) >= 0) select.value = selectedUnit;
+    var roster = document.getElementById("unit-roster");
+    roster.dataset.role = role || "";
+    roster.innerHTML = own.length ? own.map(function (tank) {
+      var hp = Math.max(0, Number(tank.hp || 0));
+      var status = tank.last_fire ? "FIRING" : tank.last_move && tank.last_move !== "none" ? "MOVING · " + tank.last_move.toUpperCase() : "STANDING BY";
+      return '<button class="unit-card ' + (tank.id === selectedUnit ? 'selected' : '') + '" data-unit="' + escapeHtml(tank.id) + '">' +
+        '<span class="unit-badge">' + escapeHtml(tank.id.toUpperCase()) + '</span>' +
+        '<span><b>' + '●'.repeat(hp) + '</b><small>' + escapeHtml(status) + '</small></span></button>';
+    }).join("") : '<span class="map-hint">ALL FRIENDLY UNITS OFFLINE</span>';
+    roster.querySelectorAll(".unit-card").forEach(function (card) {
+      card.addEventListener("click", function () {
+        selectUnit(card.dataset.unit || "");
+      });
+    });
+  }
+
+  function renderPlan(plan) {
+    if (!plan || typeof plan !== "object") return;
+    var orders = Array.isArray(plan.orders) ? plan.orders : [];
+    if (!orders.length) return;
+    var active = new Set(plan.active_order_ids || []);
+    var labels = {
+      assault: "Frontal Assault", surround: "Encircle", flank_left: "Left Flank",
+      flank_right: "Right Flank", defend: "Depth Defense", retreat: "Orderly Retreat", hold: "Hold",
+      move_to: "Move to Position", patrol: "Patrol", attack_unit: "Attack Unit"
+    };
+    var list = orders.map(function (order) {
+      var scope = Array.isArray(order.unit_ids) ? order.unit_ids.map(function (id) { return String(id).toUpperCase(); }).join(", ") : "WHOLE FORCE";
+      var timing = order.start_tick != null ? " · T" + order.start_tick : "";
+      if (order.expires_tick != null) timing += "–T" + order.expires_tick;
+      var target = order.target ? " · POSITION (" + order.target.col + "," + order.target.row + ")" : "";
+      if (Array.isArray(order.waypoints)) target += " · WAYPOINTS " + order.waypoints.map(function (point) { return "(" + point.col + "," + point.row + ")"; }).join(" ↔ ");
+      if (order.target_unit_id) target += " · TARGET " + String(order.target_unit_id).toUpperCase();
+      var trigger = order.trigger ? " · CONDITIONAL" : "";
+      var prefix = active.has(String(order.id)) ? "● " : "○ ";
+      return '<li>' + prefix + escapeHtml(scope + " / " + (labels[order.kind] || order.kind) + timing + target + trigger) + '</li>';
+    }).join("");
+    var preview = document.getElementById("plan-preview");
+    preview.innerHTML = '<strong>COMPILED INTO ' + orders.length + ' EXECUTABLE ORDERS</strong><ol>' + list + '</ol>';
+    preview.classList.add("show");
+  }
+
+  function selectUnit(unitId) {
+    selectedUnit = unitId;
+    document.getElementById("unit-select").value = unitId;
+    document.getElementById("selected-chip").textContent = unitId ? "SELECT " + unitId.toUpperCase() : "NO UNIT SELECTED";
+    if (latestWorld && latestSnapshot) updateUnitSelect(latestWorld, latestSnapshot.role);
+  }
+
+  function collectEvents(items, tick) {
+    items.forEach(function (item, index) {
+      var key = tick + ":" + index + ":" + JSON.stringify(item);
+      if (eventKeys.has(key)) return;
+      eventKeys.add(key);
+      events.unshift({ tick: tick, data: item });
+    });
+    events = events.slice(0, 12);
+    var labels = {
+      fire: "FIRE",
+      hit: "HIT",
+      destroyed: "UNIT DESTROYED",
+      brick_destroyed: "OBSTACLE DESTROYED",
+      pickup: "POWER-UP ACQUIRED",
+      game_over: "BATTLE COMPLETE"
+    };
+    var log = document.getElementById("event-log");
+    log.innerHTML = events.length ? events.map(function (entry) {
+      var item = entry.data;
+      var detail = labels[item.type] || item.type || "BATTLE UPDATE";
+      if (item.victim) detail += " · " + item.victim;
+      if (item.tank) detail += " · " + item.tank;
+      if (item.kind) detail += " / " + item.kind;
+      if (item.winner) detail += " · " + item.winner.toUpperCase();
+      return '<div class="event ' + (item.type || "") + '"><span>T' + String(entry.tick).padStart(4, "0") + '</span><b>' + escapeHtml(detail) + '</b></div>';
+    }).join("") : '<div class="event"><span>----</span><b>NO ENGAGEMENTS YET</b></div>';
+    document.getElementById("event-count").textContent = events.length + " EVENTS";
+  }
+
+  function escapeHtml(text) {
+    var node = document.createElement("span");
+    node.textContent = String(text);
+    return node.innerHTML;
+  }
+
+  function resizeCanvas() {
+    var rect = canvas.getBoundingClientRect();
+    var ratio = Math.min(window.devicePixelRatio || 1, 2);
+    var width = Math.max(1, Math.round(rect.width * ratio));
+    var height = Math.max(1, Math.round(rect.height * ratio));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      terrainCanvas.width = width;
+      terrainCanvas.height = height;
+      terrainKey = "";
+    }
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    terrainCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return { width: rect.width, height: rect.height };
+  }
+
+  function clampCamera(size, world, cell) {
+    var mapWidth = cell * world.cols;
+    var mapHeight = cell * world.rows;
+    var baseX = (size.width - mapWidth) / 2;
+    var baseY = (size.height - mapHeight) / 2;
+    var edge = 86;
+    camera.panX = Math.max(edge - mapWidth - baseX, Math.min(size.width - edge - baseX, camera.panX));
+    camera.panY = Math.max(edge - mapHeight - baseY, Math.min(size.height - edge - baseY, camera.panY));
+  }
+
+  function renderTerrain(world, cell, ox, oy, size) {
+    var gridSignature = world.grid.map(function (row) { return row.join(""); }).join("|");
+    var key = [gridSignature, cell.toFixed(3), ox.toFixed(2), oy.toFixed(2), size.width, size.height].join("@");
+    if (key === terrainKey) return;
+    terrainKey = key;
+    terrainCtx.clearRect(0, 0, size.width, size.height);
+    // drawGrid is shared with the original renderer; switch its target only while
+    // rebuilding the static layer. Tanks, bullets and water motion stay on the live canvas.
+    var liveContext = ctx;
+    try {
+      ctx = terrainCtx;
+      drawGrid(world, cell, ox, oy);
+      drawSectorGrid(world, cell, ox, oy);
+    } finally {
+      ctx = liveContext;
+    }
+  }
+
+  function drawSectorGrid(world, cell, ox, oy) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(217,255,104,.09)";
+    ctx.fillStyle = "rgba(220,235,220,.34)";
+    ctx.lineWidth = 1;
+    ctx.font = Math.max(8, Math.min(11, cell * .32)) + "px Cascadia Mono, monospace";
+    ctx.textAlign = "center";
+    for (var col = 5; col < world.cols; col += 5) {
+      var x = ox + col * cell;
+      ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + world.rows * cell); ctx.stroke();
+      ctx.fillText(String(col), x, oy + 11);
+    }
+    ctx.textAlign = "left";
+    for (var row = 5; row < world.rows; row += 5) {
+      var y = oy + row * cell;
+      ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + world.cols * cell, y); ctx.stroke();
+      ctx.fillText(String(row), ox + 3, y - 3);
+    }
+    ctx.restore();
+  }
+
+  function drawWaterMotion(world, cell, ox, oy) {
+    var phase = performance.now() / 620;
+    ctx.save();
+    ctx.strokeStyle = "rgba(104,213,255,.22)";
+    ctx.lineWidth = Math.max(1, cell * .035);
+    for (var row = 0; row < world.rows; row++) {
+      for (var col = 0; col < world.cols; col++) {
+        if (world.grid[row][col] !== "W") continue;
+        var x = ox + col * cell, y = oy + row * cell + cell * .53;
+        ctx.beginPath();
+        for (var step = 0; step <= 5; step++) {
+          var px = x + cell * step / 5;
+          var py = y + Math.sin(phase + col * .7 + step * 1.2) * cell * .055;
+          if (!step) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    var size = resizeCanvas();
+    ctx.clearRect(0, 0, size.width, size.height);
+    if (!latestWorld) {
+      terrainCtx.clearRect(0, 0, size.width, size.height);
+      ctx.fillStyle = "#91a198";
+      ctx.font = "600 13px Bahnschrift, sans-serif";
+      ctx.fillText("Awaiting authoritative battlefield frame…", 24, 34);
+      requestAnimationFrame(draw);
+      return;
+    }
+    var world = latestWorld;
+    var fitCell = Math.min((size.width - 28) / world.cols, (size.height - 24) / world.rows);
+    var cell = fitCell * camera.zoom;
+    clampCamera(size, world, cell);
+    var ox = (size.width - cell * world.cols) / 2;
+    var oy = (size.height - cell * world.rows) / 2;
+    ox += camera.panX;
+    oy += camera.panY;
+    transform = { cell: cell, fitCell: fitCell, x: ox, y: oy, width: size.width, height: size.height };
+    renderTerrain(world, cell, ox, oy, size);
+    drawWaterMotion(world, cell, ox, oy);
+    drawPickups(world, cell, ox, oy);
+    drawBullets(world, cell, ox, oy);
+    drawTanks(world, previousWorld, cell, ox, oy);
+    requestAnimationFrame(draw);
+  }
+
+  // Deterministic hash in [0,1) from integer coords — used for stable per-tile
+  // texture detail that must NOT flicker between frames.
+  function _hash01(a, b) {
+    var n = (a * 73856093) ^ (b * 19349663);
+    n = (n ^ (n >>> 13)) * 1274126177;
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+
+  function drawGrid(world, cell, ox, oy) {
+    var now = performance.now();
+    var wavePhase = now / 520;  // water ripple animation phase
+    for (var row = 0; row < world.rows; row++) {
+      for (var col = 0; col < world.cols; col++) {
+        var tile = world.grid[row][col];
+        var x = ox + col * cell;
+        var y = oy + row * cell;
+        var h = _hash01(row, col);
+        if (tile === ".") {
+          // bare ground: dark base + faint deterministic speckle
+          ctx.fillStyle = "#161b13";
+          ctx.fillRect(x, y, cell + .4, cell + .4);
+          if (h > .78) {
+            ctx.fillStyle = "rgba(120,140,100,.05)";
+            ctx.fillRect(x + h * cell * .4, y + h * cell * .4, cell * .14, cell * .14);
+          }
+        } else if (tile === "#") {
+          // steel wall: brushed-metal gradient + rivets + bevelled edge
+          var g = ctx.createLinearGradient(x, y, x, y + cell);
+          g.addColorStop(0, "#6b7568");
+          g.addColorStop(.45, "#525c4f");
+          g.addColorStop(.55, "#3e4639");
+          g.addColorStop(1, "#2c3329");
+          ctx.fillStyle = g;
+          ctx.fillRect(x, y, cell + .4, cell + .4);
+          // top highlight
+          ctx.strokeStyle = "rgba(210,225,200,.28)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x + .5, y + 1.5); ctx.lineTo(x + cell - .5, y + 1.5); ctx.stroke();
+          // four rivets
+          ctx.fillStyle = "rgba(20,26,18,.85)";
+          var rv = Math.max(1, cell * .06);
+          [[.22,.22],[.78,.22],[.22,.78],[.78,.78]].forEach(function (p) {
+            ctx.beginPath(); ctx.arc(x + cell * p[0], y + cell * p[1], rv, 0, Math.PI * 2); ctx.fill();
+          });
+          ctx.fillStyle = "rgba(180,195,170,.4)";
+          [[.22,.22],[.78,.22],[.22,.78],[.78,.78]].forEach(function (p) {
+            ctx.beginPath(); ctx.arc(x + cell * p[0] - rv * .3, y + cell * p[1] - rv * .3, rv * .4, 0, Math.PI * 2); ctx.fill();
+          });
+        } else if (tile === "B") {
+          // brick: warm gradient + mortar grid + battle cracks
+          var bg = ctx.createLinearGradient(x, y, x, y + cell);
+          bg.addColorStop(0, "#9a6240");
+          bg.addColorStop(1, "#6e4327");
+          ctx.fillStyle = bg;
+          ctx.fillRect(x, y, cell + .4, cell + .4);
+          // mortar lines: horizontal mid + vertical staggered
+          ctx.strokeStyle = "rgba(40,24,14,.6)";
+          ctx.lineWidth = Math.max(1, cell * .04);
+          ctx.beginPath();
+          ctx.moveTo(x, y + cell * .5); ctx.lineTo(x + cell, y + cell * .5);
+          ctx.moveTo(x + cell * (h > .5 ? .32 : .68), y); ctx.lineTo(x + cell * (h > .5 ? .32 : .68), y + cell * .5);
+          ctx.moveTo(x + cell * (h > .5 ? .68 : .32), y + cell * .5); ctx.lineTo(x + cell * (h > .5 ? .68 : .32), y + cell);
+          ctx.stroke();
+          // deterministic crack on some bricks
+          if (h > .82) {
+            ctx.strokeStyle = "rgba(20,10,4,.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x + cell * .3, y + cell * .15);
+            ctx.lineTo(x + cell * .45, y + cell * .4);
+            ctx.lineTo(x + cell * .38, y + cell * .55);
+            ctx.stroke();
+          }
+        } else if (tile === "W") {
+          // water: deep base + two animated sine ripple layers
+          ctx.fillStyle = "#0e2a36";
+          ctx.fillRect(x, y, cell + .4, cell + .4);
+          ctx.lineWidth = Math.max(1, cell * .05);
+          for (var layer = 0; layer < 2; layer++) {
+            ctx.strokeStyle = layer ? "rgba(120,200,230,.22)" : "rgba(78,217,255,.14)";
+            ctx.beginPath();
+            var baseY = y + cell * (layer ? .62 : .38);
+            for (var sx = 0; sx <= cell; sx += Math.max(2, cell * .12)) {
+              var wy = baseY + Math.sin((sx / cell) * Math.PI * 2 + wavePhase + layer * 1.3 + col * .7) * cell * .07;
+              if (sx === 0) ctx.moveTo(x + sx, wy); else ctx.lineTo(x + sx, wy);
+            }
+            ctx.stroke();
+          }
+        } else if (tile === "S") {
+          // bush (grass): dark green base + several blade clusters
+          ctx.fillStyle = "#1f3a23";
+          ctx.fillRect(x, y, cell + .4, cell + .4);
+          ctx.strokeStyle = "rgba(120,180,90,.5)";
+          ctx.lineWidth = Math.max(1, cell * .04);
+          for (var b = 0; b < 5; b++) {
+            var bh = _hash01(row * 7 + b, col * 3 + b);
+            var bx = x + cell * (.15 + bh * .7);
+            var by = y + cell * (.2 + _hash01(row, col * 5 + b) * .6);
+            ctx.beginPath();
+            ctx.moveTo(bx, by + cell * .12);
+            ctx.lineTo(bx + cell * .04, by - cell * .04);
+            ctx.stroke();
+          }
+          ctx.fillStyle = "rgba(90,150,70,.22)";
+          ctx.beginPath(); ctx.arc(x + cell * .5, y + cell * .5, cell * .26, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+    // arena border
+    ctx.strokeStyle = "rgba(215,255,71,.16)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox + .5, oy + .5, cell * world.cols - 1, cell * world.rows - 1);
+  }
+
+  function drawPickups(world, cell, ox, oy) {
+    var now = performance.now();
+    var pulse = 0.5 + 0.5 * Math.sin(now / 360);  // breathing glow
+    (world.pickups || []).forEach(function (pickup) {
+      if (!pickup.active) return;
+      var x = ox + pickup.x / SCALE * cell;
+      var y = oy + pickup.y / SCALE * cell;
+      var isRepair = pickup.kind === "repair", isSpeed = pickup.kind === "speed";
+      var color = isRepair ? "#f3eee1" : isSpeed ? "#d7ff47" : "#ffc857";
+      // outer breathing halo
+      ctx.save();
+      ctx.globalAlpha = 0.25 + pulse * 0.3;
+      var rg = ctx.createRadialGradient(x, y, 0, x, y, cell * .42);
+      rg.addColorStop(0, color);
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, cell * .42, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // icon disc
+      ctx.save(); ctx.translate(x, y); ctx.rotate(now / 1400);
+      ctx.fillStyle = "rgba(16,20,14,.85)";
+      ctx.beginPath(); ctx.arc(0, 0, cell * .2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.2, cell * .045);
+      ctx.beginPath(); ctx.arc(0, 0, cell * .2, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      // glyph (axis-aligned so it stays legible)
+      ctx.save(); ctx.translate(x, y);
+      ctx.strokeStyle = color; ctx.fillStyle = color;
+      ctx.lineWidth = Math.max(1.4, cell * .06);
+      var s = cell * .1;
+      if (isRepair) {
+        // medical cross
+        ctx.fillRect(-s * .3, -s, s * .6, s * 2);
+        ctx.fillRect(-s, -s * .3, s * 2, s * .6);
+      } else if (isSpeed) {
+        // lightning bolt
+        ctx.beginPath();
+        ctx.moveTo(s * .3, -s); ctx.lineTo(-s * .3, s * .1); ctx.lineTo(s * .05, s * .1);
+        ctx.lineTo(-s * .3, s); ctx.lineTo(s * .3, -s * .1); ctx.lineTo(-s * .05, -s * .1);
+        ctx.closePath(); ctx.fill();
+      } else {
+        // rapid-fire triple chevron
+        for (var k = 0; k < 3; k++) {
+          var ky = -s * .6 + k * s * .6;
+          ctx.beginPath();
+          ctx.moveTo(-s * .5, ky); ctx.lineTo(s * .5, ky - s * .3); ctx.lineTo(-s * .5, ky - s * .6);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    });
+  }
+
+  function drawBullets(world, cell, ox, oy) {
+    (world.bullets || []).forEach(function (bullet) {
+      var x = ox + bullet.x / SCALE * cell;
+      var y = oy + bullet.y / SCALE * cell;
+      var color = bullet.team === "host" ? "#ff8a6f" : "#b8f2ff";
+      // motion trail — extend opposite to travel direction
+      var dir = { up: [0, 1], down: [0, -1], left: [1, 0], right: [-1, 0] }[bullet.facing || bullet.dir] || [0, 0];
+      var trail = cell * .22;
+      var tg = ctx.createLinearGradient(x, y, x + dir[0] * trail, y + dir[1] * trail);
+      tg.addColorStop(0, color);
+      tg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.strokeStyle = tg;
+      ctx.lineWidth = Math.max(2, cell * .1);
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dir[0] * trail, y + dir[1] * trail); ctx.stroke();
+      // glowing head
+      ctx.shadowBlur = 10; ctx.shadowColor = color;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(x, y, Math.max(2, cell * .09), 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  function drawTanks(world, previous, cell, ox, oy) {
+    var previousById = Object.create(null);
+    if (previous && previous.tanks) previous.tanks.forEach(function (tank) { previousById[tank.id] = tank; });
+    var alpha = Math.min(1, Math.max(0, (performance.now() - receivedAt) / 110));
+    var maxHp = (world.rules && world.rules.balance && world.rules.balance.hp) || 3;
+    world.tanks.forEach(function (tank) {
+      var old = previousById[tank.id] || tank;
+      var ux = old.x + (tank.x - old.x) * alpha;
+      var uy = old.y + (tank.y - old.y) * alpha;
+      var x = ox + ux / SCALE * cell;
+      var y = oy + uy / SCALE * cell;
+      var facing = tank.facing || "up";
+      var angle = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0 }[facing] || 0;
+      var dead = tank.hp <= 0;
+      var baseColor = tank.team === "host" ? "#ff5b3b" : "#4ed9ff";
+      var darkColor = tank.team === "host" ? "#7a1d0e" : "#13516a";
+      var lightColor = tank.team === "host" ? "#ff9a82" : "#a8ecff";
+      var body = cell * .84;
+
+      ctx.save(); ctx.translate(x, y);
+      // Keep wrecks legible in the sticky terminal view. They are muted enough
+      // to read as destroyed, but remain useful evidence of the final formation.
+      if (dead) ctx.globalAlpha = .48;
+      if (!dead) {
+        ctx.shadowColor = "rgba(0,0,0,.52)";
+        ctx.shadowBlur = Math.max(2, cell * .2);
+        ctx.shadowOffsetY = Math.max(1, cell * .08);
+      }
+
+      // status aura rings (speed / rapid) drawn under the hull
+      if (!dead && (tank.speed_until || tank.rapid_until)) {
+        var now = performance.now();
+        if (tank.speed_until) {
+          ctx.strokeStyle = "rgba(215,255,71,.5)"; ctx.lineWidth = Math.max(1, cell * .035);
+          ctx.beginPath(); ctx.arc(0, 0, cell * .52 + Math.sin(now / 180) * cell * .02, 0, Math.PI * 2); ctx.stroke();
+        }
+        if (tank.rapid_until) {
+          ctx.strokeStyle = "rgba(255,200,87,.55)"; ctx.lineWidth = Math.max(1, cell * .035);
+          ctx.beginPath(); ctx.arc(0, 0, cell * .6 + Math.sin(now / 180 + 1) * cell * .02, 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+
+      ctx.rotate(angle);
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      // tracks (treads) — two dark bars along the hull flanks with tread segments
+      ctx.fillStyle = "#1a1f17";
+      var treadW = body * .2;
+      ctx.fillRect(-body / 2, -body * .5, treadW, body);
+      ctx.fillRect(body / 2 - treadW, -body * .5, treadW, body);
+      ctx.fillStyle = "rgba(90,100,82,.5)";
+      for (var t = -body * .45; t < body * .45; t += body * .14) {
+        ctx.fillRect(-body / 2, t, treadW, body * .05);
+        ctx.fillRect(body / 2 - treadW, t, treadW, body * .05);
+      }
+
+      // hull — rounded metal body with team gradient + bevel highlight
+      var hull = body * .62;
+      var hg = ctx.createLinearGradient(0, -hull / 2, 0, hull / 2);
+      hg.addColorStop(0, lightColor);
+      hg.addColorStop(.5, baseColor);
+      hg.addColorStop(1, darkColor);
+      ctx.fillStyle = hg;
+      var r = body * .12;
+      ctx.beginPath();
+      ctx.moveTo(-hull / 2 + r, -hull / 2);
+      ctx.lineTo(hull / 2 - r, -hull / 2); ctx.quadraticCurveTo(hull / 2, -hull / 2, hull / 2, -hull / 2 + r);
+      ctx.lineTo(hull / 2, hull / 2 - r); ctx.quadraticCurveTo(hull / 2, hull / 2, hull / 2 - r, hull / 2);
+      ctx.lineTo(-hull / 2 + r, hull / 2); ctx.quadraticCurveTo(-hull / 2, hull / 2, -hull / 2, hull / 2 - r);
+      ctx.lineTo(-hull / 2, -hull / 2 + r); ctx.quadraticCurveTo(-hull / 2, -hull / 2, -hull / 2 + r, -hull / 2);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.stroke();
+
+      // turret — circular, slightly raised, with shadow
+      var turretR = body * .24;
+      ctx.fillStyle = "rgba(0,0,0,.4)";
+      ctx.beginPath(); ctx.arc(0, body * .02, turretR, 0, Math.PI * 2); ctx.fill();
+      var tg2 = ctx.createRadialGradient(-turretR * .3, -turretR * .3, 0, 0, 0, turretR);
+      tg2.addColorStop(0, lightColor); tg2.addColorStop(1, darkColor);
+      ctx.fillStyle = tg2;
+      ctx.beginPath(); ctx.arc(0, 0, turretR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1; ctx.stroke();
+
+      // cannon barrel — points "up" in local frame (rotated to facing)
+      var bl = body * .42, bw = body * .11;
+      ctx.fillStyle = "#15180f";
+      ctx.fillRect(-bw / 2, -hull / 2 - bl, bw, bl);
+      ctx.fillStyle = "rgba(120,130,112,.6)";
+      ctx.fillRect(-bw / 2, -hull / 2 - bl, bw * .35, bl);
+
+      // muzzle flash if fired this frame
+      if (!dead && tank.last_fire) {
+        ctx.fillStyle = "rgba(255,230,140,.9)";
+        ctx.beginPath(); ctx.arc(0, -hull / 2 - bl - body * .04, body * .1, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      if (!dead) {
+        // HP bar above the hull — sized to the enlarged body, lifted clear of the cannon
+        var bw2 = body * .96, bh = Math.max(2.5, cell * .085);
+        var bx = x - bw2 / 2, by = y - body * .5 - bh - cell * .04;
+        ctx.fillStyle = "rgba(0,0,0,.65)"; ctx.fillRect(bx, by, bw2, bh);
+        var hpFrac = Math.max(0, Math.min(1, tank.hp / maxHp));
+        ctx.fillStyle = hpFrac > .5 ? "#9ad84a" : hpFrac > .25 ? "#ffc857" : "#ff5b3b";
+        ctx.fillRect(bx, by, bw2 * hpFrac, bh);
+        ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw2, bh);
+        // selection ring
+        if (tank.id === selectedUnit) {
+          ctx.strokeStyle = "#d7ff47"; ctx.lineWidth = 1.8;
+          ctx.setLineDash([cell * .12, cell * .08]);
+          ctx.beginPath(); ctx.arc(x, y, body * .72, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      // Labels stay readable when zoomed and de-clutter at full-map scale.
+      if (cell >= 17 || tank.id === selectedUnit) {
+        var labelY = y + body * .5 + Math.max(10, cell * .25);
+        ctx.fillStyle = dead ? "rgba(120,126,114,.5)" : "rgba(238,244,235,.9)";
+        ctx.font = "700 " + Math.max(9, Math.min(13, cell * .25)) + "px Cascadia Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(tank.id.toUpperCase(), x, labelY);
+      }
+    });
+  }
+
+  function issueOrder(kind, units) {
+    if (!bridgeReady || !latestWorld) return showError(new Error("The real-time command link is not ready"));
+    if (latestWorld.game_over) return showError(new Error("This match has ended; start a new match before issuing orders"));
+    var order = {
+      id: "human-" + Date.now().toString(36),
+      kind: kind,
+      issued_at_tick: latestWorld.tick,
+      expires_tick: latestWorld.tick + 600
+    };
+    if (units && units.length) order.unit_ids = units;
+    request("orders", { order: order, maneuver: kind, plan: null }).then(function (response) {
+      if (!response.ok) throw new Error((response.data && response.data.error) || "The order was not saved");
+      document.getElementById("plan-preview").classList.remove("show");
+      notifyToast("✓ " + (units ? units.join(", ").toUpperCase() : "WHOLE FORCE") + " EXECUTING · " + (MANEUVER_LABELS[kind] || kind), "ok");
+      document.querySelectorAll(".order-btn").forEach(function (button) {
+        button.classList.toggle("active", !units && button.dataset.order === kind);
+      });
+    }).catch(showError);
+  }
+
+  // Human-readable labels for the seven maneuvers declared in DECISION_SCHEMA.choices.
+  var MANEUVER_LABELS = {
+    assault: "Frontal Assault", flank_left: "Left Flank", flank_right: "Right Flank",
+    retreat: "Orderly Retreat", defend: "Depth Defense", surround: "Encircle", hold: "Hold",
+    move_to: "Move to Position", patrol: "Patrol", attack_unit: "Attack Unit",
+  };
+
+  function notifyToast(message, kind) {
+    // kind: "ok" (acid/green) | "warn" (amber) | "error" (host-red). Falls back to default.
+    var toast = document.getElementById("toast");
+    toast.textContent = message;
+    toast.style.color = kind === "ok" ? "var(--acid)"
+      : kind === "warn" ? "var(--warn)"
+      : kind === "error" ? "var(--host)" : "";
+  }
+
+  function submitNaturalOrder() {
+    var input = document.getElementById("natural-input");
+    var text = input.value.trim();
+    if (!text) return;
+    if (!latestWorld || latestWorld.game_over) return showError(new Error("There is no active match to command"));
+    request("whisper", { role: "user", text: text }).then(function (response) {
+      if (!response.ok) throw new Error((response.data && response.data.error) || "The natural-language order was not delivered");
+      input.value = "";
+      var data = response.data || {};
+      var ack = data.ack_status;
+      if (ack === "strategy_active" || ack === "policy_active") {
+        // The bridge materialised the order into strategy; surface which maneuver the
+        // local Agent will now execute every tick so the human sees a concrete effect.
+        var maneuver = (data.applied && data.applied.payload && data.applied.payload.maneuver)
+          || (data.applied && data.applied.policy);
+        var plan = data.applied && data.applied.payload && data.applied.payload.plan;
+        if (plan) renderPlan(plan);
+        var label = MANEUVER_LABELS[maneuver] || maneuver || "ADOPTED";
+        notifyToast(plan ? "✓ COMPILED AND ACTIVATED " + plan.orders.length + " TACTICAL ORDERS" : "✓ TACTIC ACTIVE · " + label, "ok");
+      } else if (ack === "decision_queued" || ack === "intent_queued") {
+        notifyToast("✓ ORDER QUEUED FOR THE NEXT WINDOW · “" + text + "”", "ok");
+      } else if (ack === "unparsed") {
+        // The order was recorded as an operator_hint but no maneuver was recognised;
+        // the Agent continues its default (assault) tactic. Tell the user honestly.
+        notifyToast("⚠ TACTIC NOT RECOGNIZED · Agent continues the default assault. Try move, patrol, attack, flank, defend, or retreat.", "warn");
+      } else if (ack === "error") {
+        notifyToast("⚠ TACTIC EXCEEDED THE SAFE INPUT BOUNDS AND WAS NOT EXECUTED", "error");
+      } else {
+        notifyToast("TACTICAL NOTE RECORDED · “" + text + "”");
+      }
+    }).catch(function (error) {
+      notifyToast("⚠ " + error.message, "error");
+    });
+  }
+
+  function showError(error) {
+    notifyToast("⚠ " + error.message, "error");
+  }
+
+  document.querySelectorAll(".order-btn").forEach(function (button) {
+    button.addEventListener("click", function () { issueOrder(button.dataset.order, null); });
+  });
+  document.getElementById("natural-send").addEventListener("click", submitNaturalOrder);
+  document.getElementById("natural-input").addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submitNaturalOrder();
+    }
+  });
+  document.getElementById("unit-send").addEventListener("click", function () {
+    var unit = document.getElementById("unit-select").value;
+    if (!unit) return showError(new Error("Select a friendly tank first"));
+    selectUnit(unit);
+    issueOrder(document.getElementById("unit-order").value, [unit]);
+  });
+  document.getElementById("unit-select").addEventListener("change", function (event) {
+    selectUnit(event.target.value);
+  });
+  canvas.addEventListener("click", function (event) {
+    if (pointerDrag && pointerDrag.moved) return;
+    if (!latestWorld || !transform || !latestSnapshot) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (event.clientX - rect.left - transform.x) / transform.cell * SCALE;
+    var y = (event.clientY - rect.top - transform.y) / transform.cell * SCALE;
+    var own = latestWorld.tanks.filter(function (tank) { return tank.team === latestSnapshot.role && tank.hp > 0; });
+    var nearest = own.reduce(function (best, tank) {
+      var distance = Math.abs(tank.x - x) + Math.abs(tank.y - y);
+      return !best || distance < best.distance ? { tank: tank, distance: distance } : best;
+    }, null);
+    if (nearest && nearest.distance < SCALE) {
+      selectUnit(nearest.tank.id);
+    }
+  });
+
+  function setZoom(nextZoom, anchorX, anchorY) {
+    if (!latestWorld || !transform) return;
+    var oldCell = transform.cell;
+    var worldX = (anchorX - transform.x) / oldCell;
+    var worldY = (anchorY - transform.y) / oldCell;
+    camera.zoom = Math.max(1, Math.min(3.4, nextZoom));
+    var newCell = transform.fitCell * camera.zoom;
+    var baseX = (transform.width - newCell * latestWorld.cols) / 2;
+    var baseY = (transform.height - newCell * latestWorld.rows) / 2;
+    camera.panX = anchorX - worldX * newCell - baseX;
+    camera.panY = anchorY - worldY * newCell - baseY;
+    terrainKey = "";
+    document.getElementById("zoom-label").textContent = Math.round(camera.zoom * 100) + "%";
+  }
+
+  document.getElementById("zoom-in").addEventListener("click", function () {
+    if (transform) setZoom(camera.zoom * 1.22, transform.width / 2, transform.height / 2);
+  });
+  document.getElementById("zoom-out").addEventListener("click", function () {
+    if (transform) setZoom(camera.zoom / 1.22, transform.width / 2, transform.height / 2);
+  });
+  document.getElementById("zoom-reset").addEventListener("click", function () {
+    camera = { zoom: 1, panX: 0, panY: 0 };
+    terrainKey = "";
+    document.getElementById("zoom-label").textContent = "100%";
+  });
+  canvas.addEventListener("wheel", function (event) {
+    if (!transform) return;
+    event.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
+    setZoom(camera.zoom * factor, event.clientX - rect.left, event.clientY - rect.top);
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", function (event) {
+    pointerDrag = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      panX: camera.panX,
+      panY: camera.panY,
+      moved: false
+    };
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", function (event) {
+    if (!pointerDrag || pointerDrag.id !== event.pointerId) return;
+    var dx = event.clientX - pointerDrag.x, dy = event.clientY - pointerDrag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 5) pointerDrag.moved = true;
+    if (pointerDrag.moved) {
+      camera.panX = pointerDrag.panX + dx;
+      camera.panY = pointerDrag.panY + dy;
+      terrainKey = "";
+    }
+  });
+  canvas.addEventListener("pointerup", function (event) {
+    if (pointerDrag && pointerDrag.id === event.pointerId) {
+      canvas.releasePointerCapture(event.pointerId);
+      setTimeout(function () { pointerDrag = null; }, 0);
+    }
+  });
+
+  sendToParent({
+    type: "hello",
+    capabilities: ["snapshot", "strategy", "orders", "whisper"]
+  });
+  setTimeout(function () {
+    if (!bridgeReady) setConnection(false, "WAITING FOR PARENT");
+  }, 1400);
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

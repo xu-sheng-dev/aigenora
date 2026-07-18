@@ -110,6 +110,14 @@ def pick_follow(hand_cards: dict[str, tuple[int, int]], lead: tuple[int, int],
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+    DECISION_SCHEMA = {
+        "match_key": "action_seq",
+        "value_field": "kind",
+        "choices": {"play": "play", "draw": "draw"},
+        "card_field": "id_b",
+    }
+
     def proto_host_metadata(self) -> tuple[str, str, str, dict[str, Any]]:
         return ("Briscola", "game,briscola,cards,trick-taking", "supply", {})
 
@@ -152,6 +160,52 @@ class Hooks(ProtocolHooks):
         rank, suit = hand_cards[id_b]
         self.current_trick.append((role, (rank, suit)))
         return {"kind": "play", "id_b": id_b}
+
+    def proto_mp_legal_actions(self, state: dict) -> list[dict[str, Any]]:
+        hand_cards = state.get("_mp_hand_cards") or {}
+        deck = state.get("_mp_deck_view")
+        self.snapshot.update(
+            game="briscola",
+            briscola=self.briscola,
+            points=self.points,
+            completed_tricks=self.completed_tricks,
+            current_trick=[
+                {"who": who, "rank": card[0], "suit": card[1]}
+                for who, card in self.current_trick
+            ],
+            ranks=RANKS,
+            suits=SUITS,
+        )
+        stock = deck.stock if deck is not None else set()
+        if (not self.current_trick and self.completed_tricks > 0
+                and len(hand_cards) < HAND_SIZE and stock):
+            return [{"kind": "draw"}]
+        return [
+            {"kind": "play", "id_b": id_b, "rank": rank, "suit": suit}
+            for id_b, (rank, suit) in sorted(hand_cards.items())
+        ]
+
+    def proto_mp_coerce_action(self, state: dict, decision: dict[str, Any]) -> dict[str, Any]:
+        action = super().proto_mp_coerce_action(state, decision)
+        legal = self.proto_mp_legal_actions(state)
+        if action["kind"] == "draw":
+            if not any(item["kind"] == "draw" for item in legal):
+                raise ValueError("draw is not legal in the current state")
+            return action
+        if action["kind"] != "play":
+            raise ValueError("Briscola only supports play and refill draw actions")
+        if not any(
+            item["kind"] == "play" and item["id_b"] == action["id_b"]
+            for item in legal
+        ):
+            raise ValueError("selected card is not legal in the current state")
+        return action
+
+    def proto_mp_apply_local_action(self, state: dict, action: dict[str, Any]) -> None:
+        if action["kind"] != "play":
+            return
+        rank, suit = (state.get("_mp_hand_cards") or {})[action["id_b"]]
+        self.current_trick.append((state.get("_mp_role"), (rank, suit)))
 
     def proto_mp_validate_play(self, state: dict, who: str, play_msg: dict):
         from aigenora.proto import mental_poker

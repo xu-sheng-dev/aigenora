@@ -49,6 +49,13 @@ DEFAULT_BALANCE: dict[str, dict] = {
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+    DECISION_SCHEMA = {
+        "match_key": "round",
+        "value_field": "move",
+        "strategy_field": "move",
+        "choices": {move: MOVE_LABEL[move] for move in MOVES},
+    }
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -66,12 +73,8 @@ class Hooks(ProtocolHooks):
         self.fallback_strategy: str = args[0] if args else "smart"
         self._init_state()
         self.snapshot.update(
-            phase="handshake",
-            heroes={"host": self.host_hero, "guest": self.guest_hero},
-            hp={"host": self.host_hp, "guest": self.guest_hp},
-            mana={"host": self.host_mana, "guest": self.guest_mana},
-            round=1,
-            max_rounds=self.max_rounds,
+            phase="handshake", round=1, max_rounds=self.max_rounds,
+            **self._ui_state(),
         )
 
     def _pick_hero(self, name: Any) -> str:
@@ -89,6 +92,27 @@ class Hooks(ProtocolHooks):
         self.guest_mana = int(g["mana"])
         self.host_cd = {"skill_a": 0, "skill_b": 0, "ult": 0}
         self.guest_cd = {"skill_a": 0, "skill_b": 0, "ult": 0}
+
+    def _ui_state(self) -> dict[str, Any]:
+        """Public combat state used by the local Web controller."""
+        return {
+            "heroes": {"host": self.host_hero, "guest": self.guest_hero},
+            "hp": {"host": self.host_hp, "guest": self.guest_hp},
+            "hp_max": {
+                "host": int(self._hero("host")["hp"]),
+                "guest": int(self._hero("guest")["hp"]),
+            },
+            "mana": {"host": self.host_mana, "guest": self.guest_mana},
+            "mana_max": {
+                "host": int(self._hero("host")["mana"]),
+                "guest": int(self._hero("guest")["mana"]),
+            },
+            "cooldowns": {"host": dict(self.host_cd), "guest": dict(self.guest_cd)},
+            "hero_stats": {
+                "host": copy.deepcopy(self._hero("host")),
+                "guest": copy.deepcopy(self._hero("guest")),
+            },
+        }
 
     def proto_host_metadata(self):
         return (
@@ -260,6 +284,12 @@ class Hooks(ProtocolHooks):
         return "normal"
 
     def _pick(self, round_index: int) -> str:
+        if self.control_mode == "human":
+            decision = self._await_human_decision("round", round_index)
+            move = decision.get("move")
+            if move not in MOVES:
+                self._reject_human_decision("round", round_index, decision, "move is not a legal hero action")
+            return move
         auto = self._pick_auto(round_index)
         if self.bus is None:
             return auto
@@ -269,21 +299,7 @@ class Hooks(ProtocolHooks):
             if d and d.get("move") in MOVES:
                 return d["move"]
             return auto
-        # --coach（manual）：阻塞逐手等待
-        if not self.timing_enabled:
-            return auto
-        now = time.monotonic()
-        min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
-        max_think = float(self.options.get("max_think_seconds", self.timing["max_think_seconds"]))
-        fallback = {"round": round_index, "move": self._pick_auto(round_index)}
-        self._update_timing_snapshot("round", round_index, now + min_think, now + max_think, "waiting")
-        decision = self.bus.await_latest_decision(
-            match_key="round", match_value=round_index,
-            release_at=now + min_think, deadline_at=now + max_think, fallback_value=fallback,
-        )
-        self._clear_timing_snapshot()
-        move = decision.get("move")
-        return move if move in MOVES else fallback["move"]
+        raise RuntimeError(f"unsupported decision mode: {self.decision_mode}")
 
     # ---- simultaneous_round hooks ----
     def proto_round_value(self, round_index: int, state: dict) -> str:
@@ -336,11 +352,10 @@ class Hooks(ProtocolHooks):
         )
         self.snapshot.update(
             phase=phase,
-            hp={"host": self.host_hp, "guest": self.guest_hp},
-            mana={"host": self.host_mana, "guest": self.guest_mana},
             round=next_round,
             last_event={"summary": summary, "structured": {
                 "round": rd, "winner": winner, "game_over": over, "game_winner": game_winner}},
+            **self._ui_state(),
         )
 
     # ---- 展示 ----
@@ -373,9 +388,7 @@ class Hooks(ProtocolHooks):
         self._init_state()
         self.snapshot.update(
             phase="playing",
-            heroes={"host": self.host_hero, "guest": self.guest_hero},
-            hp={"host": self.host_hp, "guest": self.guest_hp},
-            round=1, max_rounds=self.max_rounds,
+            round=1, max_rounds=self.max_rounds, **self._ui_state(),
         )
         return HookResult({
             "action": "ready",
@@ -394,9 +407,7 @@ class Hooks(ProtocolHooks):
         self._init_state()
         self.snapshot.update(
             phase="playing",
-            heroes={"host": self.host_hero, "guest": self.guest_hero},
-            hp={"host": self.host_hp, "guest": self.guest_hp},
-            round=1, max_rounds=self.max_rounds,
+            round=1, max_rounds=self.max_rounds, **self._ui_state(),
         )
 
     def proto_guest_handle(self, msg):

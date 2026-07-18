@@ -27,6 +27,7 @@ CHOICE_KEYWORDS = {
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
     CHOICE_KEYWORDS = CHOICE_KEYWORDS
     # v019-M4: 声明决策 schema。beats 由本协议 run_policy 解释，引擎不读。
     DECISION_SCHEMA = {
@@ -174,6 +175,12 @@ class Hooks(ProtocolHooks):
         return result
 
     def _pick(self, round_index: int) -> str:
+        if self.control_mode == "human":
+            decision = self._await_human_decision("round", round_index)
+            choice = decision.get("choice")
+            if choice not in CHOICES:
+                self._reject_human_decision("round", round_index, decision, "choice must be rock, paper, or scissors")
+            return choice
         auto = self._pick_auto(round_index)
         if self.bus is None:
             return auto
@@ -183,28 +190,7 @@ class Hooks(ProtocolHooks):
             if d and d.get("choice") in CHOICES:
                 return d["choice"]
             return auto
-        # --coach（manual）：阻塞逐手等待
-        if not self.timing_enabled:
-            return auto
-        now = time.monotonic()
-        # options 里的 min/max_think_seconds 优先于 spec.timing 默认值（邀约级覆盖）
-        min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
-        max_think = float(self.options.get("max_think_seconds", self.timing["max_think_seconds"]))
-        fallback = {"round": round_index, "choice": self._pick_auto(round_index)}
-        self._update_timing_snapshot(
-            "round", round_index,
-            now + min_think,
-            now + max_think, "waiting",
-        )
-        decision = self.bus.await_latest_decision(
-            match_key="round", match_value=round_index,
-            release_at=now + min_think,
-            deadline_at=now + max_think,
-            fallback_value=fallback,
-        )
-        self._clear_timing_snapshot()
-        choice = decision.get("choice")
-        return choice if choice in CHOICES else fallback["choice"]
+        raise RuntimeError(f"unsupported decision mode: {self.decision_mode}")
 
     # ---- simultaneous_round hooks ----
     def proto_round_value(self, round_index: int, state: dict) -> str:

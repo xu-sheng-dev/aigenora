@@ -1,48 +1,189 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Crazy Eights — Aigenora</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Crazy Eights · Aigenora</title>
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; }
-    h1 { font-size: 1.25rem; margin: 0 0 4px; }
-    .muted { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
-    .panel { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
-    .row { display: flex; gap: 24px; }
-    .stat { font-variant-numeric: tabular-nums; }
-    .stat b { font-size: 1.1rem; }
-    ul { margin: 6px 0; padding-left: 20px; }
-    li { margin: 2px 0; }
+    :root {
+      --felt:#0d342c; --felt-deep:#071e1a; --ink:#17221e; --paper:#f3ead7;
+      --paper-2:#fffaf0; --gold:#d9ad5b; --red:#b73535; --muted:#a6bab3;
+      --line:rgba(245,232,204,.22); --shadow:rgba(0,0,0,.34);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--paper); background:var(--felt-deep); font-family:Inter,ui-sans-serif,system-ui,"Microsoft YaHei",sans-serif; }
+    button { font:inherit; }
+    .shell { width:min(1120px,100%); min-height:100vh; margin:auto; padding:24px clamp(16px,4vw,46px) 30px; background:var(--felt); border-inline:1px solid rgba(255,255,255,.05); box-shadow:0 0 80px rgba(0,0,0,.32); }
+    header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding-bottom:17px; border-bottom:1px solid var(--line); }
+    .eyebrow { color:var(--gold); font:700 11px/1.2 ui-monospace,Consolas,monospace; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:5px 0 2px; font:600 clamp(26px,4vw,40px)/1.05 Georgia,"Noto Serif SC",serif; letter-spacing:-.02em; }
+    .sub { color:var(--muted); font-size:13px; }
+    .mode { display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid var(--line); color:var(--paper); font-size:12px; white-space:nowrap; }
+    .mode-dot { width:8px; height:8px; background:var(--gold); border-radius:50%; box-shadow:0 0 0 4px rgba(217,173,91,.13); }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--line); }
+    .stat { padding:14px 14px 13px 0; }
+    .stat + .stat { padding-left:18px; border-left:1px solid var(--line); }
+    .label { display:block; color:var(--muted); font:700 10px/1.2 ui-monospace,Consolas,monospace; letter-spacing:.12em; text-transform:uppercase; }
+    .value { display:block; margin-top:5px; font:600 19px/1.2 Georgia,serif; }
+    .table { position:relative; min-height:330px; padding:28px 0; display:grid; grid-template-rows:auto 1fr auto; gap:24px; }
+    .opponent { display:flex; justify-content:center; min-height:54px; }
+    .backs { display:flex; padding-left:18px; }
+    .back { width:38px; height:54px; margin-left:-18px; border:2px solid #e8dcc1; background:#173f67; background-image:repeating-linear-gradient(45deg,transparent 0 5px,rgba(255,255,255,.12) 5px 7px); box-shadow:0 3px 8px var(--shadow); }
+    .center { display:flex; align-items:center; justify-content:center; gap:clamp(34px,8vw,96px); }
+    .pile { text-align:center; }
+    .pile-title { margin-bottom:8px; color:var(--muted); font-size:11px; letter-spacing:.1em; text-transform:uppercase; }
+    .face, .stock-card { width:88px; height:126px; display:flex; flex-direction:column; align-items:center; justify-content:center; border:1px solid rgba(0,0,0,.18); background:var(--paper-2); color:var(--ink); box-shadow:0 12px 25px var(--shadow); }
+    .stock-card { color:#e8dcc1; border:4px double #e8dcc1; background:#173f67; background-image:repeating-linear-gradient(45deg,transparent 0 7px,rgba(255,255,255,.11) 7px 9px); font:700 12px ui-monospace,monospace; letter-spacing:.12em; }
+    .rank { font:700 34px/1 Georgia,serif; }
+    .suit { margin-top:6px; font-size:28px; }
+    .red { color:var(--red); }
+    .hand-wrap { min-height:142px; }
+    .hand-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; color:var(--muted); font-size:12px; }
+    .hand { display:flex; align-items:flex-end; justify-content:center; gap:10px; flex-wrap:wrap; }
+    .card { position:relative; width:82px; height:116px; padding:9px; border:2px solid transparent; background:var(--paper-2); color:var(--ink); text-align:left; box-shadow:0 8px 18px var(--shadow); cursor:pointer; transition:transform .14s,border-color .14s,opacity .14s; }
+    .card:hover:not(:disabled), .card:focus-visible { transform:translateY(-8px); border-color:var(--gold); outline:none; }
+    .card:disabled { opacity:.38; cursor:not-allowed; filter:saturate(.5); }
+    .card strong { display:block; font:700 22px/1 Georgia,serif; }
+    .card span { display:block; margin-top:4px; font-size:23px; }
+    .wild { position:absolute; right:7px; bottom:7px; color:#8a7652; font:700 9px ui-monospace,monospace; letter-spacing:.08em; }
+    .control { border-top:1px solid var(--line); padding-top:17px; display:grid; grid-template-columns:1fr auto; align-items:center; gap:18px; }
+    .prompt { font:600 17px/1.35 Georgia,"Noto Serif SC",serif; }
+    .prompt small { display:block; margin-top:4px; color:var(--muted); font:400 12px/1.5 ui-sans-serif,system-ui; }
+    .actions { display:flex; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+    .action { min-width:90px; padding:10px 14px; border:1px solid var(--gold); color:var(--paper); background:transparent; cursor:pointer; }
+    .action:hover:not(:disabled) { background:var(--gold); color:#15231d; }
+    .action:disabled { opacity:.35; cursor:not-allowed; }
+    .suit-picker { display:none; grid-column:1/-1; padding:14px 0 0; border-top:1px dashed var(--line); }
+    .suit-picker.open { display:flex; align-items:center; justify-content:center; gap:9px; flex-wrap:wrap; }
+    .suit-choice { width:52px; height:46px; border:1px solid var(--line); background:var(--paper-2); color:var(--ink); font-size:24px; cursor:pointer; }
+    .notice { min-height:21px; margin-top:12px; color:var(--muted); font-size:12px; }
+    .notice.error { color:#ffaaa2; }
+    body[data-control-mode="autonomous"] .control-actions { display:none; }
+    @media (max-width:700px) {
+      .shell { padding-top:17px; }
+      header { align-items:center; }
+      .stats { grid-template-columns:1fr 1fr; }
+      .stat:nth-child(3) { border-left:0; }
+      .stat:nth-child(n+3) { border-top:1px solid var(--line); }
+      .table { min-height:300px; }
+      .center { gap:28px; }
+      .card { width:68px; height:98px; }
+      .control { grid-template-columns:1fr; }
+      .actions { justify-content:flex-start; }
+    }
   </style>
 </head>
-<body>
-  <h1>Crazy Eights</h1>
-  <div class="muted">v016 M2 — mental_poker shedding card game (cheat-detectable, not high-stakes).</div>
-
-  <div class="panel">
-    <div class="row">
-      <div class="stat">My hand: <b id="my-hand">—</b></div>
-      <div class="stat">Opponent hand: <b id="opp-hand">—</b></div>
-      <div class="stat">Stock: <b id="stock">—</b></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div>Discard top: <b id="top">—</b> · Follow suit: <b id="suit">—</b></div>
-    <p class="muted" style="margin-top:8px">Play a card matching the rank or suit, or play an 8 (wild) and call a suit. Otherwise draw; pass when the stock is empty.</p>
-  </div>
-
-  <div class="panel">
-    <div class="muted">Event log</div>
-    <ul id="log"></ul>
-  </div>
-
-  <!-- The runtime injects the session event stream; this panel is a static scaffold.
-       Full live wiring (snapshot + events.jsonl) lands in M3 alongside the docs sync. -->
+<body data-control-mode="autonomous">
+  <main class="shell">
+    <header>
+      <div><div class="eyebrow">Aigenora · Mental Poker</div><h1>疯狂八点</h1><div class="sub">Crazy Eights · 本地手牌仅对你可见</div></div>
+      <div class="mode"><i class="mode-dot"></i><span id="mode">读取模式…</span></div>
+    </header>
+    <section class="stats" aria-label="对局状态">
+      <div class="stat"><span class="label">你的身份</span><span class="value" id="role">—</span></div>
+      <div class="stat"><span class="label">对手手牌</span><span class="value" id="opp-count">—</span></div>
+      <div class="stat"><span class="label">牌堆余量</span><span class="value" id="stock-count">—</span></div>
+      <div class="stat"><span class="label">决策计时</span><span class="value" id="timer">—</span></div>
+    </section>
+    <section class="table">
+      <div class="opponent"><div class="backs" id="opponent"></div></div>
+      <div class="center">
+        <div class="pile"><div class="pile-title">牌堆</div><div class="stock-card">DRAW</div></div>
+        <div class="pile"><div class="pile-title">弃牌 · 跟随 <b id="follow">—</b></div><div class="face" id="top-card"><span class="rank">—</span><span class="suit">◇</span></div></div>
+      </div>
+      <div class="hand-wrap">
+        <div class="hand-title"><span>你的手牌</span><span id="hand-count">0 张</span></div>
+        <div class="hand" id="hand"></div>
+      </div>
+    </section>
+    <section class="control">
+      <div class="prompt" id="prompt">正在等待对局状态<small id="hint">页面只会提交你的选择，不会替你选牌。</small></div>
+      <div class="actions control-actions">
+        <button class="action" id="draw" disabled>摸一张</button>
+        <button class="action" id="pass" disabled>过牌</button>
+      </div>
+      <div class="suit-picker control-actions" id="suit-picker">
+        <span class="sub">八点指定花色：</span>
+        <button class="suit-choice" data-suit="0">♣</button><button class="suit-choice red" data-suit="1">♦</button>
+        <button class="suit-choice red" data-suit="2">♥</button><button class="suit-choice" data-suit="3">♠</button>
+      </div>
+    </section>
+    <div class="notice" id="notice" role="status" aria-live="polite"></div>
+  </main>
   <script>
-    // Placeholder: real binding hooks into the host's snapshot/events bus in M3.
+    const RANKS=["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+    const SUITS=["♣","♦","♥","♠"], SUIT_NAMES=["梅花","方片","红桃","黑桃"];
+    const $=id=>document.getElementById(id);
+    let info={}, snapshot={}, pendingEight=null, sending=false;
+
+    function modeName(mode){ return ({human:"完全人工",hybrid:"人机混合",autonomous:"全自动"})[mode]||mode||"未知"; }
+    function isRed(s){ return s===1||s===2; }
+    function legal(kind,id){ return (snapshot.legal_actions||[]).some(a=>a.kind===kind&&(id===undefined||a.id_b===id)); }
+    function phaseOpen(){ return snapshot.phase==="action_required"||info.control_mode==="hybrid"; }
+    function renderInfo(){
+      const mode=info.control_mode||snapshot.control_mode||"autonomous";
+      document.body.dataset.controlMode=mode;
+      $("mode").textContent=modeName(mode);
+      $("role").textContent=info.role==="host"?"Host":"Guest";
+      $("hint").textContent=mode==="human"?"本回合必须由你明确选择；超时或非法选择会终止本局。":mode==="hybrid"?"你可以抢先干预；没有输入时 Agent 继续自动行动。":"当前为只读观战，所有操作由 Agent 完成。";
+    }
+    function render(){
+      renderInfo();
+      const hand=Array.isArray(snapshot.hand)?snapshot.hand:[];
+      const legalActions=Array.isArray(snapshot.legal_actions)?snapshot.legal_actions:[];
+      $("opp-count").textContent=snapshot.opponent_hand_count??"—";
+      $("stock-count").textContent=snapshot.stock_count??"—";
+      $("hand-count").textContent=`${hand.length} 张`;
+      $("follow").textContent=snapshot.current_suit==null?"任意":SUIT_NAMES[snapshot.current_suit];
+      const top=$("top-card"), r=snapshot.top_rank, s=snapshot.current_suit;
+      top.innerHTML=`<span class="rank">${r==null?"—":RANKS[r]}</span><span class="suit ${isRed(s)?"red":""}">${s==null?"◇":SUITS[s]}</span>`;
+      const backs=$("opponent"); backs.replaceChildren();
+      for(let i=0;i<Math.min(Number(snapshot.opponent_hand_count)||0,16);i++){ const el=document.createElement("i"); el.className="back"; backs.append(el); }
+      const handEl=$("hand"); handEl.replaceChildren();
+      hand.forEach(card=>{
+        const btn=document.createElement("button"); btn.className=`card ${isRed(card.suit)?"red":""}`;
+        btn.innerHTML=`<strong>${RANKS[card.rank]}</strong><span>${SUITS[card.suit]}</span>${card.rank===6?'<em class="wild">WILD</em>':""}`;
+        btn.disabled=sending||!phaseOpen()||!legal("play",card.id_b)||info.control_mode==="autonomous";
+        btn.title=btn.disabled?"当前不可出":"出这张牌";
+        btn.onclick=()=>chooseCard(card); handEl.append(btn);
+      });
+      $("draw").disabled=sending||!phaseOpen()||!legal("draw");
+      $("pass").disabled=sending||!phaseOpen()||!legal("pass");
+      const open=info.control_mode!=="autonomous"&&snapshot.phase==="action_required";
+      $("prompt").firstChild.textContent=open?"轮到你了，请选择动作":snapshot.phase==="action_submitted"?"选择已提交，等待对手":"对局进行中";
+      if(!pendingEight) $("suit-picker").classList.remove("open");
+      renderTimer();
+    }
+    function renderTimer(){
+      const deadline=Number(snapshot.timing&&snapshot.timing.deadline_at_epoch);
+      if(!deadline){ $("timer").textContent="—"; return; }
+      const seconds=Math.max(0,deadline-Date.now()/1000);
+      $("timer").textContent=`${seconds.toFixed(1)}s`;
+    }
+    function chooseCard(card){
+      if(card.rank===6){ pendingEight=card; $("suit-picker").classList.add("open"); $("notice").textContent="请选择这张八点要指定的花色。"; }
+      else submit({kind:"play",id_b:card.id_b});
+    }
+    async function submit(action){
+      if(sending||snapshot.action_seq==null) return;
+      sending=true; pendingEight=null; $("suit-picker").classList.remove("open"); render();
+      try{
+        const res=await fetch("/api/decide",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action_seq:snapshot.action_seq,...action})});
+        const body=await res.json();
+        if(!res.ok||body.ok===false) throw new Error(body.error||body.reason||`HTTP ${res.status}`);
+        $("notice").className="notice"; $("notice").textContent="操作已安全提交，等待协议确认。";
+      }catch(err){ $("notice").className="notice error"; $("notice").textContent=`提交失败：${err.message}`; }
+      finally{ sending=false; render(); }
+    }
+    $("draw").onclick=()=>submit({kind:"draw"}); $("pass").onclick=()=>submit({kind:"pass"});
+    document.querySelectorAll("[data-suit]").forEach(btn=>btn.onclick=()=>pendingEight&&submit({kind:"play",id_b:pendingEight.id_b,call_suit:Number(btn.dataset.suit)}));
+    async function refresh(){
+      try{
+        const [ir,sr]=await Promise.all([fetch("/api/info",{cache:"no-store"}),fetch("/api/snapshot",{cache:"no-store"})]);
+        if(ir.ok) info=await ir.json(); if(sr.ok) snapshot=await sr.json(); render();
+      }catch(err){ $("notice").className="notice error"; $("notice").textContent="正在重新连接本地会话…"; }
+    }
+    refresh(); setInterval(refresh,500); setInterval(renderTimer,100);
   </script>
 </body>
 </html>

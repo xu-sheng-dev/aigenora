@@ -85,6 +85,15 @@ def winner_by_hand_count(guest_n: int, host_n: int) -> str | None:
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+    DECISION_SCHEMA = {
+        "match_key": "action_seq",
+        "value_field": "kind",
+        "choices": {"play": "play", "draw": "draw", "pass": "pass"},
+        "card_field": "id_b",
+        "optional_fields": ["call_suit"],
+    }
+
     def proto_host_metadata(self) -> tuple[str, str, str, dict[str, Any]]:
         return ("Crazy Eights", "game,crazy-eights,cards", "supply",
                 {"hand_size": self.hand_size})
@@ -128,6 +137,62 @@ class Hooks(ProtocolHooks):
         if not stock_empty:
             return {"kind": "draw"}
         return {"kind": "pass"}
+
+    def proto_mp_legal_actions(self, state: dict) -> list[dict[str, Any]]:
+        """Expose only this participant's legal actions and known card faces."""
+        hand_cards = state.get("_mp_hand_cards") or {}
+        deck = state.get("_mp_deck_view")
+        self.snapshot.update(
+            game="crazy_eights",
+            top_rank=self.top_rank,
+            current_suit=self.current_suit,
+            ranks=RANKS,
+            suits=SUITS,
+        )
+        stock_empty = deck is None or not deck.stock
+        first = self._first_turn(state)
+        playable: list[dict[str, Any]] = []
+        for id_b, (rank, suit) in sorted(hand_cards.items()):
+            if can_play(rank, suit, self.top_rank, self.current_suit, first):
+                playable.append({
+                    "kind": "play",
+                    "id_b": id_b,
+                    "rank": rank,
+                    "suit": suit,
+                    "call_suit_required": rank == EIGHT_IDX,
+                })
+        if playable:
+            return playable
+        return [{"kind": "pass" if stock_empty else "draw"}]
+
+    def proto_mp_coerce_action(self, state: dict, decision: dict[str, Any]) -> dict[str, Any]:
+        action = super().proto_mp_coerce_action(state, decision)
+        legal = self.proto_mp_legal_actions(state)
+        kind = action["kind"]
+        if kind != "play":
+            if not any(item["kind"] == kind for item in legal):
+                raise ValueError(f"{kind} is not legal in the current state")
+            return action
+
+        legal_play = next(
+            (item for item in legal
+             if item["kind"] == "play" and item["id_b"] == action["id_b"]),
+            None,
+        )
+        if legal_play is None:
+            raise ValueError("selected card is not playable")
+        if legal_play["call_suit_required"]:
+            if "call_suit" not in action or action["call_suit"] not in range(len(SUITS)):
+                raise ValueError("playing an 8 requires call_suit between 0 and 3")
+        elif "call_suit" in action:
+            raise ValueError("call_suit is only allowed when playing an 8")
+        return action
+
+    def proto_mp_apply_local_action(self, state: dict, action: dict[str, Any]) -> None:
+        if action["kind"] != "play":
+            return
+        rank, suit = (state.get("_mp_hand_cards") or {})[action["id_b"]]
+        self._apply_play_locally(rank, suit, action.get("call_suit"))
 
     def proto_mp_validate_play(self, state: dict, who: str, play_msg: dict):
         from aigenora.proto import mental_poker

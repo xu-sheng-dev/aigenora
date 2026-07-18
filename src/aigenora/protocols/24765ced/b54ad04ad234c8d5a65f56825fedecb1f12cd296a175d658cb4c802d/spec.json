@@ -1,0 +1,112 @@
+{
+  "name": "Tank Battle · Authoritative Realtime",
+  "spec_version": "1.0",
+  "description": "Built-in reference game for Aigenora's Host-authoritative real-time strategy workflow. Host advances a fixed 10 Hz simulation and broadcasts every complete world frame. Guest submits future micro-command frames asynchronously; the game never waits for Guest verification. Both sides retain the full state/command/hash stream for optional post-game audit. Human users issue persistent macro orders while their local Agents control every owned tank.",
+  "type": "game",
+  "family": "tank-battle",
+  "flow": {
+    "mode": "authoritative_realtime",
+    "realtime": {
+      "tick_rate_hz": 10,
+      "input_delay_ticks": 3,
+      "snapshot_every_ticks": 1,
+      "max_command_lead_ticks": 30,
+      "max_commands_per_frame": 64,
+      "disconnect_policy": "abort"
+    }
+  },
+  "messages": [
+    {
+      "name": "rt_join",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_join"], "required": true},
+        "wire_version": {"type": "integer", "min": 1, "max": 1, "required": true},
+        "ruleset_hash": {"type": "hash", "required": true},
+        "match_config_hash": {"type": "hash", "required": true}
+      }
+    },
+    {
+      "name": "rt_command",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_command"], "required": true},
+        "seq": {"type": "integer", "min": 1, "required": true},
+        "target_tick": {"type": "integer", "min": 1, "required": true},
+        "commands": {"type": "json", "container": "array", "max_total_bytes": 131072, "required": true},
+        "command_hash": {"type": "hash", "required": true}
+      }
+    },
+    {
+      "name": "rt_ready",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_ready"], "required": true},
+        "wire_version": {"type": "integer", "min": 1, "max": 1, "required": true},
+        "ruleset_hash": {"type": "hash", "required": true},
+        "match_config_hash": {"type": "hash", "required": true},
+        "config": {"type": "json", "container": "object", "max_total_bytes": 8192, "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    },
+    {
+      "name": "rt_reject",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_reject"], "required": true},
+        "reason": {"type": "text", "max_length": 256, "required": true}
+      }
+    },
+    {
+      "name": "rt_command_ack",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_command_ack"], "required": true},
+        "seq": {"type": "integer", "min": 1, "required": true},
+        "target_tick": {"type": "integer", "min": 1, "required": true},
+        "status": {"type": "enum", "values": ["accepted", "rejected"], "required": true},
+        "received_at_tick": {"type": "integer", "min": 0, "required": true},
+        "command_hash": {"type": "hash", "required": true},
+        "reason": {"type": "text", "max_length": 256}
+      }
+    },
+    {
+      "name": "rt_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["rt_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "rules": {
+    "authority": "Host is the only live referee and advances the world at the protocol-bound fixed tick rate. Host never waits for a Guest command or audit result.",
+    "commands": "Each side controls only its own units through structured unit_id/move/aim/fire objects. Guest commands target future ticks, receive an acceptance/rejection receipt, and appear again in the authoritative frame if applied.",
+    "evidence": "Every frame contains the complete public world, all applied commands, events, a state hash and a chained frame hash. Guest stores this stream for optional offline audit; only cheap hash-chain verification occurs during play.",
+    "movement": "Tank positions use integer fixed-point coordinates. Movement proposals are resolved simultaneously, so neither Host nor Guest receives ID-order collision priority.",
+    "combat": "Aim is independent from movement. Bullets destroy brick, stop on steel and damage enemy tanks; friendly fire is a match parameter.",
+    "win_condition": "Eliminate all enemy tanks. At max_ticks compare surviving tanks, then total remaining HP, otherwise draw.",
+    "macro_control": "Human strategy is persistent structured data (maneuver/order/scope/target/expiry). The local Agent converts it into micro commands for every owned tank each tick."
+  },
+  "parameters": {
+    "balance": {
+      "type": "table",
+      "columns": {
+        "hp": {"type": "integer", "min": 1, "max": 99},
+        "speed": {"type": "integer", "min": 40, "max": 1000},
+        "fire_cooldown": {"type": "integer", "min": 1, "max": 60},
+        "bullet_speed": {"type": "integer", "min": 100, "max": 3000}
+      }
+    },
+    "team_size": {"type": "integer", "min": 1, "max": 32},
+    "max_ticks": {"type": "integer", "min": 10, "max": 100000},
+    "map_text": {"type": "text", "max_length": 32768},
+    "friendly_fire": {"type": "boolean"},
+    "pickup_mode": {"type": "enum", "values": ["none", "powerups"]},
+    "powerup_duration_ticks": {"type": "integer", "min": 10, "max": 10000}
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "macro_orders_to_agent_micro_commands"
+  }
+}

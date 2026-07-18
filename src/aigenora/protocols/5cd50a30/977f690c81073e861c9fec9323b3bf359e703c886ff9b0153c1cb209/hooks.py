@@ -108,6 +108,7 @@ def heuristic_move(board: list[list[str]], rows: int, cols: int, sym: str) -> in
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -239,6 +240,15 @@ class Hooks(ProtocolHooks):
         return heuristic_move(self.board, self.rows, self.cols, sym)
 
     def _pick(self, sym: str, match_turn: int) -> int:
+        if self.control_mode == "human":
+            decision = self._await_human_decision("turn", match_turn)
+            try:
+                col = int(decision["col"])
+            except (KeyError, TypeError, ValueError):
+                self._reject_human_decision("turn", match_turn, decision, "col must be an integer")
+            if not _in(self.rows, self.cols, 0, col) or drop_cell(self.board, self.rows, self.cols, col) is None:
+                self._reject_human_decision("turn", match_turn, decision, "column is full or outside the board")
+            return col
         col = self._pick_auto(sym)
         if self.bus is None:
             return col
@@ -253,23 +263,7 @@ class Hooks(ProtocolHooks):
                 except (TypeError, ValueError):
                     pass
             return col
-        # --coach（manual）：阻塞逐手等待
-        if not self.timing_enabled:
-            return col
-        now = time.monotonic()
-        min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
-        max_think = float(self.options.get("max_think_seconds", self.timing["max_think_seconds"]))
-        self._update_timing_snapshot("turn", match_turn, now + min_think, now + max_think, "waiting")
-        decision = self.bus.await_latest_decision(
-            match_key="turn", match_value=match_turn,
-            release_at=now + min_think, deadline_at=now + max_think,
-            fallback_value={"col": col},
-        )
-        self._clear_timing_snapshot()
-        c = int(decision.get("col", col))
-        if _in(self.rows, self.cols, 0, c) and drop_cell(self.board, self.rows, self.cols, c) is not None:
-            return c
-        return col
+        raise RuntimeError(f"unsupported decision mode: {self.decision_mode}")
 
     # ---- snapshot / details ----
     def _record(self, r: int, c: int, player: str, turn: int, over: bool, winner: str) -> None:

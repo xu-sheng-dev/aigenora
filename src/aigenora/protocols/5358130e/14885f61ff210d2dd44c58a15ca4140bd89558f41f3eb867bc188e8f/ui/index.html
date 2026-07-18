@@ -56,6 +56,9 @@
   .whisper-input button { align-self: flex-end; }
   footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
   footer code { font-family: "Consolas", "Menlo", monospace; }
+  body[data-control-mode="human"] #side h2:nth-of-type(n+2),
+  body[data-control-mode="human"] #side h2:nth-of-type(n+2) ~ * { display: none; }
+  body[data-control-mode="autonomous"] #pass-move { display: none; }
   @media (max-width: 760px) { main { grid-template-columns: 1fr; } .cell { width: 26px; height: 26px; } .stone { width: 20px; height: 20px; } }
 </style>
 </head>
@@ -77,6 +80,7 @@
   <section class="card" id="side">
     <h2>Status</h2>
     <div class="hint" id="status-hint"></div>
+    <button id="pass-move" disabled style="margin-top:10px">Pass (no legal move)</button>
     <h2 style="margin-top:14px">Strategy</h2>
     <div class="hint" id="strat-role-hint"></div>
     <div class="strat-row"><label>mode</label>
@@ -93,7 +97,7 @@
 <footer>Reversi · reads via <code>/api/*</code> and <code>/sse/stream</code></footer>
 <script>
 const $ = (s) => document.querySelector(s);
-let snap = {}, whispers = [], myRole = null;
+let snap = {}, whispers = [], myRole = null, controlMode = "autonomous";
 const DIRS = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
 function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
@@ -115,8 +119,9 @@ function renderSnapshot(s) {
   const n = snap.board_size || 8; const board = snap.board || []; const last = snap.last_move || null;
   const timing = snap.timing;
   const mySym = myRole === "guest" ? "B" : "W";
-  const canPlay = !!timing && timing.match_key === "turn" && snap.phase !== "game_over" && myRole;
+  const canPlay = controlMode !== "autonomous" && !!timing && timing.match_key === "turn" && snap.phase !== "game_over" && myRole;
   const legal = canPlay ? legalSet(board, n, mySym) : new Set();
+  $("#pass-move").disabled = !canPlay || legal.size > 0;
   const box = $("#board"); box.style.gridTemplateColumns = `repeat(${n}, 32px)`;
   let html = "";
   for (let r=0;r<n;r++) for (let c=0;c<n;c++) {
@@ -134,7 +139,7 @@ function renderSnapshot(s) {
   else if (phase === "waiting_peer") { tag.textContent = "waiting"; tag.className = "tag waiting"; }
   else { tag.textContent = phase; tag.className = "tag"; }
   $("#black-score").textContent = snap.black ?? 2; $("#white-score").textContent = snap.white ?? 2;
-  $("#meta").textContent = `Reversi ${n}×${n} · turn ${snap.turn||0} · ${snap.current||"-"} to move`;
+  $("#meta").textContent = `Reversi ${n}×${n} · ${controlMode} · turn ${snap.turn||0} · ${snap.current||"-"} to move`;
   if (phase === "game_over") {
     const w = snap.winner || (snap.last_event?.structured?.winner) || "none";
     $("#game-summary").textContent = w === "none" ? `Draw (B${snap.black}-W${snap.white})` : `${w} wins (B${snap.black}-W${snap.white})`;
@@ -151,6 +156,13 @@ async function submitMove(r, c) {
     $("#status-hint").textContent = res.ok ? `Played (${r},${c})` : `Rejected: ${res.status}`;
   } catch(e) { $("#status-hint").textContent = "Error: " + e.message; }
 }
+async function submitPass() {
+  const timing = snap.timing; if (!timing || timing.match_key !== "turn") return;
+  const res = await fetch("/api/decide", { method: "POST", body: JSON.stringify(
+    { turn: timing.match_value, pass: true, agent_id: agentLabel(), idempotency_key: uuid4() }) });
+  $("#status-hint").textContent = res.ok ? "Pass submitted" : `Pass rejected: ${res.status}`;
+}
+$("#pass-move").addEventListener("click", submitPass);
 function renderStrategy(st) {
   st = st || {}; const mode = st.mode || "heuristic";
   $("#strat-mode").value = mode; $("#strat-fixed-row").style.display = mode === "fixed" ? "flex" : "none";
@@ -183,6 +195,7 @@ es.addEventListener("whisper", e => { whispers.push(JSON.parse(e.data)); renderW
 es.addEventListener("whisper_ack", e => { fetch("/api/whispers").then(r=>r.json()).then(w=>renderWhispers(w)).catch(()=>{}); });
 es.onerror = () => {};
 (async () => {
+  try { const info = await fetch("/api/info").then(r=>r.json()); controlMode = info.control_mode || controlMode; myRole = info.role || myRole; document.body.dataset.controlMode = controlMode; } catch(e) {}
   try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
   try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
   try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}

@@ -18,6 +18,8 @@ class Hooks(ProtocolHooks):
     with the stdin user experience.
     """
 
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+
     def proto_init(self, options, role, args, state_dir: Path,
                     decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)

@@ -1,49 +1,143 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Briscola — Aigenora</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Briscola · Aigenora</title>
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; }
-    h1 { font-size: 1.25rem; margin: 0 0 4px; }
-    .muted { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
-    .panel { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
-    .row { display: flex; gap: 24px; }
-    .stat { font-variant-numeric: tabular-nums; }
-    .stat b { font-size: 1.1rem; }
-    ul { margin: 6px 0; padding-left: 20px; }
-    li { margin: 2px 0; }
+    :root { --navy:#122c38; --navy-2:#0b2029; --cream:#f3e6cc; --paper:#fff9eb; --terra:#c76847; --gold:#cca55d; --ink:#25231f; --muted:#aebebc; --line:rgba(243,230,204,.2); --red:#bd3d3d; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--cream); background:#071920; font-family:Inter,ui-sans-serif,system-ui,"Microsoft YaHei",sans-serif; }
+    button { font:inherit; }
+    .shell { width:min(1140px,100%); min-height:100vh; margin:auto; padding:22px clamp(16px,4vw,48px) 30px; background:var(--navy); box-shadow:0 0 90px rgba(0,0,0,.45); }
+    header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding-bottom:18px; border-bottom:1px solid var(--line); }
+    .kicker { color:var(--gold); font:700 10px ui-monospace,Consolas,monospace; letter-spacing:.18em; text-transform:uppercase; }
+    h1 { margin:5px 0 1px; font:600 clamp(28px,4vw,42px)/1 Georgia,"Noto Serif SC",serif; }
+    .sub { color:var(--muted); font-size:12px; }
+    .mode { border-left:3px solid var(--terra); padding:5px 0 5px 12px; text-align:right; }
+    .mode b { display:block; font:600 14px Georgia,serif; }
+    .mode span { color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
+    .scoreboard { display:grid; grid-template-columns:1fr auto 1fr; align-items:stretch; border-bottom:1px solid var(--line); }
+    .score { padding:14px 0; }
+    .score:last-child { text-align:right; }
+    .score small { display:block; color:var(--muted); font:700 10px ui-monospace,monospace; letter-spacing:.13em; text-transform:uppercase; }
+    .score strong { display:block; margin-top:3px; font:600 29px Georgia,serif; }
+    .score-mid { min-width:170px; padding:14px 24px; border-inline:1px solid var(--line); text-align:center; }
+    .score-mid small { color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+    .score-mid b { display:block; margin-top:5px; color:var(--gold); font:600 18px Georgia,serif; }
+    .table { min-height:425px; display:grid; grid-template-rows:70px 1fr auto; gap:20px; padding:26px 0 22px; }
+    .opponent { display:flex; justify-content:center; align-items:flex-start; }
+    .backs { display:flex; padding-left:24px; }
+    .back { width:48px; height:68px; margin-left:-24px; border:3px double var(--cream); background:var(--terra); background-image:repeating-linear-gradient(135deg,transparent 0 7px,rgba(255,255,255,.13) 7px 9px); box-shadow:0 5px 12px rgba(0,0,0,.3); transform:rotate(var(--turn,0deg)); }
+    .center { display:flex; align-items:center; justify-content:center; gap:clamp(30px,7vw,82px); }
+    .trick { min-width:245px; text-align:center; }
+    .caption { margin-bottom:10px; color:var(--muted); font:700 10px ui-monospace,monospace; letter-spacing:.13em; text-transform:uppercase; }
+    .trick-cards { min-height:132px; display:flex; justify-content:center; align-items:center; gap:14px; }
+    .stock { text-align:center; }
+    .stock-back { width:86px; height:124px; display:grid; place-items:center; border:5px double var(--cream); background:var(--terra); background-image:repeating-linear-gradient(135deg,transparent 0 9px,rgba(255,255,255,.12) 9px 11px); box-shadow:0 11px 22px rgba(0,0,0,.32); color:var(--cream); font:700 12px ui-monospace,monospace; letter-spacing:.1em; }
+    .card { position:relative; width:86px; height:124px; padding:10px; border:2px solid transparent; background:var(--paper); color:var(--ink); text-align:left; box-shadow:0 9px 20px rgba(0,0,0,.34); }
+    button.card { cursor:pointer; transition:transform .14s,border-color .14s,opacity .14s; }
+    button.card:hover:not(:disabled), button.card:focus-visible { transform:translateY(-8px); border-color:var(--gold); outline:none; }
+    button.card:disabled { opacity:.4; cursor:not-allowed; }
+    .card strong { display:block; font:700 23px/1 Georgia,serif; }
+    .card span { display:block; margin-top:5px; font-size:24px; }
+    .card em { position:absolute; right:7px; bottom:7px; color:#8a7652; font:700 9px ui-monospace,monospace; font-style:normal; }
+    .red { color:var(--red)!important; }
+    .hand-zone { min-height:145px; }
+    .hand-head { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-bottom:10px; }
+    .hand { display:flex; justify-content:center; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+    .control { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; padding-top:17px; border-top:1px solid var(--line); }
+    .prompt { font:600 17px/1.35 Georgia,"Noto Serif SC",serif; }
+    .prompt small { display:block; margin-top:4px; color:var(--muted); font:400 12px/1.45 ui-sans-serif,system-ui; }
+    .draw { padding:11px 18px; border:1px solid var(--gold); color:var(--cream); background:transparent; cursor:pointer; }
+    .draw:hover:not(:disabled) { color:var(--ink); background:var(--gold); }
+    .draw:disabled { opacity:.34; cursor:not-allowed; }
+    .meta { display:flex; gap:20px; flex-wrap:wrap; margin-top:12px; color:var(--muted); font:11px ui-monospace,Consolas,monospace; }
+    .notice { min-height:21px; margin-top:11px; color:var(--muted); font-size:12px; }
+    .notice.error { color:#ffaaa2; }
+    body[data-control-mode="autonomous"] .control-action { display:none; }
+    @media (max-width:680px) {
+      .shell { padding-top:16px; }
+      .score-mid { min-width:120px; padding-inline:12px; }
+      .table { min-height:390px; }
+      .center { gap:24px; }
+      .trick { min-width:170px; }
+      .card { width:72px; height:104px; }
+      .stock-back { width:72px; height:104px; }
+      .control { grid-template-columns:1fr; }
+    }
   </style>
 </head>
-<body>
-  <h1>Briscola</h1>
-  <div class="muted">v016 M2 — mental_poker trick-taking card game (cheat-detectable, not high-stakes).</div>
-
-  <div class="panel">
-    <div class="row">
-      <div class="stat">My hand: <b id="my-hand">—</b></div>
-      <div class="stat">Opponent hand: <b id="opp-hand">—</b></div>
-      <div class="stat">Stock: <b id="stock">—</b></div>
-      <div class="stat">Trump: <b id="trump">—</b></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div>Host points: <b id="host-pts">0</b> · Guest points: <b id="guest-pts">0</b></div>
-    <p class="muted" style="margin-top:8px">Host leads each trick, guest follows. Higher card of the led suit wins, unless trumped; trump beats any non-trump. First to 61 of 120 points wins.</p>
-  </div>
-
-  <div class="panel">
-    <div class="muted">Event log</div>
-    <ul id="log"></ul>
-  </div>
-
-  <!-- The runtime injects the session event stream; this panel is a static scaffold.
-       Full live wiring (snapshot + events.jsonl) lands in M3 alongside the docs sync. -->
+<body data-control-mode="autonomous">
+  <main class="shell">
+    <header>
+      <div><div class="kicker">Aigenora · Tavolo verificabile</div><h1>布里斯科拉</h1><div class="sub">Briscola · 每张暗牌都经过心智扑克审计</div></div>
+      <div class="mode"><b id="mode">读取模式…</b><span id="role">—</span></div>
+    </header>
+    <section class="scoreboard">
+      <div class="score"><small>Host 分数</small><strong id="host-points">0</strong></div>
+      <div class="score-mid"><small>王牌花色</small><b id="trump">—</b></div>
+      <div class="score"><small>Guest 分数</small><strong id="guest-points">0</strong></div>
+    </section>
+    <section class="table">
+      <div class="opponent"><div class="backs" id="opponent"></div></div>
+      <div class="center">
+        <div class="trick"><div class="caption">当前牌墩</div><div class="trick-cards" id="trick"><span class="sub">等待首张牌</span></div></div>
+        <div class="stock"><div class="caption">牌堆 · <b id="stock-count">—</b></div><div class="stock-back">BRISCOLA</div></div>
+      </div>
+      <div class="hand-zone"><div class="hand-head"><span>你的手牌</span><span id="hand-count">0 张</span></div><div class="hand" id="hand"></div></div>
+    </section>
+    <section class="control">
+      <div class="prompt" id="prompt">正在等待对局状态<small id="hint">你的手牌不会发送给对手或邀约服务器。</small></div>
+      <button class="draw control-action" id="draw" disabled>补一张牌</button>
+    </section>
+    <div class="meta"><span>已完成 <b id="tricks">0</b> 墩</span><span>对手 <b id="opp-count">—</b> 张</span><span>决策剩余 <b id="timer">—</b></span></div>
+    <div class="notice" id="notice" role="status" aria-live="polite"></div>
+  </main>
   <script>
-    // Placeholder: real binding hooks into the host's snapshot/events bus in M3.
+    const RANKS=["A","2","3","4","5","6","7","J","Q","K"];
+    const SUITS=["♣","♦","♥","♠"], SUIT_NAMES=["梅花 ♣","方片 ♦","红桃 ♥","黑桃 ♠"];
+    const $=id=>document.getElementById(id);
+    let info={},snapshot={},sending=false;
+    function isRed(s){ return s===1||s===2; }
+    function modeName(m){ return ({human:"完全人工",hybrid:"人机混合",autonomous:"全自动"})[m]||m||"未知"; }
+    function legal(kind,id){ return (snapshot.legal_actions||[]).some(a=>a.kind===kind&&(id===undefined||a.id_b===id)); }
+    function cardNode(card,interactive=false){
+      const el=document.createElement(interactive?"button":"div"); el.className=`card ${isRed(card.suit)?"red":""}`;
+      el.innerHTML=`<strong>${RANKS[card.rank]}</strong><span>${SUITS[card.suit]}</span><em>${card.who||""}</em>`;
+      return el;
+    }
+    function renderInfo(){
+      const mode=info.control_mode||snapshot.control_mode||"autonomous"; document.body.dataset.controlMode=mode;
+      $("mode").textContent=modeName(mode); $("role").textContent=info.role==="host"?"你是 HOST":"你是 GUEST";
+      $("hint").textContent=mode==="human"?"必须由你明确选择每次出牌或补牌；系统不会代打。":mode==="hybrid"?"可在自动动作前人工干预；没有选择时 Agent 继续行动。":"当前只读观战，Agent 正在自动完成所有出牌。";
+    }
+    function render(){
+      renderInfo(); const hand=Array.isArray(snapshot.hand)?snapshot.hand:[], points=snapshot.points||{};
+      $("host-points").textContent=points.host??0; $("guest-points").textContent=points.guest??0;
+      $("trump").textContent=snapshot.briscola==null?"—":SUIT_NAMES[snapshot.briscola];
+      $("stock-count").textContent=snapshot.stock_count??"—"; $("opp-count").textContent=snapshot.opponent_hand_count??"—";
+      $("tricks").textContent=snapshot.completed_tricks??0; $("hand-count").textContent=`${hand.length} 张`;
+      const backs=$("opponent"); backs.replaceChildren();
+      for(let i=0;i<Math.min(Number(snapshot.opponent_hand_count)||0,12);i++){const e=document.createElement("i");e.className="back";e.style.setProperty("--turn",`${(i-(snapshot.opponent_hand_count-1)/2)*3}deg`);backs.append(e);}
+      const trick=$("trick"); trick.replaceChildren(); const current=Array.isArray(snapshot.current_trick)?snapshot.current_trick:[];
+      if(!current.length){const s=document.createElement("span");s.className="sub";s.textContent="等待首张牌";trick.append(s);} else current.forEach(c=>trick.append(cardNode(c)));
+      const handEl=$("hand"); handEl.replaceChildren();
+      hand.forEach(c=>{const btn=cardNode(c,true);btn.disabled=sending||info.control_mode==="autonomous"||!legal("play",c.id_b);btn.title=btn.disabled?"当前不可出":"打出这张牌";btn.onclick=()=>submit({kind:"play",id_b:c.id_b});handEl.append(btn);});
+      $("draw").disabled=sending||!legal("draw")||info.control_mode==="autonomous";
+      $("prompt").firstChild.textContent=snapshot.phase==="action_required"?((snapshot.legal_actions||[]).some(a=>a.kind==="draw")?"牌墩结束，请补牌":"轮到你了，请选择一张牌"):snapshot.phase==="action_submitted"?"操作已提交，等待对手":"对局进行中";
+      renderTimer();
+    }
+    function renderTimer(){const d=Number(snapshot.timing&&snapshot.timing.deadline_at_epoch);$("timer").textContent=d?`${Math.max(0,d-Date.now()/1000).toFixed(1)}s`:"—";}
+    async function submit(action){
+      if(sending||snapshot.action_seq==null)return; sending=true;render();
+      try{const r=await fetch("/api/decide",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action_seq:snapshot.action_seq,...action})});const b=await r.json();if(!r.ok||b.ok===false)throw new Error(b.error||b.reason||`HTTP ${r.status}`);$("notice").className="notice";$("notice").textContent="操作已安全提交，等待协议确认。";}
+      catch(err){$("notice").className="notice error";$("notice").textContent=`提交失败：${err.message}`;}
+      finally{sending=false;render();}
+    }
+    $("draw").onclick=()=>submit({kind:"draw"});
+    async function refresh(){try{const [ir,sr]=await Promise.all([fetch("/api/info",{cache:"no-store"}),fetch("/api/snapshot",{cache:"no-store"})]);if(ir.ok)info=await ir.json();if(sr.ok)snapshot=await sr.json();render();}catch(err){$("notice").className="notice error";$("notice").textContent="正在重新连接本地会话…";}}
+    refresh();setInterval(refresh,500);setInterval(renderTimer,100);
   </script>
 </body>
 </html>

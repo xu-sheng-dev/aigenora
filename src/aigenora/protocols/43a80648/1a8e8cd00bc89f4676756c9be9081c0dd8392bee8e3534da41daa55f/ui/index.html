@@ -72,6 +72,9 @@
   .rounds .rd .winner.guest { color: #58f; }
   .rounds .rd .winner.draw { color: #888; }
   .empty { text-align: center; color: #888; font-size: 13px; padding: 20px 0; }
+  body[data-control-mode="human"] #strategy,
+  body[data-control-mode="human"] #whisper { display: none; }
+  body[data-control-mode="autonomous"] #direct-command { display: none; }
   footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
   footer code { font-family: "Consolas", "Menlo", monospace; }
 </style>
@@ -79,7 +82,7 @@
 <body>
 <header>
   <div><h1>Rock-Paper-Scissors <span class="tag" id="phase-tag">--</span></h1></div>
-  <div class="meta" id="meta">connecting...</div>
+  <div class="meta"><span class="tag" id="control-mode-tag">connecting</span> <span id="meta">connecting...</span></div>
 </header>
 <main>
   <!-- Score -->
@@ -148,6 +151,7 @@
 const $ = (s) => document.querySelector(s);
 let snap = {}, rounds = [], whispers = [];
 let myRole = null;
+let runtimeInfo = { control_mode: "autonomous" };
 const CHOICES = ["rock", "paper", "scissors"];
 const ICON = { rock: "✊", paper: "✋", scissors: "✌" };
 const LABEL = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
@@ -178,18 +182,29 @@ function renderSnapshot(s) {
   updateDirectCommand();
 }
 
+function renderRuntimeInfo(info) {
+  runtimeInfo = info || runtimeInfo;
+  const mode = runtimeInfo.control_mode || "autonomous";
+  document.body.dataset.controlMode = mode;
+  const labels = { human: "完全人工", hybrid: "人机混合", autonomous: "全自动" };
+  $("#control-mode-tag").textContent = labels[mode] || mode;
+  myRole = runtimeInfo.role || myRole;
+  updateDirectCommand();
+}
+
 function updateDirectCommand() {
   const timing = snap.timing;
   const phase = snap.phase;
   const roleHint = $("#role-hint");
   const cmdHint = $("#cmd-hint");
-  const enable = timing && timing.match_key === "round" && phase !== "game_over";
+  const enable = runtimeInfo.control_mode !== "autonomous" && timing && timing.match_key === "round" && phase !== "game_over";
   CHOICES.forEach(c => { $("#move-" + c).disabled = !enable; });
   if (myRole) { roleHint.textContent = `You are the ${myRole}. Pick your move.`; }
   else { roleHint.textContent = ""; }
   if (phase === "game_over") { cmdHint.textContent = "Game over."; }
-  else if (!timing || timing.match_key !== "round") { cmdHint.textContent = "Waiting for coach mode..."; }
-  else { cmdHint.textContent = `Round ${timing.match_value + 1} — make your move.`; }
+  else if (!timing || timing.match_key !== "round") { cmdHint.textContent = runtimeInfo.control_mode === "hybrid" ? "Agent is moving; submit early to intervene." : "Waiting for your decision window..."; }
+  else if (runtimeInfo.control_mode === "human") { cmdHint.textContent = `Round ${timing.match_value + 1} — your move is required; there is no automatic fallback.`; }
+  else { cmdHint.textContent = `Round ${timing.match_value + 1} — optional intervention window.`; }
 }
 
 function pickMove(choice) {
@@ -297,6 +312,7 @@ es.addEventListener("detail", e => pushEvent(JSON.parse(e.data)));
 es.onerror = () => {};
 
 (async () => {
+  try { renderRuntimeInfo(await fetch("/api/info").then(r=>r.json())); } catch(e) {}
   try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
   try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
   try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}

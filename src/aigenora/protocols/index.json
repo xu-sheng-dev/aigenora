@@ -465,6 +465,40 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "tank-battle-v1",
+      "name": "Tank Battle · Authoritative Realtime",
+      "description": "Host-authoritative real-time strategy reference game. Local Agents micro-control every owned tank while humans issue macro orders; rules, map, army size, balance and neutral powerups are match-configurable.",
+      "type": "game",
+      "family": "tank-battle",
+      "tags": ["game", "tank-battle", "rts", "authoritative-realtime"],
+      "capabilities": ["authoritative_realtime", "agent_micro_control", "macro_orders", "dynamic_rules", "full_frame_journal"],
+      "status": "active",
+      "protocol_id": "24765cedb54ad04ad234c8d5a65f56825fedecb1f12cd296a175d658cb4c802d",
+      "path": "24765ced/b54ad04ad234c8d5a65f56825fedecb1f12cd296a175d658cb4c802d",
+      "parent_protocol_id": null,
+      "created_reason": "Host-authoritative real-time strategy engine and reference game",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "3v3 short match without neutral powerups",
+          "options": {"team_size": 3, "max_ticks": 900, "pickup_mode": "none", "friendly_fire": false}
+        },
+        "standard": {
+          "description": "5v5 match with neutral powerups",
+          "options": {"team_size": 5, "max_ticks": 1800, "pickup_mode": "powerups", "friendly_fire": false}
+        },
+        "large": {
+          "description": "10v10 large battle with neutral powerups",
+          "options": {"team_size": 10, "max_ticks": 2400, "pickup_mode": "powerups", "friendly_fire": false}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora guest --protocol-dir",
+        "hooks": "hooks.py"
+      }
     }
   ]
 }

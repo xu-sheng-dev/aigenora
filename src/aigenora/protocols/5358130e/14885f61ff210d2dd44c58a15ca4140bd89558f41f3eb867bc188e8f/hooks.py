@@ -137,6 +137,7 @@ def heuristic_move(board: list[list[str]], n: int, sym: str):
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
         super().proto_init(options, role, args, state_dir, decision_config)
         self.state = StateStore(state_dir)
@@ -199,6 +200,10 @@ class Hooks(ProtocolHooks):
                                 flipped=flipped, summary=f"T{turn} guest -> ({r},{c}) flipped {flipped}")
             self._push_snapshot("playing", "host", {"row": r, "col": c, "player": "guest"}, False, "none")
             return {"action": "move", "turn": turn, "row": r, "col": c}
+        if self.control_mode == "human":
+            # A forced pass is still a local game operation in strict human mode.
+            # Wait for an explicit acknowledgement instead of silently sending it.
+            self._pick(BLACK, turn)
         self.turn = turn
         self.details.append(type="pass", turn=turn, player="guest", summary=f"T{turn} guest pass")
         self._push_snapshot("playing", "host", {"player": "guest", "passed": True}, False, "none")
@@ -237,6 +242,8 @@ class Hooks(ProtocolHooks):
             self.turn = hturn + 1
             return HookResult(self._round_result(hturn, hr, hc, flipped, False, over, winner), completed=over)
         # host has no move -> pass
+        if self.control_mode == "human":
+            self._pick(WHITE, hturn)
         over = self._is_terminal()
         winner = self._winner() if over else "none"
         self.details.append(type="pass", turn=hturn, player="host", game_over=over, winner=winner,
@@ -289,6 +296,22 @@ class Hooks(ProtocolHooks):
         return heuristic_move(self.board, self.n, sym)
 
     def _pick(self, sym: str, match_turn: int):
+        if self.control_mode == "human":
+            decision = self._await_human_decision("turn", match_turn)
+            moves = legal_moves(self.board, self.n, sym)
+            if not moves:
+                if decision.get("pass") is True or decision.get("action") == "pass":
+                    return None
+                self._reject_human_decision("turn", match_turn, decision, "no legal move; submit pass=true")
+            if decision.get("pass") is True or decision.get("action") == "pass":
+                self._reject_human_decision("turn", match_turn, decision, "pass is illegal while a move exists")
+            try:
+                row, col = int(decision["row"]), int(decision["col"])
+            except (KeyError, TypeError, ValueError):
+                self._reject_human_decision("turn", match_turn, decision, "row and col must be integers")
+            if not is_legal(self.board, self.n, row, col, sym):
+                self._reject_human_decision("turn", match_turn, decision, "move does not bracket opponent stones")
+            return (row, col)
         auto = self._pick_auto(sym)
         if auto is None:
             auto = heuristic_move(self.board, self.n, sym)
@@ -307,23 +330,7 @@ class Hooks(ProtocolHooks):
                 except (TypeError, ValueError):
                     pass
             return auto
-        # --coach（manual）：阻塞逐手等待
-        if not self.timing_enabled:
-            return auto
-        now = time.monotonic()
-        min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
-        max_think = float(self.options.get("max_think_seconds", self.timing["max_think_seconds"]))
-        self._update_timing_snapshot("turn", match_turn, now + min_think, now + max_think, "waiting")
-        decision = self.bus.await_latest_decision(
-            match_key="turn", match_value=match_turn,
-            release_at=now + min_think, deadline_at=now + max_think,
-            fallback_value={"row": auto[0], "col": auto[1]},
-        )
-        self._clear_timing_snapshot()
-        r, c = int(decision.get("row", auto[0])), int(decision.get("col", auto[1]))
-        if is_legal(self.board, self.n, r, c, sym):
-            return (r, c)
-        return auto
+        raise RuntimeError(f"unsupported decision mode: {self.decision_mode}")
 
     # ---- snapshot ----
     def _push_snapshot(self, phase: str, current: str, last_move, over: bool, winner: str) -> None:

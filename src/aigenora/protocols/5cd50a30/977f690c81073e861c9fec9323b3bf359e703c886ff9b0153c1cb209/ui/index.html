@@ -49,6 +49,8 @@
   .whisper-input button { align-self: flex-end; }
   footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
   footer code { font-family: "Consolas", "Menlo", monospace; }
+  body[data-control-mode="human"] #side h2:nth-of-type(n+2),
+  body[data-control-mode="human"] #side h2:nth-of-type(n+2) ~ * { display: none; }
   @media (max-width: 760px) { main { grid-template-columns: 1fr; } .cell { width: 24px; height: 24px; } }
 </style>
 </head>
@@ -84,7 +86,7 @@
 <footer>Connect Four · reads via <code>/api/*</code> and <code>/sse/stream</code></footer>
 <script>
 const $ = (s) => document.querySelector(s);
-let snap = {}, whispers = [], myRole = null;
+let snap = {}, whispers = [], myRole = null, controlMode = "autonomous";
 function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
 function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
 function _esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -96,7 +98,7 @@ function renderSnapshot(s) {
   const board = snap.board || [];
   const last = snap.last_move || null;
   const timing = snap.timing;
-  const clickable = !!timing && timing.match_key === "turn" && snap.phase !== "game_over";
+  const clickable = controlMode !== "autonomous" && !!timing && timing.match_key === "turn" && snap.phase !== "game_over";
   const box = $("#board");
   box.style.gridTemplateColumns = `repeat(${cols}, 30px)`;
   let html = "";
@@ -118,7 +120,7 @@ function renderSnapshot(s) {
   if (phase === "game_over") { tag.textContent = "game over"; tag.className = "tag over"; }
   else if (phase === "waiting_peer") { tag.textContent = "waiting"; tag.className = "tag waiting"; }
   else { tag.textContent = phase; tag.className = "tag"; }
-  $("#meta").textContent = `Connect Four ${cols}×${rows} · turn ${snap.turn||0} · ${snap.current||"-"} to move · ${snap.moves||0} stones`;
+  $("#meta").textContent = `Connect Four ${cols}×${rows} · ${controlMode} · turn ${snap.turn||0} · ${snap.current||"-"} to move · ${snap.moves||0} stones`;
   if (phase === "game_over") {
     const w = snap.winner || (snap.last_event?.structured?.winner) || "none";
     $("#game-summary").textContent = w === "none" ? "Draw (board full)" : `${w} wins!`;
@@ -177,6 +179,7 @@ es.addEventListener("whisper", e => { whispers.push(JSON.parse(e.data)); renderW
 es.addEventListener("whisper_ack", e => { fetch("/api/whispers").then(r=>r.json()).then(w=>renderWhispers(w)).catch(()=>{}); });
 es.onerror = () => {};
 (async () => {
+  try { const info = await fetch("/api/info").then(r=>r.json()); controlMode = info.control_mode || controlMode; myRole = info.role || myRole; document.body.dataset.controlMode = controlMode; } catch(e) {}
   try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
   try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
   try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}

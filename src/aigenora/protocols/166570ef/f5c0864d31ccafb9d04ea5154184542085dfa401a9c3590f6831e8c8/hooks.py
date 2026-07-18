@@ -10,12 +10,15 @@ from aigenora.proto.sdk import StateStore
 
 
 class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
     # v019-M4: 声明决策 schema。match_key=attempt，value_field=number（不是 bid）。
     DECISION_SCHEMA = {
         "match_key": "attempt",
         "value_field": "number",
         "numeric": True,
         "strategy_field": "number",
+        "setup_match_key": "setup",
+        "setup_value_field": "secret",
     }
 
     def proto_init(self, options, role, args, state_dir: Path, decision_config: dict[str, Any] | None = None):
@@ -24,7 +27,33 @@ class Hooks(ProtocolHooks):
         self.range_min = int(options.get("range_min") or 1)
         self.range_max = int(options.get("range_max") or 100)
         self.max_attempts = int(options.get("max_attempts") or 7)
-        self.secret = int(options.get("secret") or random.randint(self.range_min, self.range_max))
+        configured_secret = options.get("secret")
+        if configured_secret is not None:
+            self.secret = int(configured_secret)
+        elif self.control_mode == "human" and role == "host":
+            self.snapshot.update(
+                phase="setup_required",
+                last_event={
+                    "summary": "Choose the secret number",
+                    "structured": {"range_min": self.range_min, "range_max": self.range_max},
+                },
+            )
+            decision = self._await_human_decision("setup", 0)
+            try:
+                self.secret = int(decision["secret"])
+            except (KeyError, TypeError, ValueError):
+                self._reject_human_decision("setup", 0, decision, "secret must be an integer")
+        else:
+            self.secret = random.randint(self.range_min, self.range_max)
+        if self.secret < self.range_min or self.secret > self.range_max:
+            if self.control_mode == "human" and role == "host" and configured_secret is None:
+                self._reject_human_decision(
+                    "setup", 0, {"secret": self.secret},
+                    f"secret must be within [{self.range_min}, {self.range_max}]",
+                )
+            raise ValueError(
+                f"secret must be within [{self.range_min}, {self.range_max}]"
+            )
         self.attempts = 0
         self.lo = self.range_min
         self.hi = self.range_max
@@ -147,6 +176,19 @@ class Hooks(ProtocolHooks):
         return {"action": "guess", "attempt": self.guest_attempt, "number": number}
 
     def _guess(self) -> dict:
+        if self.control_mode == "human":
+            decision = self._await_human_decision("attempt", self.guest_attempt)
+            try:
+                number = int(decision["number"])
+            except (KeyError, TypeError, ValueError):
+                self._reject_human_decision("attempt", self.guest_attempt, decision, "number must be an integer")
+            if number < self.lo or number > self.hi:
+                self._reject_human_decision(
+                    "attempt", self.guest_attempt, decision,
+                    f"number must be within the current range [{self.lo}, {self.hi}]",
+                )
+            self.state.write("last_guess", number)
+            return {"action": "guess", "attempt": self.guest_attempt, "number": number}
         auto = self._guess_auto()
         if self.bus is None:
             return auto
@@ -161,28 +203,7 @@ class Hooks(ProtocolHooks):
                 except (TypeError, ValueError):
                     pass
             return auto
-        # --coach（manual）：阻塞逐手等待
-        if not self.timing_enabled:
-            return auto
-        now = time.monotonic()
-        # options 里的 min/max_think_seconds 优先于 spec.timing 默认值（邀约级覆盖）
-        min_think = float(self.options.get("min_think_seconds", self.timing["min_think_seconds"]))
-        max_think = float(self.options.get("max_think_seconds", self.timing["max_think_seconds"]))
-        fallback = self._guess_auto()
-        self._update_timing_snapshot("attempt", self.guest_attempt,
-            now + min_think,
-            now + max_think, "waiting")
-        decision = self.bus.await_latest_decision(
-            match_key="attempt", match_value=self.guest_attempt,
-            release_at=now + min_think,
-            deadline_at=now + max_think,
-            fallback_value=fallback,
-        )
-        self._clear_timing_snapshot()
-        number = int(decision.get("number", (self.lo + self.hi) // 2))
-        number = max(self.lo, min(self.hi, number))
-        self.state.write("last_guess", number)
-        return {"action": "guess", "attempt": self.guest_attempt, "number": number}
+        raise RuntimeError(f"unsupported decision mode: {self.decision_mode}")
 
     def proto_guest_first_action(self):
         return self._guess()

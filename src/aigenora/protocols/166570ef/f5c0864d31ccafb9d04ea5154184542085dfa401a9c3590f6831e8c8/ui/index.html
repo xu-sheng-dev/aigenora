@@ -74,6 +74,9 @@
   .empty { text-align: center; color: #888; font-size: 13px; padding: 20px 0; }
   footer { padding: 10px 20px; border-top: 1px solid #8884; font-size: 11px; color: #888; }
   footer code { font-family: "Consolas", "Menlo", monospace; }
+  body[data-control-mode="human"] #strategy,
+  body[data-control-mode="human"] #whisper { display: none; }
+  body[data-control-mode="autonomous"] #direct-command { display: none; }
 </style>
 </head>
 <body>
@@ -148,6 +151,7 @@
 const $ = (s) => document.querySelector(s);
 let snap = {}, guesses = [], whispers = [];
 let myRole = null;
+let controlMode = "autonomous";
 
 function uuid4() { return 'xxxxxxxx-xxxx-4xxx'.replace(/[x]/g, () => (Math.random()*16|0).toString(16)); }
 function agentLabel() { try { let id = sessionStorage.getItem("aigenora.agent_id"); if (!id) { id = "browser-" + Math.random().toString(36).slice(2,10); sessionStorage.setItem("aigenora.agent_id", id); } return id; } catch(_) { return "browser-anon"; } }
@@ -170,7 +174,7 @@ function renderSnapshot(s) {
   if (phase === "game_over") { phaseTag.textContent = "game over"; phaseTag.className = "tag over"; }
   else if (phase === "waiting_peer") { phaseTag.textContent = "waiting"; phaseTag.className = "tag waiting"; }
   else { phaseTag.textContent = phase; phaseTag.className = "tag"; }
-  $("#meta").textContent = `Guess Number · [${lo},${hi}] · ${phase}`;
+  $("#meta").textContent = `Guess Number · ${controlMode} · [${lo},${hi}] · ${phase}`;
   if (phase === "game_over") {
     const st = snap.last_event?.structured || {};
     const w = st.winner || "none";
@@ -191,15 +195,20 @@ function updateDirectCommand() {
   const cmdHint = $("#cmd-hint");
 
   if (role === "host") {
-    roleHint.textContent = "Host does not make guesses in this protocol.";
-    input.disabled = true;
-    btn.disabled = true;
-    cmdHint.textContent = "";
+    const choosingSecret = controlMode === "human" && timing && timing.match_key === "setup";
+    roleHint.textContent = choosingSecret ? "You are the host. Choose the secret number." : "Host waits for the guest's guesses.";
+    input.disabled = !choosingSecret;
+    btn.disabled = !choosingSecret;
+    input.min = snap.range_min ?? 1;
+    input.max = snap.range_max ?? 100;
+    btn.textContent = choosingSecret ? "Set secret" : "Submit";
+    cmdHint.textContent = choosingSecret ? `Required: choose within [${input.min}, ${input.max}].` : "";
     return;
   }
+  btn.textContent = "Submit";
   roleHint.textContent = "You are the guest. Enter your guess.";
   if (phase === "game_over") { input.disabled = true; btn.disabled = true; cmdHint.textContent = "Game over."; return; }
-  if (!timing || timing.match_key !== "attempt") { input.disabled = true; btn.disabled = true; cmdHint.textContent = "Waiting for coach mode..."; return; }
+  if (controlMode === "autonomous" || !timing || timing.match_key !== "attempt") { input.disabled = true; btn.disabled = true; cmdHint.textContent = controlMode === "hybrid" ? "Agent is guessing; submit early to intervene." : "Waiting for your decision window..."; return; }
   input.disabled = false;
   btn.disabled = false;
   input.min = snap.lo ?? 1;
@@ -220,12 +229,17 @@ async function submitGuess() {
   const num = parseInt(input.value);
   if (isNaN(num)) return;
   const timing = snap.timing;
-  if (!timing || timing.match_key !== "attempt") return;
+  if (!timing || !["attempt", "setup"].includes(timing.match_key)) return;
   const lo = snap.lo ?? 1, hi = snap.hi ?? 100;
-  if (num < lo || num > hi) { $("#cmd-hint").textContent = `Must be in [${lo}, ${hi}]`; return; }
+  const min = timing.match_key === "setup" ? (snap.range_min ?? 1) : lo;
+  const max = timing.match_key === "setup" ? (snap.range_max ?? 100) : hi;
+  if (num < min || num > max) { $("#cmd-hint").textContent = `Must be in [${min}, ${max}]`; return; }
   input.disabled = true;
   try {
-    const r = await fetch("/api/decide", { method: "POST", body: JSON.stringify({ attempt: timing.match_value, number: num, agent_id: agentLabel(), idempotency_key: uuid4() }) });
+    const decision = timing.match_key === "setup"
+      ? { setup: timing.match_value, secret: num }
+      : { attempt: timing.match_value, number: num };
+    const r = await fetch("/api/decide", { method: "POST", body: JSON.stringify({ ...decision, agent_id: agentLabel(), idempotency_key: uuid4() }) });
     if (r.ok) { $("#cmd-hint").textContent = `Submitted: ${num}`; input.value = ""; }
     else { const d = await r.json().catch(()=>({})); $("#cmd-hint").textContent = `Rejected: ${d.reason||r.status}`; input.disabled = false; }
   } catch(e) { $("#cmd-hint").textContent = "Error: " + e.message; input.disabled = false; }
@@ -307,6 +321,7 @@ es.addEventListener("detail", e => pushEvent(JSON.parse(e.data)));
 es.onerror = () => {};
 
 (async () => {
+  try { const info = await fetch("/api/info").then(r=>r.json()); controlMode = info.control_mode || controlMode; myRole = info.role || myRole; document.body.dataset.controlMode = controlMode; } catch(e) {}
   try { renderSnapshot(await fetch("/api/snapshot").then(r=>r.json())); } catch(e) {}
   try { renderStrategy(await fetch("/api/strategy").then(r=>r.json())); } catch(e) {}
   try { renderWhispers(await fetch("/api/whispers").then(r=>r.json()).catch(()=>[])); } catch(e) {}

@@ -1,8 +1,8 @@
 {
   "catalog_version": "1",
-  "catalog_digest": "sha256:54357f04b370bef0e9b576e28b51eb786cf66f47ae02543f60d86ce40a56f543",
+  "catalog_digest": "sha256:c869179b2f7625144eedf713d39d3b1733692d1c6a41ca22ac585d40789302ab",
   "execution_trust": "builtin_pinned",
-  "index_sha256": "d6d847955139df893a984755a156e9ca2a3c727625e6f1c71fa263270f863256",
+  "index_sha256": "cd09729825927f68428393e04ff16109da286416560c1587a7eb8060f30a3857",
   "wheel_version": "0.1.0",
   "protocols": [
     {
@@ -14,8 +14,8 @@
       "default_profile": "standard",
       "profiles": ["easy", "standard", "hard"],
       "spec_sha256": "45e858caf9fce631b89b9abaee9d1780cb7b28d26f4a08a60b210e6a0164fe98",
-      "hooks_sha256": "ba96631720ba8f05969a7a50d42e95eb6309e0437cbf88b01625a57bdd7397b9",
-      "bundle_digest": "sha256:a24a6292dba731b8baabb4acb20391138b75932f427256a00b9aca5b38153eb1",
+      "hooks_sha256": "1903cec8d888e61c0935bfc102ff227857683681256df5fe310c51882b58b731",
+      "bundle_digest": "sha256:b13fb4468794eb907e3fed5f1add618988382dfc797e7e22563e2e28ead59959",
       "execution_trust": "builtin_pinned"
     },
     {
@@ -27,8 +27,8 @@
       "default_profile": "standard",
       "profiles": ["quick", "standard", "long", "marathon", "paced"],
       "spec_sha256": "c8bc9497b232b8ef3c489ae3e2c82bca0f205097be69acefc56bd92109c52568",
-      "hooks_sha256": "55f54527dac4d7843d8fd20c7ffcfa6e9e68d590489d4736a9709fe56c716d7d",
-      "bundle_digest": "sha256:cb46b4c05d23e4858a03afab83c42d0316fc9a08fee3893e716f50a971dd14ae",
+      "hooks_sha256": "d33db234a7fd027ecbe977f9a7e147f0037b188f984c44b11bba00c04ce47621",
+      "bundle_digest": "sha256:ba1039a688e282661f265a3520dfd4a19b565245aa8b8e707434665347e54ed2",
       "execution_trust": "builtin_pinned"
     }
   ]
