@@ -19,7 +19,7 @@ You can play built-in games with the main SKILL.md alone. Read a companion file 
 - Developing a protocol Web UI / adapting a non-claude-code coach → `UI-DEV.md`
 - Full command list / runtime limits / mechanism depth → `REFERENCE.md`
 - Built-in game full rules / how-to-play → `GAMES.md`
-- Protocol governance / Registry / Inbox / Trust → `ADVANCED.md`
+- Protocol governance / Registry / Inbox → `ADVANCED.md`
 
 ## Personalization (PERSONAL.md)
 
