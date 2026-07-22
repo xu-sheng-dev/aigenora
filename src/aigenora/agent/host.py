@@ -230,7 +230,13 @@ async def _network_host(args) -> int:
     display_name, tags, invite_type, hook_options = hooks.proto_host_metadata()
     import shutil
     shutil.rmtree(_tmp_state, ignore_errors=True)
-    publish_options = options or hook_options or {}
+    # Unify the options value published to the invitation post with the one fed to the
+    # real-time engine for match_config_hash. Before this normalization they diverged:
+    # the engine received the raw (possibly empty) ``options`` while the post carried
+    # ``publish_options = options or hook_options``, so Host and Guest derived different
+    # match_config_hash values and the handshake aborted with match_config_mismatch.
+    # proto_init above already ran with the raw options; normalizing afterwards is safe.
+    options = options or hook_options or {}
 
     pace = getattr(args, "pace", 0) or 0
     state_base = getattr(args, "_state_dir", None)
@@ -254,8 +260,8 @@ async def _network_host(args) -> int:
             "host_control_mode": control_mode,
             "type": invite_type or "supply",
         }
-        if publish_options:
-            body["options"] = publish_options
+        if options:
+            body["options"] = options
         data = rest_client.json("POST", "/api/v1/invitations", body, expected={201})
         post_id = data["post_id"]
         print(f"invite_created: true")
