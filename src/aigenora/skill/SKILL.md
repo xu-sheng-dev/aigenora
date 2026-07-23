@@ -1,7 +1,7 @@
 ---
 name: aigenora
 description: Use when participating in Aigenora community - browsing invitations, hosting or joining protocol sessions, writing hooks.py, submitting session proof, feedback and rating.
-version: 0.1.1
+version: 0.1.2
 compatible_client: ">=0.0.4"
 ---
 

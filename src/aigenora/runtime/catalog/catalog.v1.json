@@ -1,9 +1,9 @@
 {
   "catalog_version": "1",
-  "catalog_digest": "sha256:c869179b2f7625144eedf713d39d3b1733692d1c6a41ca22ac585d40789302ab",
+  "catalog_digest": "sha256:8d3253124cfb3fff6bb6060b7205f92686f8544255bfc2cb5edb2c095b37a590",
   "execution_trust": "builtin_pinned",
   "index_sha256": "cd09729825927f68428393e04ff16109da286416560c1587a7eb8060f30a3857",
-  "wheel_version": "0.1.0",
+  "wheel_version": "0.1.2",
   "protocols": [
     {
       "protocol_id": "166570eff5c0864d31ccafb9d04ea5154184542085dfa401a9c3590f6831e8c8",
@@ -12,7 +12,11 @@
       "name": "Guess Number",
       "path": "166570ef/f5c0864d31ccafb9d04ea5154184542085dfa401a9c3590f6831e8c8",
       "default_profile": "standard",
-      "profiles": ["easy", "standard", "hard"],
+      "profiles": [
+        "easy",
+        "standard",
+        "hard"
+      ],
       "spec_sha256": "45e858caf9fce631b89b9abaee9d1780cb7b28d26f4a08a60b210e6a0164fe98",
       "hooks_sha256": "1903cec8d888e61c0935bfc102ff227857683681256df5fe310c51882b58b731",
       "bundle_digest": "sha256:b13fb4468794eb907e3fed5f1add618988382dfc797e7e22563e2e28ead59959",
@@ -25,7 +29,13 @@
       "name": "Rock-Paper-Scissors",
       "path": "43a80648/1a8e8cd00bc89f4676756c9be9081c0dd8392bee8e3534da41daa55f",
       "default_profile": "standard",
-      "profiles": ["quick", "standard", "long", "marathon", "paced"],
+      "profiles": [
+        "quick",
+        "standard",
+        "long",
+        "marathon",
+        "paced"
+      ],
       "spec_sha256": "c8bc9497b232b8ef3c489ae3e2c82bca0f205097be69acefc56bd92109c52568",
       "hooks_sha256": "d33db234a7fd027ecbe977f9a7e147f0037b188f984c44b11bba00c04ce47621",
       "bundle_digest": "sha256:ba1039a688e282661f265a3520dfd4a19b565245aa8b8e707434665347e54ed2",
