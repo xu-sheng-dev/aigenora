@@ -365,7 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     ibr.add_argument("id", type=int)
     ibr.add_argument("--json", action="store_true", dest="json_output")
     _common(ibr)
-    # v012 批次4：export 备份 / clear 清空 / delete 删单条
+    # v012 batch 4: export backups, clear all messages, or delete one message.
     ibe = ib_sub.add_parser("export")
     ibe.add_argument("--out", help="output file path (default <data_dir>/inbox-export.json)")
     ibe.add_argument("--json", action="store_true", dest="json_output")
@@ -494,6 +494,134 @@ def build_parser() -> argparse.ArgumentParser:
     con.add_argument("--no-open", action="store_true", help="Do not auto-open browser")
     _common(con)
 
+    decision = sub.add_parser(
+        "decision",
+        help="Experimental VSDP native ceremony tools (L0/L1 research only)",
+    )
+    decision_sub = decision.add_subparsers(dest="decision_cmd", required=True)
+
+    dm = decision_sub.add_parser("manifest")
+    dm_sub = dm.add_subparsers(dest="decision_subcmd", required=True)
+    dms = dm_sub.add_parser("setup")
+    dms.add_argument("--question", required=True)
+    dms.add_argument(
+        "--choice",
+        action="append",
+        required=True,
+        help="repeat OPTION_ID=SUMMARY between 2 and 16 times",
+    )
+    dms.add_argument("--guardian-public-key", action="append", required=True)
+    dms.add_argument("--witness-public-key", action="append", required=True)
+    dms.add_argument("--roster-snapshot-commitment", required=True)
+    dms.add_argument("--minimum-anonymity-set", type=int, default=20)
+    dms.add_argument("--enrollment-duration-seconds", type=int, default=604800)
+    dms.add_argument("--voting-duration-seconds", type=int, default=172800)
+    dms.add_argument("--dispute-duration-seconds", type=int, default=86400)
+    dms.add_argument(
+        "--challenge-source",
+        choices=["physical_coin_after_receipt", "second_device_after_receipt"],
+        default="physical_coin_after_receipt",
+    )
+    dms.add_argument("--output", required=True)
+
+    dmf = dm_sub.add_parser("final")
+    dmf.add_argument("--setup", required=True)
+    dmf.add_argument("--eligibility-root", required=True)
+    dmf.add_argument("--enrollment-count", type=int, required=True)
+    dmf.add_argument("--tally-public-key", required=True)
+    dmf.add_argument("--dkg-transcript-root", required=True)
+    dmf.add_argument("--board-epoch", required=True)
+    dmf.add_argument("--board-genesis-hash", required=True)
+    dmf.add_argument("--setup-artifact-root", required=True)
+    dmf.add_argument("--vote-opens-at", required=True)
+    dmf.add_argument("--vote-closes-at", required=True)
+    dmf.add_argument("--dispute-closes-at", required=True)
+    dmf.add_argument("--output", required=True)
+
+    dw = decision_sub.add_parser("witness")
+    dw_sub = dw.add_subparsers(dest="decision_subcmd", required=True)
+    dwk = dw_sub.add_parser("keygen")
+    dwk.add_argument("--output", required=True)
+    dwk.add_argument("--force", action="store_true")
+    dws = dw_sub.add_parser("serve")
+    dws.add_argument("--state-dir", required=True)
+    dws.add_argument("--final-manifest", required=True)
+    dws.add_argument("--key-file")
+    dws.add_argument("--init-key", action="store_true")
+    dws.add_argument("--force-key", action="store_true")
+    dws.add_argument("--control-token-file")
+    dws.add_argument("--host", default="127.0.0.1")
+    dws.add_argument("--port", type=int, default=0)
+    dws.add_argument("--proof-verifier-command")
+
+    db = decision_sub.add_parser("board")
+    db_sub = db.add_subparsers(dest="decision_subcmd", required=True)
+    dbp = db_sub.add_parser("post")
+    dbp.add_argument("--final-manifest", required=True)
+    dbp.add_argument("--record", required=True)
+    dbp.add_argument("--witness-url", action="append", required=True)
+    dbp.add_argument("--output", required=True)
+    dbp.add_argument("--timeout", type=float, default=30.0)
+    dbs = db_sub.add_parser("seal")
+    dbs.add_argument("--final-manifest", required=True)
+    dbs.add_argument("--witness-url", action="append", required=True)
+    dbs.add_argument(
+        "--witness-control-token-file",
+        action="append",
+        required=True,
+        metavar="WITNESS_URL=PATH",
+    )
+    dbs.add_argument("--cutoff-statement-hash", required=True)
+    dbs.add_argument("--previous-checkpoint-hash", required=True)
+    dbs.add_argument("--height", type=int, default=1)
+    dbs.add_argument("--output", required=True)
+    dbs.add_argument("--timeout", type=float, default=30.0)
+
+    bundle = decision_sub.add_parser("bundle")
+    bundle_sub = bundle.add_subparsers(dest="decision_subcmd", required=True)
+    bundle_build = bundle_sub.add_parser("build")
+    bundle_build.add_argument("--final-manifest", required=True)
+    bundle_build.add_argument("--record", action="append", required=True)
+    bundle_build.add_argument("--receipt", action="append", required=True)
+    bundle_build.add_argument("--checkpoint", required=True)
+    bundle_build.add_argument("--minimum-anonymity-set", type=int, required=True)
+    bundle_build.add_argument("--output", required=True)
+    bundle_decision = bundle_sub.add_parser("decision")
+    bundle_decision.add_argument("--setup-manifest", required=True)
+    bundle_decision.add_argument("--board-bundle", required=True)
+    bundle_decision.add_argument("--authorization", required=True)
+    bundle_decision.add_argument("--tally-result", required=True)
+    bundle_decision.add_argument("--output", required=True)
+
+    mirror = decision_sub.add_parser(
+        "mirror",
+        help="Experimental aggregate-only community mirror",
+    )
+    mirror_sub = mirror.add_subparsers(dest="decision_subcmd", required=True)
+    mirror_register = mirror_sub.add_parser("register")
+    mirror_register.add_argument("--setup-manifest", required=True)
+    mirror_register.add_argument("--final-manifest", required=True)
+    mirror_register.add_argument("--server")
+    mirror_register.add_argument("--data-dir")
+    mirror_register.add_argument("--timeout", type=float, default=30.0)
+    mirror_publish = mirror_sub.add_parser("publish")
+    mirror_publish.add_argument("--bundle", required=True)
+    mirror_publish.add_argument("--server")
+    mirror_publish.add_argument("--data-dir")
+    mirror_publish.add_argument("--timeout", type=float, default=30.0)
+    mirror_get = mirror_sub.add_parser("get")
+    mirror_get.add_argument("--decision-id", required=True)
+    mirror_get.add_argument("--artifact-id")
+    mirror_get.add_argument("--server")
+    mirror_get.add_argument("--timeout", type=float, default=30.0)
+
+    dv = decision_sub.add_parser("verify")
+    dv.set_defaults(decision_subcmd=None)
+    dv.add_argument("--bundle", required=True)
+    dv.add_argument("--proof-verifier-command", required=True)
+    dv.add_argument("--tally-verifier-command")
+    dv.add_argument("--timeout", type=float, default=30.0)
+
     # skill management
     from aigenora.agent.skill import build_subparser as _build_skill
     _build_skill(sub)
@@ -618,6 +746,8 @@ def main(argv: list[str] | None = None) -> int:
         from aigenora.agent.session import agent_stats as run
     elif args.cmd == "console":
         from aigenora.agent.console import run
+    elif args.cmd == "decision":
+        from aigenora.agent.decision import run
     elif args.cmd == "skill":
         from aigenora.agent.skill import run as run
     else:
