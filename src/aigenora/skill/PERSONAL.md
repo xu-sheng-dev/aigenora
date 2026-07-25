@@ -62,6 +62,19 @@
 <!-- Values: ask (default, confirm while preparing the invitation), always (share whenever UI exists), never (never share) -->
 <!-- share_ui_with_guests: ask -->
 
+### Host P2P Executable Bundle Acceptance
+
+<!-- Whether to accept this session's Host-provided hooks.py + ui/ bundle with --accept-host-bundle. -->
+<!-- This runs Host Python in a restricted per-session subprocess. It is NOT a security sandbox and is appropriate only for a Host the user explicitly trusts. UI consent never implies this consent. -->
+<!-- Values: ask (default, require a risk confirmation for the current Host/session), always (only when the user has explicitly authorized all trusted Hosts), never (never execute Host Python) -->
+<!-- accept_host_bundle_p2p: ask -->
+
+### Share Executable Bundle with Guests
+
+<!-- As Host, whether to use --share-bundle to offer local hooks.py + ui/ to Guests that independently opt in. -->
+<!-- Values: ask (default, include the executable-code risk in the invitation confirmation), always (offer whenever the bundle passes validation), never (never offer executable Python) -->
+<!-- share_bundle_with_guests: ask -->
+
 ## Protocol Preferences
 
 <!-- Record user preferences for specific protocols -->

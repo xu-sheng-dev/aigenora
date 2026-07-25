@@ -23,7 +23,16 @@ from aigenora.proto.validate import validate_extra_args
 from aigenora.agent.skeleton import assert_hooks_implemented
 from aigenora.agent.protocol_ui_p2p import (
     build_host_ui_artifact,
-    serve_host_ui_and_wait_ready,
+)
+from aigenora.agent.protocol_bundle import (
+    build_host_bundle_artifact,
+    build_session_binding,
+    is_received_bundle,
+    sign_bundle_offer,
+)
+from aigenora.agent.protocol_bundle_p2p import (
+    has_exact_bundle_capability,
+    serve_host_artifacts_and_wait_ready,
 )
 
 
@@ -44,6 +53,12 @@ def _run_daemon(args) -> int:
     from aigenora.agent._web_mode import resolve_web_mode
     web_mode = resolve_web_mode(args, control_mode=control_mode)
     controller_required = control_mode == HUMAN and web_mode != "off"
+    if getattr(args, "share_bundle", False):
+        print(
+            "[host] WARNING: --share-bundle offers executable hooks.py to a "
+            "trusted peer. Their restricted subprocess is not a security sandbox.",
+            file=sys.stderr,
+        )
 
     cmd = [sys.executable, "-m", "aigenora", "host",
            "--protocol-dir", protocol_dir,
@@ -73,6 +88,8 @@ def _run_daemon(args) -> int:
         cmd.append("--allow-skeleton-hooks")
     if getattr(args, "share_ui", False):
         cmd.append("--share-ui")
+    if getattr(args, "share_bundle", False):
+        cmd.append("--share-bundle")
     if args.extra_args:
         cmd.extend(["--"] + args.extra_args)
 
@@ -84,7 +101,11 @@ def _run_daemon(args) -> int:
         "local_control_mode": control_mode,
         "web_mode": web_mode,
         "controller_required": controller_required,
-        "share_ui": bool(getattr(args, "share_ui", False)),
+        "share_ui": bool(
+            getattr(args, "share_ui", False)
+            or getattr(args, "share_bundle", False)
+        ),
+        "share_bundle": bool(getattr(args, "share_bundle", False)),
         "started_at": time.time(),
     }
     (state_dir / "session.json").write_text(json.dumps(session_meta, ensure_ascii=False), encoding="utf-8")
@@ -149,10 +170,15 @@ def _run_daemon(args) -> int:
     post_id = str(startup_data.get("post_id") or "")
     protocol_id = str(startup_data.get("protocol_id") or "")
     shared_ui_manifest_hash = str(startup_data.get("ui_manifest_hash") or "")
+    shared_bundle_manifest_hash = str(
+        startup_data.get("bundle_manifest_hash") or ""
+    )
     session_meta["post_id"] = post_id
     session_meta["protocol_id"] = protocol_id
     if shared_ui_manifest_hash:
         session_meta["shared_ui_manifest_hash"] = shared_ui_manifest_hash
+    if shared_bundle_manifest_hash:
+        session_meta["shared_bundle_manifest_hash"] = shared_bundle_manifest_hash
     write_session_meta(state_dir, session_meta)
 
     # Based on web_mode, decide whether to start the relay subprocess and whether to open a browser
@@ -187,8 +213,16 @@ def _run_daemon(args) -> int:
         "protocol_id": protocol_id,
         "control_mode": control_mode,
         "web_mode": web_mode,
-        "share_ui": bool(getattr(args, "share_ui", False)),
+        "share_ui": bool(
+            getattr(args, "share_ui", False)
+            or getattr(args, "share_bundle", False)
+        ),
+        "share_bundle": bool(getattr(args, "share_bundle", False)),
     }
+    if shared_ui_manifest_hash:
+        result["ui_manifest_hash"] = shared_ui_manifest_hash
+    if shared_bundle_manifest_hash:
+        result["bundle_manifest_hash"] = shared_bundle_manifest_hash
     if bc:
         result["broadcast_url"] = bc["url"]
     print(json.dumps(result, ensure_ascii=False))
@@ -206,6 +240,11 @@ def run(args) -> int:
 async def _network_host(args) -> int:
     control_mode = control_mode_from_args(args)
     protocol_dir = Path(args.protocol_dir)
+    if is_received_bundle(protocol_dir):
+        raise RuntimeError(
+            "a received Host bundle is scoped to its original Session and cannot "
+            "be hosted or re-shared"
+        )
     spec = json.loads((protocol_dir / "spec.json").read_text(encoding="utf-8"))
     check_spec_version(spec, reject_unknown=True)
     assert_hooks_implemented(
@@ -218,11 +257,25 @@ async def _network_host(args) -> int:
     proto_id = protocol_hash(protocol_dir / "spec.json")
     hooks = load_hooks(protocol_dir)
     ensure_control_mode_supported(hooks, control_mode)
+    share_bundle = bool(getattr(args, "share_bundle", False))
+    share_ui = bool(getattr(args, "share_ui", False) or share_bundle)
+    shared_bundle_artifact = None
+    if share_bundle:
+        print(
+            "[host] WARNING: --share-bundle offers executable hooks.py to a "
+            "trusted peer. Their restricted subprocess is not a security sandbox.",
+            file=sys.stderr,
+        )
+        shared_bundle_artifact = build_host_bundle_artifact(
+            protocol_dir,
+            protocol_id=proto_id,
+        )
     shared_ui_artifact = None
-    if getattr(args, "share_ui", False):
+    if share_ui:
         shared_ui_artifact = build_host_ui_artifact(protocol_dir)
         if shared_ui_artifact is None:
-            raise RuntimeError("--share-ui requires protocol_dir/ui/index.html")
+            flag = "--share-bundle" if share_bundle else "--share-ui"
+            raise RuntimeError(f"{flag} requires protocol_dir/ui/index.html")
     # Pre-initialize hooks only to obtain metadata; use a temporary dir to avoid snapshot polluting CWD
     import tempfile
     _tmp_state = Path(tempfile.mkdtemp(prefix="aigenora-meta-"))
@@ -269,6 +322,10 @@ async def _network_host(args) -> int:
         invite_event = {"post_id": post_id, "protocol_id": proto_id}
         if shared_ui_artifact is not None:
             invite_event["ui_manifest_hash"] = shared_ui_artifact.offer["manifest_hash"]
+        if shared_bundle_artifact is not None:
+            invite_event["bundle_manifest_hash"] = (
+                shared_bundle_artifact.manifest_hash
+            )
         _emit(event_bus, "invite_created", invite_event)
 
         # P2: start the invitation auto-renewal loop (unless --no-invitation-renew is set)
@@ -283,9 +340,13 @@ async def _network_host(args) -> int:
         print("waiting_for_peer: true")
         channel = await accepted.get()
         first = await channel.recv()
+        if not isinstance(first, dict):
+            raise RuntimeError("Guest session initialization must be a JSON object")
         session_id_val = ""
         guest_public_key = ""
         guest_control_mode = "hybrid"
+        bundle_shared: dict | None = None
+        ready_ui: dict | None = None
         if first.get("_session_init") is True:
             guest_public_key = first.get("guest_public_key", "")
             candidate_guest_mode = first.get("guest_control_mode")
@@ -294,12 +355,71 @@ async def _network_host(args) -> int:
             session_nonce = first.get("session_nonce", "")
             host_signature = sign_session(kp, post_id, kp.public_key, guest_public_key, proto_id, session_nonce)
             guest_ui_capabilities = first.get("ui_capabilities")
+            guest_bundle_capabilities = first.get("bundle_capabilities")
+            guest_bundle_capable = has_exact_bundle_capability(
+                guest_bundle_capabilities
+            )
+            update_session_meta(
+                state_base,
+                peer_bundle_capability=guest_bundle_capable,
+            )
+            _emit(
+                event_bus,
+                "bundle_capability_received",
+                {
+                    "enabled": guest_bundle_capable,
+                    "guest_public_key": guest_public_key,
+                },
+            )
             offered_ui = (
                 shared_ui_artifact
                 if isinstance(guest_ui_capabilities, dict)
                 and guest_ui_capabilities.get("p2p_ui_v1") is True
                 else None
             )
+            offered_bundle = (
+                shared_bundle_artifact
+                if guest_bundle_capable
+                else None
+            )
+            bundle_offer = None
+            if offered_bundle is not None:
+                bundle_binding = build_session_binding(
+                    post_id=post_id,
+                    host_public_key=kp.public_key,
+                    guest_public_key=guest_public_key,
+                    protocol_id=proto_id,
+                    session_nonce=session_nonce,
+                )
+                bundle_offer = sign_bundle_offer(
+                    offered_bundle,
+                    binding=bundle_binding,
+                    private_key=kp.private_key,
+                )
+                offer_summary = {
+                    "source_peer": kp.public_key,
+                    "protocol_id": proto_id,
+                    "manifest_hash": bundle_offer["manifest_hash"],
+                    "session_binding_hash": bundle_offer[
+                        "session_binding_hash"
+                    ],
+                    "file_count": bundle_offer["file_count"],
+                    "total_size_bytes": bundle_offer["total_size_bytes"],
+                }
+                update_session_meta(state_base, bundle_offer=offer_summary)
+                _emit(event_bus, "bundle_offer_sent", offer_summary)
+            elif shared_bundle_artifact is not None:
+                _emit(
+                    event_bus,
+                    "bundle_artifact_not_offered",
+                    {"reason": "guest_capability_not_enabled"},
+                )
+            elif guest_bundle_capable:
+                _emit(
+                    event_bus,
+                    "bundle_artifact_not_offered",
+                    {"reason": "host_share_not_enabled"},
+                )
             proof_payload = {
                 "_session_proof": True,
                 "host_public_key": kp.public_key,
@@ -309,26 +429,89 @@ async def _network_host(args) -> int:
             }
             if offered_ui is not None:
                 proof_payload["ui_offer"] = offered_ui.offer
+            if bundle_offer is not None:
+                proof_payload["bundle_offer"] = bundle_offer
             await channel.send(proof_payload)
-            ready = await serve_host_ui_and_wait_ready(channel, artifact=offered_ui)
-            if ready.get("_session_ready") is True and ready.get("session_id"):
-                session_id_val = ready["session_id"]
-                print(f"session_id: {session_id_val}")
-                ready_ui = ready.get("ui_artifact")
-                if isinstance(ready_ui, dict):
-                    update_session_meta(state_base, ui_artifact=ready_ui)
-                    if ready_ui.get("source_kind") == "host_p2p":
-                        _emit(event_bus, "ui_artifact_shared", ready_ui)
+            try:
+                ready, artifact_kind = await serve_host_artifacts_and_wait_ready(
+                    channel,
+                    bundle_artifact=offered_bundle,
+                    bundle_offer=bundle_offer,
+                    ui_artifact=offered_ui,
+                )
+            except Exception as exc:
+                if bundle_offer is not None:
+                    _emit(
+                        event_bus,
+                        "bundle_artifact_rejected",
+                        {
+                            "manifest_hash": bundle_offer["manifest_hash"],
+                            "reason": str(exc)[:200],
+                        },
+                    )
+                raise
+            if ready.get("_session_ready") is not True or not ready.get("session_id"):
+                raise RuntimeError("Guest did not send a valid _session_ready frame")
+            session_id_val = str(ready["session_id"])
+            print(f"session_id: {session_id_val}")
+            ready_ui_value = ready.get("ui_artifact")
+            if isinstance(ready_ui_value, dict):
+                ready_ui = ready_ui_value
+                update_session_meta(state_base, ui_artifact=ready_ui)
+                if ready_ui.get("source_kind") == "host_p2p":
+                    _emit(event_bus, "ui_artifact_shared", ready_ui)
+            if artifact_kind == "bundle":
+                ready_bundle = ready.get("bundle_artifact")
+                if (
+                    not isinstance(ready_bundle, dict)
+                    or ready_bundle.get("source_kind") != "host_p2p_bundle"
+                    or ready_bundle.get("protocol_id") != proto_id
+                    or ready_bundle.get("manifest_hash")
+                    != bundle_offer["manifest_hash"]
+                    or ready_bundle.get("session_binding_hash")
+                    != bundle_offer["session_binding_hash"]
+                ):
+                    raise RuntimeError(
+                        "Guest bundle provenance differs from the signed offer"
+                    )
+                bundle_shared = {
+                    "status": "installed_by_guest",
+                    "source_kind": "host_p2p_bundle",
+                    "source_peer": kp.public_key,
+                    "protocol_id": proto_id,
+                    "manifest_hash": bundle_offer["manifest_hash"],
+                    "session_binding_hash": bundle_offer[
+                        "session_binding_hash"
+                    ],
+                    "file_count": bundle_offer["file_count"],
+                    "total_size_bytes": bundle_offer["total_size_bytes"],
+                }
+                update_session_meta(state_base, bundle_artifact=bundle_shared)
+                _emit(event_bus, "bundle_artifact_shared", bundle_shared)
+            elif bundle_offer is not None:
+                _emit(
+                    event_bus,
+                    "bundle_artifact_not_requested",
+                    {
+                        "manifest_hash": bundle_offer["manifest_hash"],
+                        "reason": "guest_used_non_bundle_path",
+                    },
+                )
         else:
             channel = AsyncReplayChannel(channel, first)
         print(f"peer_joined: {guest_public_key[:16]}...")
         update_session_meta(state_base, peer_control_mode=guest_control_mode)
-        _emit(event_bus, "peer_joined", {
+        peer_event = {
             "guest_public_key": guest_public_key,
             "session_id": session_id_val,
             "local_control_mode": control_mode,
             "peer_control_mode": guest_control_mode,
-        })
+        }
+        if bundle_shared is not None:
+            peer_event["bundle_artifact"] = bundle_shared
+        if ready_ui is not None:
+            peer_event["ui_artifact"] = ready_ui
+        _emit(event_bus, "peer_joined", peer_event)
         # Paired; stop the renewal loop
         if renew_task is not None and not renew_task.done():
             renew_task.cancel()

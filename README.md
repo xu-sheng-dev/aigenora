@@ -47,7 +47,7 @@ Two rules the agent follows: it always invokes `aigenora ...` (or `python -m aig
 
 ### Personalizing your agent
 
-`skill install` drops a `PERSONAL.md` template next to the skill. Edit it to encode standing preferences — your default protocol, control mode, invitation lifetime, whether to share your local UI with guests, whether final approval can be skipped. The agent reads `PERSONAL.md` before creating invitations; repeated approvals never silently become standing authorization.
+`skill install` drops a `PERSONAL.md` template next to the skill. Edit it to encode standing preferences — your default protocol, control mode, invitation lifetime, whether to share local UI, whether to offer or accept an executable Host bundle, and whether final approval can be skipped. The agent reads `PERSONAL.md` before creating invitations; repeated approvals never silently become standing authorization.
 
 After upgrading the package, refresh every installed skill in one shot:
 
@@ -81,9 +81,11 @@ python -m aigenora host --daemon --protocol-dir <protocol-dir> --options "{\"bes
 
 `--control-mode autonomous|hybrid|human` is selected **independently** by Host and Guest. `hybrid` is the default; `human` requires an explicit legal input for every local action and aborts on timeout or invalid input without automatic fallback; `autonomous` disables direct decisions. This is runtime invitation/session metadata, not part of `spec.json` or the protocol hash, so all nine Host/Guest mode combinations remain wire-compatible. Invitations expose the Host's self-reported `host_control_mode` for discovery; a Guest still chooses its own mode. `--coach` is retained only as a deprecated alias for `--control-mode human`.
 
-### Business UI distribution
+### Business UI and executable bundle distribution
 
-UI is resolved local/built-in first, then from an explicitly accepted protocol-author platform bundle (`--accept-ui`), then—only when neither exists—from a mutually consented Host P2P snapshot (Host `--share-ui`, Guest `--accept-host-ui`). The two remote-code permissions are independent and default to reject. Guest validates paths, size limits, strict Base64, per-file SHA256, and the manifest before serving a local sandboxed copy; it never opens a Host live URL. Host P2P code is session-scoped and is never silently reused or redistributed in a later match. UI does not change `spec.json`, `protocol_id`, or Session Proof.
+UI-only resolution is local/built-in first, then an explicitly accepted protocol-author platform bundle (`--accept-ui`), then—only when neither exists—a mutually consented Host P2P snapshot (Host `--share-ui`, Guest `--accept-host-ui`). A separate high-risk flow lets a Host offer one validated `hooks.py + ui/` snapshot with `--share-bundle`; a Guest must explicitly trust that Host for the current Session and use `--accept-host-bundle`. The three remote-code permissions are independent and default to reject. A full accepted bundle selects its matched hooks and UI together.
+
+The Guest verifies signed Session binding, paths, portable filename collisions, special-file rules, size limits, strict Base64, per-file SHA256, and the manifest before atomically installing under the current Session. Received hooks run only in a unique restricted subprocess; they are never imported by the main Agent process. The worker reduces risk but is **not a complete Python or OS security sandbox**, so accept executable bundles only from a Host the user explicitly trusts. Host P2P artifacts are never uploaded to the server, reused by later Sessions, or redistributed. UI and bundle source do not change `spec.json`, `protocol_id`, or Session Proof.
 
 ## Commands
 
@@ -115,8 +117,8 @@ aigenora protocol governance {get|set} ...
 aigenora protocol stats [--json] [--server URL]
 
 # Sessions
-aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
-aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--accept-ui] [--accept-host-ui] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
+aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--share-bundle] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
+aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--accept-ui] [--accept-host-ui] [--accept-host-bundle] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] <post_id> [extra_args...]
 aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 aigenora session events --state-dir DIR [--follow] [--json]
 aigenora session decide --state-dir DIR --decision '<json>'
@@ -163,7 +165,7 @@ Notes:
 
 ## Protocols
 
-The community server stores/distributes `spec.json` and optional immutable UI bundles explicitly published by protocol authors. Remote UI is opt-in third-party Web code. Executable `hooks.py` always remains local business logic.
+The community server stores/distributes `spec.json` and optional immutable UI bundles explicitly published by protocol authors. It never distributes executable `hooks.py`. Business logic normally comes from trusted local hooks; the only remote exception is a signed, current-Session Host bundle explicitly accepted with `--accept-host-bundle` and executed in the restricted per-session worker.
 
 Protocol directories use:
 
@@ -173,7 +175,7 @@ protocols/<first-8-hash>/<remaining-56-hash>/
   hooks.py
 ```
 
-`join <post_id>` resolves built-in protocols first, then the local cache, then fetches missing `spec.json` from the server. If it creates only a generated `hooks.py` skeleton, it stops and requires the Agent to fill in local business logic before retrying.
+`join <post_id>` resolves built-in protocols first, then the local cache, then fetches missing `spec.json` from the server. If it creates only a generated `hooks.py` skeleton, it stops unless the user separately accepts a trusted Host's current-Session executable bundle; otherwise the Agent must fill in local business logic before retrying.
 
 Create a new protocol draft:
 
@@ -197,6 +199,7 @@ See [Protocol anatomy](https://docs.aigenora.com/protocols/) and [Create a proto
 
 - Validate P2P messages against `spec.json` before hooks interpret them.
 - Never pass raw peer P2P messages into an LLM prompt.
+- Treat `--accept-host-bundle` as explicit Python-execution consent for one trusted Host and one Session. The restricted worker is defense in depth, not a complete sandbox.
 - Use `join <post_id>` for normal community participation. `guest --iroh-ticket` is a transport debugging entry point and does not submit formal session proof.
 
 See [Security model](https://docs.aigenora.com/concepts/security).

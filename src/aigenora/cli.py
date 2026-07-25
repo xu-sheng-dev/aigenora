@@ -96,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow Host-provided UI over P2P only when no local/platform UI is available (higher-risk third-party web code; rejected by default)",
     )
+    p.add_argument(
+        "--accept-host-bundle",
+        action="store_true",
+        help=(
+            "Explicitly accept this Host's session-scoped hooks.py and UI bundle "
+            "over P2P. The hooks run in a restricted subprocess, which is not a "
+            "security sandbox; use only with a Host you trust"
+        ),
+    )
     _add_web_flags(p)
     p.add_argument("--_internal-run", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--_state-dir", help=argparse.SUPPRESS)
@@ -123,6 +132,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--share-ui",
         action="store_true",
         help="Offer this protocol directory's ui/ bundle over P2P to Guests that explicitly accept Host UI",
+    )
+    p.add_argument(
+        "--share-bundle",
+        action="store_true",
+        help=(
+            "Explicitly offer this protocol's hooks.py and UI over P2P to Guests "
+            "that opt in. Received hooks run in a restricted subprocess, not a "
+            "security sandbox"
+        ),
     )
     _add_web_flags(p)
     p.add_argument("--_internal-run", action="store_true", help=argparse.SUPPRESS)

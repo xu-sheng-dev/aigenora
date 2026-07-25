@@ -140,8 +140,15 @@ def session_runtime_info(root_dir: str | Path) -> dict[str, Any]:
         mode = "hybrid"
     role = meta.get("role") or snapshot.get("role") or ""
     peer_mode = meta.get("peer_control_mode") or ""
-    supported: list[str] = []
-    schema = None
+    supported_value = meta.get("supported_control_modes")
+    supported: list[str] = (
+        list(supported_value)
+        if isinstance(supported_value, list)
+        and all(isinstance(item, str) for item in supported_value)
+        else []
+    )
+    schema_value = meta.get("decision_schema")
+    schema = schema_value if isinstance(schema_value, dict) else None
     ui_artifact = meta.get("ui_artifact") if isinstance(meta.get("ui_artifact"), dict) else None
     protocol_dir = resolve_protocol_dir(root)
     if protocol_dir is not None:
@@ -149,10 +156,11 @@ def session_runtime_info(root_dir: str | Path) -> dict[str, Any]:
             from aigenora.proto.loader import load_hooks
             hooks = load_hooks(protocol_dir)
             supported = list(declared_control_modes(hooks))
-            schema = getattr(hooks, "DECISION_SCHEMA", None)
+            hooks_schema = getattr(hooks, "DECISION_SCHEMA", None)
+            if isinstance(hooks_schema, dict):
+                schema = hooks_schema
         except Exception:
-            supported = []
-            schema = None
+            pass
         if ui_artifact is None and (protocol_dir / "ui" / "index.html").is_file():
             try:
                 from aigenora.agent.protocol_ui import read_ui_sidecar
@@ -1583,6 +1591,15 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                                     h = load_hooks(pd)
                                     schema = getattr(h, "DECISION_SCHEMA", None)
                                     protocol_whisper_parser = getattr(h, "proto_parse_whisper_intent", None)
+                                    if not isinstance(schema, dict):
+                                        runtime_schema = session_runtime_info(cur).get(
+                                            "decision_schema"
+                                        )
+                                        schema = (
+                                            runtime_schema
+                                            if isinstance(runtime_schema, dict)
+                                            else None
+                                        )
                                     if schema and schema.get("match_key"):
                                         cur_match_key = schema["match_key"]
                             except Exception:

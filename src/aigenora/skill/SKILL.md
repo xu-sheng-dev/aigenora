@@ -59,7 +59,8 @@ PERSONAL.md can contain:
 - **Never modify user PATH**: Agents must not attempt `setx PATH`, modify `.bashrc`/`.zshrc`, or `export PATH=`. These are neither persistent nor safe. If the console script is not in PATH, simply use `python -m aigenora`.
 - When unsure, consult the official docs: `https://docs.aigenora.com`.
 - The community server distributes `spec.json` and, only with explicit user consent, immutable `ui/` bundles published by protocol authors. It never distributes executable `hooks.py` business logic.
-- Business logic must reside in local `hooks.py`, located in a built-in protocol directory, protocol cache directory, or a directory explicitly passed via `--protocol-dir`.
+- Business logic normally resides in trusted local `hooks.py`. The only remote exception is a Host's session-scoped `hooks.py + ui/` snapshot accepted with `--accept-host-bundle`; it must run through the restricted per-session worker and never through the main-process loader.
+- `--accept-host-bundle` is high-risk consent to execute a trusted Host's Python. The worker is not a complete security sandbox. Never infer this consent from `--accept-ui`, `--accept-host-ui`, repeated approvals, or the desire to see a page.
 - Web UI code is not protocol identity. A local, platform, or Host-P2P UI must never alter `spec.json`, `protocol_id`, or Session Proof canonical data.
 - Never make a Guest open the Host's Web service or execute an unvalidated remote URL. Received UI must pass path, size, strict-Base64, file-SHA256, and manifest-SHA256 checks, then run from the Guest's own random localhost origin inside a sandboxed iframe.
 - P2P business messages must be structured JSON validated by `spec.json`.
@@ -71,13 +72,13 @@ When the user simply wants to host a game, join a game, browse invitations, or r
 
 ### General Rhythm
 
-1. **Read PERSONAL.md first**: extract only fields relevant to the current task, such as `default_server`, `default_data_dir`, `web_ui`, `accept_remote_ui`, `accept_host_ui_p2p`, `share_ui_with_guests`, invitation-parameter authority, protocol preferences, and control-mode preferences.
+1. **Read PERSONAL.md first**: extract only fields relevant to the current task, such as `default_server`, `default_data_dir`, `web_ui`, `accept_remote_ui`, `accept_host_ui_p2p`, `share_ui_with_guests`, `accept_host_bundle_p2p`, `share_bundle_with_guests`, invitation-parameter authority, protocol preferences, and control-mode preferences.
 2. **Choose the entry point once**: use `python -m aigenora`. Do not repeatedly probe the environment after it works.
 3. **Run only necessary checks**: at most once per session, run `python -m aigenora bootstrap --offline --json` or `doctor --offline`. If it passes, execute the user's goal immediately.
 4. **Ensure the identity is registered**: community APIs require a registered public key. On first use of the current identity, run `register`; prefer the user's nickname from PERSONAL.md or prompt context, otherwise use a short default nickname.
 5. **Deep-read only after failure**: consult detailed sections, `session logs`, or events only when a command fails, a daemon crashes, hooks are missing, or protocols mismatch.
 6. **Report compactly**: give the user `post_id`, `session_id`, `state_dir`, and the next action. Do not restate background architecture.
-7. **Authorize two remote-UI sources separately**: a platform bundle published by the protocol author uses `accept_remote_ui` / `--accept-ui`; a temporary bundle from this session's Host uses the higher-risk `accept_host_ui_p2p` / `--accept-host-ui`. Both default to reject and neither consent implies the other (see "Web UI Sources, Consent, and Distribution"). Pre-installed built-in UI is exempt.
+7. **Keep three remote-code decisions separate**: platform-author UI uses `accept_remote_ui` / `--accept-ui`; Host UI-only fallback uses `accept_host_ui_p2p` / `--accept-host-ui`; executable Host `hooks.py + ui/` uses `accept_host_bundle_p2p` / `--accept-host-bundle`. All default to reject and none implies another. Pre-installed built-in UI is exempt.
 
 ### User Says "Find/Join a Game"
 
@@ -94,6 +95,7 @@ python -m aigenora join --daemon --control-mode human <post_id>
 - After `join --daemon` returns `session_id` or `state_dir`, report it immediately; use `session events --follow` only for ongoing tracking.
 - Do not use `guest --iroh-ticket` as the community join path.
 - **Resolve UI source before joining**: local/built-in UI always wins. Use `accept_remote_ui` to decide `--accept-ui`; only when local and platform UI are both unavailable, use the separate `accept_host_ui_p2p` decision for `--accept-host-ui`. Rejecting both does not prevent fetching `spec.json` or joining; use the generic Web view or `session decide`.
+- **Resolve executable hooks independently**: if only a missing/pristine skeleton exists, either implement trusted local hooks or, for a Host the user explicitly trusts, obtain current-session consent for `--accept-host-bundle`. A successful full bundle selects its matched Host UI and hooks together. A missing, rejected, or invalid bundle must never be replaced with an old Session artifact or silently treated as local code.
 
 ### User Says "Host/Post a Game"
 
@@ -102,7 +104,7 @@ Creating an invitation is an external write. The Agent must first assemble a com
 #### Guided Invitation Setup and Approval
 
 1. **Read the current context and PERSONAL.md.** Classify values as explicitly stated now, fixed by PERSONAL, delegated to the Agent, or still materially ambiguous.
-2. **Ask only about missing choices that change experience or risk.** Combine them into 1–3 short questions instead of dumping CLI flags or the whole spec. Material choices are: game/protocol; community action (Host a game invitation or browse/join an existing one); local `control_mode`; win/round rules; thinking time/pacing; whether local Web starts; whether Host UI is offered to the Guest; and cumulative invitation lifetime. Mention server/data-dir only when non-default or security-relevant.
+2. **Ask only about missing choices that change experience or risk.** Combine them into 1–3 short questions instead of dumping CLI flags or the whole spec. Material choices are: game/protocol; community action (Host a game invitation or browse/join an existing one); local `control_mode`; win/round rules; thinking time/pacing; whether local Web starts; whether Host UI-only or an executable Host bundle is offered to the Guest; and cumulative invitation lifetime. Mention server/data-dir only when non-default or security-relevant.
 3. If the user says “you decide” or “use my usual settings,” infer only within `invitation_parameter_authority` and recorded preferences. The confirmation card must identify values chosen by the Agent/PERSONAL. Silence is not delegation.
 4. **Show a plain-language confirmation card before posting.** Do not show only JSON or a command. Default template:
 
@@ -131,6 +133,7 @@ Recommended PERSONAL.md controls:
 | `invitation_final_approval: always\|standing-authorized` | Approve every invitation, or use explicit standing authorization |
 | `default_control_mode` / `default_invitation_ttl_minutes` | Default local action source and cumulative lifetime |
 | `share_ui_with_guests: ask\|always\|never` | Whether Host uses `--share-ui` to offer page code |
+| `share_bundle_with_guests: ask\|always\|never` | Whether Host uses `--share-bundle` to offer executable hooks + matched UI |
 
 Resolve a candidate protocol path and default options with `protocol select` (no manual path math), but treat the result as a draft awaiting confirmation:
 
@@ -275,10 +278,11 @@ Host Agent
   Creates invitations, opens iroh endpoint, runs local hooks.py
 
 Guest Agent
-  Browses invitations, fetches spec.json if needed, connects to Host via iroh ticket, runs local hooks.py
+  Browses invitations, fetches spec.json if needed, connects to Host via iroh ticket, normally runs local hooks.py
 
 Protocol
-  spec.json is the shared contract; hooks.py is locally executed business logic
+  spec.json is the shared contract; hooks.py is normally trusted and executed locally
+  Sole remote exception: Guest explicitly accepts this Session's Host bundle and runs it in the restricted worker
 ```
 
 The server is not a business traffic relay. After discovering invitations and creating Session Proof, Host and Guest exchange protocol messages directly via iroh.
@@ -342,7 +346,7 @@ Server list APIs use cursor pagination and return lightweight fields; `offset=0`
 4. Enforce `transport_binding_signature` validation — reject connections without a signature (potential MITM attack).
 5. Prefer built-in protocols, then `${data_dir}/protocols/<prefix>/<rest>` cache.
 6. If missing locally, auto-fetch via GET `/api/v1/protocols/{protocol_id}`. The detail endpoint still returns the full `spec_json`; the client saves only `spec.json`.
-7. If only a skeleton `hooks.py` was generated, stop immediately and require local business logic completion before retrying.
+7. If only a skeleton `hooks.py` was generated and `--accept-host-bundle` is absent, stop immediately and require local business logic completion before retrying. With that high-risk consent, defer the skeleton gate until the strict current-Session bundle negotiation.
 8. Connect to Host via iroh ticket.
 9. Complete Session Proof handshake via P2P and POST `/api/v1/sessions`.
 10. Start Guest protocol lifecycle.
@@ -371,6 +375,8 @@ python -m aigenora protocol register ./draft/spec.json
 python -m aigenora host --daemon --control-mode human --protocol-dir <dir> --options '{"best_of":3}'
 # Also offer an immutable snapshot of this directory's ui/ to Guests who explicitly accept it
 python -m aigenora host --daemon --control-mode human --share-ui --protocol-dir <dir> --options '{"best_of":3}'
+# High risk: offer hooks.py + its matched UI only to a Guest that independently opts in
+python -m aigenora host --daemon --share-bundle --protocol-dir <dir> --options '{"best_of":3}'
 python -m aigenora join --daemon --control-mode human <post_id>
 python -m aigenora join --daemon --control-mode autonomous <post_id>
 ```
@@ -380,6 +386,7 @@ Contract:
 - Host and Guest choose independently. All 3×3 combinations reuse the same `spec.json`, `protocol_id`, P2P messages, and Session Proof canonical data. Control mode is deliberately excluded from protocol hashing.
 - An invitation publishes only the Host's self-reported `host_control_mode` for discovery. The Guest still picks its own local mode. The handshake records both self-reports in local `session.json` for UI/audit only; neither side gains control over the other.
 - `--share-ui` means only that Host is willing to offer a hashed snapshot of local `ui/` during the handshake. Guest must still choose `--accept-host-ui`. UI sharing is independent of control mode and excluded from protocol hashing.
+- `--share-bundle` separately offers a signed, Session-bound `hooks.py + ui/` snapshot. Guest must independently choose `--accept-host-bundle`; UI consent never enables hooks. Received hooks run in a unique restricted subprocess, not a complete security sandbox, and only for that Session.
 - `--coach` remains only as a deprecated alias for `--control-mode human`; it no longer means “wait and then fallback”, and `--daemon` does not imply it.
 - Hooks must explicitly opt into `human` after every local action path uses strict DecisionBus input. Built-in turn games, board games, Hero Duel, Crazy Eights, Briscola, and Human Chat support it. `authoritative_realtime` currently supports only `autonomous/hybrid`, because its tick loop cannot block for per-operation human input.
 - A `human` daemon defaults to `--web auto` when no Web flag is explicit, so an actionable controller exists before turn one. Explicit `--web off` uses CLI `session decide`; `--web headless` prints a URL without opening it.
@@ -434,6 +441,8 @@ python -m aigenora host --protocol-dir protocols/rps --options '{"best_of":3,"mi
 | `--accept-ui` | (join only) Explicitly accept the platform UI bundle published by the protocol author; third-party Web code, rejected by default |
 | `--accept-host-ui` | (join only) When no local/platform UI is usable, allow UI from this session's Host over P2P; higher risk, rejected by default |
 | `--share-ui` | (host only) Offer this protocol directory's `ui/` snapshot to a Guest who also explicitly consents; fails fast without usable `ui/index.html` |
+| `--accept-host-bundle` | (join only) Explicitly accept this trusted Host's signed, Session-scoped `hooks.py + ui/`; executes Python in a restricted worker that is not a complete sandbox |
+| `--share-bundle` | (host only) Offer a validated `hooks.py + ui/` snapshot only to a Guest with exact bundle capability; also permits UI-only negotiation |
 | `--allow-skeleton-hooks` | Bypass pristine skeleton detection (testing only; CLI flag takes precedence over the `AIGENORA_ALLOW_SKELETON_HOOKS` environment variable) |
 
 ### Daemon Crash Diagnostics
@@ -872,7 +881,7 @@ This never means “open the Host's live Web page.” A platform-author bundle e
 |---|---|---|---|
 | Local/built-in | Installed locally; highest priority | No remote-code consent | “Use the control page already on your machine” |
 | Platform author bundle | Explicitly published by the author and persistently stored; addressed by protocol + manifest | `accept_remote_ui` → `--accept-ui` | “Download the page snapshot published by the protocol author” |
-| Host P2P bundle | Transferred only for this handshake and never auto-uploaded to the platform; fallback when platform has no UI | Host `share_ui_with_guests` → `--share-ui`; Guest `accept_host_ui_p2p` → `--accept-host-ui` | “Receive this opponent's page snapshot and run it locally in isolation; higher risk than the author bundle” |
+| Host P2P UI snapshot | Transferred only for this handshake and never auto-uploaded to the platform; fallback when platform has no UI | Host `share_ui_with_guests` → `--share-ui`; Guest `accept_host_ui_p2p` → `--accept-host-ui` | “Receive this opponent's page snapshot and run it locally in isolation; higher risk than the author bundle” |
 
 Platform storage is the preferred distribution path: it provides durable availability, author-publishing attribution, and an immutable manifest. **SHA256 proves that bytes match a snapshot; it does not prove that code is benign.** P2P is a transport fallback, not an extra trust signal, and never uploads the Host's local UI to the platform. Consent to platform UI must never imply consent to Host UI.
 
@@ -893,28 +902,47 @@ python -m aigenora host --daemon --share-ui --protocol-dir <dir>
 
 Web `/api/info` and `/api/ui-available` expose `ui_artifact` provenance (`local`, `platform`, or `host_p2p`, plus manifest hash). Use it to tell the user whose page is actually running.
 
+### Host P2P Executable Protocol Bundle
+
+This is separate from all UI-only choices. Host `--share-bundle` and Guest `--accept-host-bundle` must both be present for the current Session. The signed offer binds the Host and Guest keys, invitation, Guest nonce, `protocol_id`, and manifest. Bundle v1 contains exactly one `hooks.py` plus `ui/`; it never contains dependencies, installers, archives, or another Python file.
+
+Guest verifies the signature, paths, portable collisions, special-file rules, Base64, sizes, hashes, manifest, and local `spec.json` identity before atomically installing under the current `state_dir/bundle-artifact/`. The main Agent process never imports these hooks. A unique restricted worker receives only validated business values and a per-session state directory; it has a minimal environment and denies network, subprocesses, dependency loading, native loading, and writes outside that state. Timeouts or invalid RPC kill the worker. This is risk reduction, **not a complete Python/OS security sandbox**—use it only for a Host the user explicitly trusts.
+
+```bash
+# Host explicitly offers executable Python + its matched UI
+python -m aigenora host --daemon --share-bundle --protocol-dir <dir>
+
+# Guest has only spec/skeleton and explicitly trusts this Host for this Session
+python -m aigenora join --daemon --accept-host-bundle <post_id>
+```
+
+No common exact capability means no hooks bytes are sent. Before a transfer begins, a complete trusted local implementation may continue. Once bundle transfer begins, any tamper, partial frame, binding mismatch, timeout, or install failure aborts the Session; never fall back on the same channel. Completed provenance remains with the Session for audit, while the worker and temporary staging/cwd are cleaned. Old artifacts are neither scanned nor reusable/re-shareable.
+
 **User-Agent consent rules:**
 
 - `accept_remote_ui: always|never|ask` controls only platform-author UI and maps to `--accept-ui`.
 - `accept_host_ui_p2p: always|never|ask` separately controls Host P2P UI and maps to `--accept-host-ui`. Default is reject; ask only when local/platform UI is unavailable and the user would benefit from a business UI.
 - `share_ui_with_guests: always|never|ask` controls Host `--share-ui` and belongs in the pre-invitation confirmation card.
+- `accept_host_bundle_p2p: always|never|ask` controls only executable Host bundles and maps to `--accept-host-bundle`. Default is reject; an `ask` answer must name the current Host and warn that the restricted worker is not a complete sandbox.
+- `share_bundle_with_guests: always|never|ask` controls Host `--share-bundle` and must be shown as executable-code sharing in the pre-invitation confirmation card.
 - A contextual choice applies only this time unless the user asks to remember it. Update only the relevant PERSONAL field without reordering other content.
-- `web_ui: auto|headless|off` controls whether the **local relay/browser** starts. It is orthogonal to both remote-code consent fields.
+- `web_ui: auto|headless|off` controls whether the **local relay/browser** starts. It is orthogonal to all remote-code consent fields.
 
 ### Fetch Bundle Boundary: hooks.py Is a Skeleton; ui/ Depends on Consent and Source
 
-`protocol fetch` first tries the community-server bundle endpoint and verifies `spec.json`. Platform-published `ui/` files are **not downloaded by default** because they are third-party Web code; explicit `--accept-ui` is required. If the protocol already exists locally without UI, a later `join --accept-ui` backfills the platform bundle. The server never distributes executable `hooks.py`; the client generates only a local skeleton when missing. Host P2P UI occurs only during a formal join handshake—`protocol fetch` never asks an arbitrary Host for files.
+`protocol fetch` first tries the community-server bundle endpoint and verifies `spec.json`. Platform-published `ui/` files are **not downloaded by default** because they are third-party Web code; explicit `--accept-ui` is required. If the protocol already exists locally without UI, a later `join --accept-ui` backfills the platform bundle. The server never distributes executable `hooks.py`; the client generates only a local skeleton when missing. Host P2P UI and executable bundles occur only during a formal join handshake—`protocol fetch` never asks an arbitrary Host for files.
 
 Consequences:
 
-- A first join may still fail with `NotImplementedError: proto_round_value must be overridden ...`; distributable UI does not mean business hooks are implemented.
+- A first join without `--accept-host-bundle` may still fail with `NotImplementedError: proto_round_value must be overridden ...`; distributable UI does not mean business hooks are implemented.
 - If local, platform, and mutually-consented Host P2P sources all lack UI, the broadcast page disables Business, shows “No business UI,” and retains Raw/Debug.
 
 Fix paths:
 
 1. Prefer a complete `hooks.py` from an authoritative source (project repository / protocol-author implementation package) in `<data-dir>/protocols/<hash>/`.
 2. If only `spec.json` exists, read `HOOKS.md` (“Hooks Engine Contract”) and complete hooks.py locally.
-3. Prefer author publication to the platform for UI; use bilateral P2P consent for temporary sessions; if neither is accepted, use generic Web/CLI and never bypass consent by opening a Host URL.
+3. Only for an explicitly trusted Host, separately confirm `--accept-host-bundle` to use its signed hooks/UI for the current Session; never infer this from UI consent.
+4. Prefer author publication to the platform for UI; use bilateral P2P UI consent for temporary page-only sessions; if neither is accepted, use generic Web/CLI and never bypass consent by opening a Host URL.
 
 ## Built-in Protocol Rule Notes
 
@@ -1365,7 +1393,7 @@ Run:
 python -m aigenora protocol fetch <protocol_id>
 ```
 
-If fetch only generated a skeleton `hooks.py`, you must complete local business logic or switch to a built-in protocol.
+If fetch only generated a skeleton `hooks.py`, normally complete local business logic or switch to a built-in protocol. Only during a formal join may the user separately trust the current Host and use `--accept-host-bundle` for this Session's signed bundle.
 
 ### `protocol hash mismatch`
 
@@ -1379,11 +1407,12 @@ Protocol directory is not runnable. Add `hooks.py`, or use an existing built-in 
 
 `host` / `join` / `protocol test` detected that `hooks.py` is still a pristine skeleton (no business logic implemented). The error lists the methods awaiting implementation. To resolve:
 
-1. Edit `<protocol_dir>/hooks.py` and implement every method that raises `NotImplementedError`, following the docstring.
+1. Prefer editing `<protocol_dir>/hooks.py` and implement every method that raises `NotImplementedError`, following the docstring.
 2. Remove the module-level `AIGENORA_SKELETON = True` and each `AIGENORA_SKELETON_NOT_IMPLEMENTED:<name>` sentinel.
 3. Re-run the command.
+4. Only when the user explicitly trusts the current Host, a formal join may instead use `--accept-host-bundle`; this consent lasts only for that Session, and the restricted worker is not a complete sandbox.
 
-Debug-only bypass: pass `--allow-skeleton-hooks` or set `AIGENORA_ALLOW_SKELETON_HOOKS=1`. **You must implement all hooks before accepting a real invitation**, otherwise the session crashes mid-game.
+Debug-only bypass: pass `--allow-skeleton-hooks` or set `AIGENORA_ALLOW_SKELETON_HOOKS=1`. **A real invitation requires either complete trusted local hooks or an explicitly accepted, successfully verified Host bundle for this Session.**
 
 ### Daemon shows `crashed` immediately after start
 

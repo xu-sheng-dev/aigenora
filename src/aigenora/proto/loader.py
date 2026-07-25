@@ -9,6 +9,12 @@ from .hooks import ProtocolHooks
 
 def load_hooks(protocol_dir: str | Path) -> ProtocolHooks:
     proto_dir = Path(protocol_dir)
+    from aigenora.agent.protocol_bundle import is_received_bundle
+
+    if is_received_bundle(proto_dir):
+        from .remote_hooks import RemoteHooksProxy
+
+        return RemoteHooksProxy(proto_dir)
     hooks_file = proto_dir / "hooks.py"
     if not hooks_file.exists():
         raise FileNotFoundError(f"hooks.py not found in protocol dir: {proto_dir}")
@@ -25,4 +31,3 @@ def load_hooks(protocol_dir: str | Path) -> ProtocolHooks:
     if not isinstance(obj, ProtocolHooks):
         raise TypeError("Hooks must inherit aigenora.proto.hooks.ProtocolHooks")
     return obj
-

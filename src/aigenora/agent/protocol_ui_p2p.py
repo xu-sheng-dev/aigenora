@@ -265,9 +265,13 @@ async def serve_host_ui_and_wait_ready(
     channel: Any,
     *,
     artifact: HostUiArtifact | None,
+    initial_message: Any | None = None,
 ) -> dict[str, Any]:
     """Serve at most one requested artifact, then return the Guest session-ready frame."""
-    message = _frame(await channel.recv(), "post-proof frame")
+    message = _frame(
+        await channel.recv() if initial_message is None else initial_message,
+        "post-proof frame",
+    )
     if message.get("_ui_artifact_request") is not True:
         return message
     if artifact is None:
