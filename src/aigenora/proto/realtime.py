@@ -148,8 +148,11 @@ def build_transport_profile(
         reason = "RTT is not available; persistent macro orders are the safe default."
     else:
         # Two jitter widths cover normal variance without turning a transient spike into
-        # an unbounded queue.  One extra tick prevents equality-at-deadline races.
-        required_ticks = math.ceil((max(0.0, rtt_ms) + jitter_ms * 2.0) / tick_ms) + 1
+        # an unbounded queue.  Two guard ticks cover the equality-at-deadline race plus
+        # one ordinary local scheduling / serialization interval.  Without the second
+        # guard, a fixed 200 ms RTT at 10 Hz can expire when the Host catches up a tick
+        # after a short scheduler pause.
+        required_ticks = math.ceil((max(0.0, rtt_ms) + jitter_ms * 2.0) / tick_ms) + 2
         lead_ticks = max(config.input_delay_ticks, required_ticks)
         lead_ticks = min(config.max_command_lead_ticks, lead_ticks)
         micro_threshold_ms = max(75.0, min(200.0, tick_ms * 1.5))
@@ -709,6 +712,11 @@ async def _run_host_async(
         while outcome == "none":
             deadline += 1.0 / config.tick_rate_hz
             await asyncio.sleep(max(0.0, deadline - time.monotonic()))
+            # Give an already-ready command receiver one fair scheduling turn before
+            # freezing this tick's input.  This never waits for peer input: sleep(0)
+            # only yields to runnable local tasks, so the Host remains authoritative
+            # and continues on its fixed monotonic deadline.
+            await asyncio.sleep(0)
             if disconnected.is_set() and config.disconnect_policy == "abort":
                 hooks.snapshot.set_phase("aborted", "Guest disconnected", reason="peer_disconnected")
                 return {
