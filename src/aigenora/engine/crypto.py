@@ -60,6 +60,10 @@ def _flow_contract(spec: dict[str, Any]) -> dict[str, Any]:
             # Tick rate, input delay and command limits change observable game
             # semantics.  Pin the complete validated object into protocol_id.
             contract_flow["realtime"] = flow["realtime"]
+        elif mode == "authoritative_group" and isinstance(flow.get("group"), dict):
+            # Membership, recovery and checkpoint cadence change the wire and
+            # failover contract, so they must be content-addressed as well.
+            contract_flow["group"] = flow["group"]
     return contract_flow
 
 

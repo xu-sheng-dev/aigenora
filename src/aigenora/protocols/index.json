@@ -469,16 +469,16 @@
     {
       "alias": "community-room-v1",
       "name": "Community Room",
-      "description": "Host-authoritative multi-member chat with one global message order, late join, stable seats, exact signed checkpoints, and lease-fenced Leader failover.",
+      "description": "Host-authoritative multi-member chat with one global message order, late join, stable seats, signed delta replay, periodic checkpoints, and lease-fenced Leader failover.",
       "type": "chat",
       "family": "community-room",
       "tags": ["chat", "multiplayer", "authoritative-group", "failover", "webui"],
       "capabilities": ["authoritative_group", "late_join", "global_order", "exact_recovery", "webui"],
       "status": "active",
-      "protocol_id": "cfdb68ff676771bf7136ba6b22aff9e74e2fbb704434a5575fe52c10b0e5c8ee",
-      "path": "cfdb68ff/676771bf7136ba6b22aff9e74e2fbb704434a5575fe52c10b0e5c8ee",
+      "protocol_id": "9a8a512873c4ad083b2692c06221b789002ce3fd813da2c8dd71501eb8b054ec",
+      "path": "9a8a5128/73c4ad083b2692c06221b789002ce3fd813da2c8dd71501eb8b054ec",
       "parent_protocol_id": null,
-      "created_reason": "v025: Host-authoritative multiplayer foundation reference chat room",
+      "created_reason": "v026: Host-authoritative chat with bounded delta replay and periodic checkpoints",
       "default_profile": "standard",
       "profiles": {
         "standard": {
@@ -506,10 +506,10 @@
       "tags": ["meeting", "multiplayer", "agenda", "vote", "failover", "webui"],
       "capabilities": ["authoritative_group", "agenda", "speaking_queue", "voting", "action_items", "exact_recovery", "webui"],
       "status": "active",
-      "protocol_id": "003b8033266c90efd18506a6126fd578fc410174b89fd084d0ee6b7c431cb306",
-      "path": "003b8033/266c90efd18506a6126fd578fc410174b89fd084d0ee6b7c431cb306",
+      "protocol_id": "182ceaf26c288909862ad2f753c1e03858daac7e2550a18d2a856adfac02b58d",
+      "path": "182ceaf2/6c288909862ad2f753c1e03858daac7e2550a18d2a856adfac02b58d",
       "parent_protocol_id": null,
-      "created_reason": "v025: recoverable Host-authoritative meeting reference protocol",
+      "created_reason": "v026: recoverable Host-authoritative meeting with bounded delta replay",
       "default_profile": "standard",
       "profiles": {
         "standard": {
@@ -537,10 +537,10 @@
       "tags": ["game", "cards", "multiplayer", "landlord", "private-hands", "webui"],
       "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "team_scoring", "restart_round_recovery", "webui"],
       "status": "active",
-      "protocol_id": "1b1b7210e0cc1b7cba7cf7a24346c3c35167b392a3c51efdc6d5a5a432dc3f18",
-      "path": "1b1b7210/e0cc1b7cba7cf7a24346c3c35167b392a3c51efdc6d5a5a432dc3f18",
+      "protocol_id": "bbc0d9890d6481c3cd269fbfb466a3b7830e9d102638a14f2b7ddbae9da70d36",
+      "path": "bbc0d989/0d6481c3cd269fbfb466a3b7830e9d102638a14f2b7ddbae9da70d36",
       "parent_protocol_id": null,
-      "created_reason": "v025: four-player private-hand game over authoritative-group and shared-deck primitives",
+      "created_reason": "v026: four-player private-hand game on optimized authoritative-group recovery",
       "default_profile": "standard",
       "profiles": {
         "standard": {
@@ -564,10 +564,10 @@
       "tags": ["game", "cards", "multiplayer", "shared-deck", "private-hands", "original", "webui"],
       "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "public_zones", "restart_round_recovery", "webui"],
       "status": "active",
-      "protocol_id": "dab6b150d69a48d2932484690e1025d5eba53b4fad61aae6d52cb5c9b011aec4",
-      "path": "dab6b150/d69a48d2932484690e1025d5eba53b4fad61aae6d52cb5c9b011aec4",
+      "protocol_id": "cbdb124e0db9be540099dbb7f7229bd9075251b5d6838f1ea943083d631570c5",
+      "path": "cbdb124e/0db9be540099dbb7f7229bd9075251b5d6838f1ea943083d631570c5",
       "parent_protocol_id": null,
-      "created_reason": "v025: original shared-deck/private-hand card-game reference protocol",
+      "created_reason": "v026: shared-deck/private-hand reference on optimized authoritative-group recovery",
       "default_profile": "standard",
       "profiles": {
         "standard": {

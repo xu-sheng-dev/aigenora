@@ -185,11 +185,14 @@ Use `session action` or the bundled WebUI to submit protocol actions. Public
 rooms and meetings resume from replicated checkpoints after a Leader change.
 Hidden-hand games retain safe public progress but restart the current deal, so
 recovery never requires copying every private hand to every candidate Leader.
+An authority frame is one accepted action/control transition, not a browser
+rendering frame. Ordinary frames use signed, replayable state/view deltas;
+periodic and safety-boundary frames carry complete checkpoints.
 All participants currently need the same locally installed content-addressed
 group bundle; Host-provided UI/executable snapshots are rejected for group
 sessions.
 
-See [Host-authoritative multiplayer](MULTIPLAYER.md) for the flow schema,
+See [Host-authoritative multiplayer](docs/multiplayer.md) for the flow schema,
 hooks contract, failover sequence, shared-deck helper, security boundary, and
 verification commands.
 

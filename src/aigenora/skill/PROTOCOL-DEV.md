@@ -177,7 +177,7 @@ Minimal structure:
       "allow_late_join": true,
       "start_policy": "min_ready",
       "recovery_mode": "exact",
-      "checkpoint_every_events": 1,
+      "checkpoint_every_events": 20,
       "max_action_bytes": 16384,
       "max_events_per_action": 64
     }
@@ -188,9 +188,14 @@ Minimal structure:
 Participant bounds must satisfy `2 <= min <= max <= 32`.
 `start_policy` is `min_ready`, `full`, or `fixed_full`. A fixed-seat game
 normally uses `fixed_full` with equal minimum and maximum and disables late
-join. `checkpoint_every_events` is optional and defaults to `1`; this version
-rejects any other value because every authority frame must be recoverable
-without rollback. `recovery_mode` is:
+join. `checkpoint_every_events` is optional, defaults to `20`, and must be
+between `1` and `256`. It controls complete checkpoint bodies, not recovery
+correctness: ordinary authority records use a verified delta when smaller,
+but every accepted record still reconstructs, certifies, and persists a
+complete successor checkpoint. Initial state, membership/Leader changes, and
+completion always force a complete body. The complete `flow.group` object is
+part of `protocol_id`, so changing this interval creates a new protocol
+contract. `recovery_mode` is:
 
 - `exact` when all recovery state is safe to replicate to every candidate;
 - `restart_round` when secret state must be discarded and freshly dealt after
@@ -200,6 +205,8 @@ without rollback. `recovery_mode` is:
 Actions are protocol-owned bounded JSON objects. Declare their business shape
 in rules and enforce it in `proto_group_handle`; the engine enforces only the
 outer JSON and byte/event limits. Never treat action text as an LLM prompt.
+Read `MULTIPLAYER.md` for the runtime workflow, frame/delta model, failover,
+privacy rules, and release test tiers.
 
 ### Protocol Convergence Principle (Important)
 

@@ -30,7 +30,15 @@ TARGET_PRESETS: dict[str, str] = {
 PERSONAL_FILENAME = "PERSONAL.md"
 # v018: companion appendix files shipped next to SKILL.md and installed together,
 # so the main SKILL.md stays thin; the agent loads appendices on demand via the index.
-APPENDIX_FILES = ("HOOKS.md", "PROTOCOL-DEV.md", "UI-DEV.md", "REFERENCE.md", "ADVANCED.md", "GAMES.md")
+APPENDIX_FILES = (
+    "HOOKS.md",
+    "PROTOCOL-DEV.md",
+    "MULTIPLAYER.md",
+    "UI-DEV.md",
+    "REFERENCE.md",
+    "ADVANCED.md",
+    "GAMES.md",
+)
 
 BACKUP_KEEP = 3
 TRACKER_PATH = Path.home() / ".aigenora" / "skill_targets.json"

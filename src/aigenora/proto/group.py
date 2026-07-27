@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from aigenora.engine.keys import KeyPair, sign_raw, verify_raw
+from aigenora.proto.json_delta import (
+    JsonDeltaError,
+    apply_json_delta,
+    make_json_delta,
+)
 from aigenora.proto.sdk import DetailLog, EventBus, SnapshotBus
 
 
@@ -19,6 +24,7 @@ MAX_CONTAINER_ITEMS = 1024
 MAX_STRING_BYTES = 65536
 _CORE_FIELDS = (
     "_group",
+    "wire_version",
     "group_id",
     "leader_public_key",
     "leader_epoch",
@@ -26,9 +32,31 @@ _CORE_FIELDS = (
     "previous_hash",
     "membership_version",
     "authority_state_hash",
+    "recovery_state_hash",
     "events_hash",
     "completed",
     "outcome",
+)
+_CHECKPOINT_STATE_FIELDS = (
+    "members",
+    "last_client_seq",
+    "recovery_mode",
+    "protocol_state",
+    "completed",
+    "outcome",
+)
+_PRIVATE_PAYLOAD_FIELDS = (
+    "viewer_public_key",
+    "view_mode",
+    "view",
+    "view_delta",
+    "view_state_hash",
+    "direct",
+    "checkpoint_mode",
+    "checkpoint",
+    "checkpoint_delta",
+    "checkpoint_hash",
+    "checkpoint_signature",
 )
 
 
@@ -43,7 +71,7 @@ class GroupConfig:
     allow_late_join: bool
     recovery_mode: str
     start_policy: str
-    checkpoint_every_events: int = 1
+    checkpoint_every_events: int = 20
     max_action_bytes: int = 8192
     max_events_per_action: int = 64
 
@@ -53,13 +81,23 @@ class GroupConfig:
         group = flow.get("group") if isinstance(flow, dict) else None
         if not isinstance(group, dict):
             raise GroupProtocolError("authoritative_group spec has no flow.group")
+        checkpoint_every_events = group.get("checkpoint_every_events", 20)
+        if (
+            not isinstance(checkpoint_every_events, int)
+            or isinstance(checkpoint_every_events, bool)
+            or checkpoint_every_events < 1
+            or checkpoint_every_events > 256
+        ):
+            raise GroupProtocolError(
+                "checkpoint_every_events must be between 1 and 256"
+            )
         return cls(
             min_participants=int(group["min_participants"]),
             max_participants=int(group["max_participants"]),
             allow_late_join=bool(group["allow_late_join"]),
             recovery_mode=str(group["recovery_mode"]),
             start_policy=str(group["start_policy"]),
-            checkpoint_every_events=int(group.get("checkpoint_every_events", 1)),
+            checkpoint_every_events=checkpoint_every_events,
             max_action_bytes=int(group.get("max_action_bytes", 8192)),
             max_events_per_action=int(group.get("max_events_per_action", 64)),
         )
@@ -170,6 +208,11 @@ class GroupAuthority:
         self.completed = False
         self.outcome: str | None = None
         self._last_envelopes: dict[str, dict[str, Any]] = {}
+        self._last_views: dict[str, dict[str, Any]] = {}
+        self._last_core: dict[str, Any] | None = None
+        self._last_events: list[dict[str, Any]] = []
+        self._checkpoint_state: dict[str, Any] | None = None
+        self._current_checkpoint: dict[str, Any] | None = None
         self._checkpoint_history: dict[int, dict[str, Any]] = {}
         self._acknowledged_seq: dict[str, int] = {}
         self._replicated_checkpoint: dict[str, Any] | None = None
@@ -230,34 +273,12 @@ class GroupAuthority:
         return self.state_dir / "group-checkpoint.json"
 
     def checkpoint(self, *, frame_hash: str | None = None) -> dict[str, Any]:
-        protocol_state = self.hooks.proto_group_recovery_snapshot(
-            copy.deepcopy(self.state)
+        if frame_hash is None and self._current_checkpoint is not None:
+            return copy.deepcopy(self._current_checkpoint)
+        checkpoint_state = self._make_checkpoint_state()
+        return self._checkpoint_from_state(
+            checkpoint_state, frame_hash or self.previous_hash
         )
-        if not isinstance(protocol_state, dict):
-            raise GroupProtocolError(
-                "proto_group_recovery_snapshot must return an object"
-            )
-        checkpoint = {
-            "version": 1,
-            "group_id": self.group_id,
-            "leader_public_key": self.leader_public_key,
-            "leader_epoch": self.leader_epoch,
-            "seq": self.seq,
-            "frame_hash": frame_hash or self.previous_hash,
-            "membership_version": self.membership_version,
-            "members": copy.deepcopy(self.members),
-            "last_client_seq": dict(self.last_client_seq),
-            "recovery_mode": self.config.recovery_mode,
-            "protocol_state": protocol_state,
-            "completed": self.completed,
-            "outcome": self.outcome,
-        }
-        checkpoint["checkpoint_hash"] = json_hash(checkpoint)
-        checkpoint["checkpoint_signature"] = sign_raw(
-            self.keypair.private_key,
-            checkpoint_certificate_canonical(checkpoint).encode("utf-8"),
-        )
-        return checkpoint
 
     def persist_checkpoint(
         self, *, frame_hash: str | None = None
@@ -267,11 +288,48 @@ class GroupAuthority:
         return checkpoint
 
     def bootstrap_envelopes(self) -> dict[str, dict[str, Any]]:
-        """Return signed current-state envelopes for initial/late joins."""
-        return copy.deepcopy(self._last_envelopes)
+        """Return self-contained current-state envelopes for initial/reconnect."""
+        envelopes: dict[str, dict[str, Any]] = {}
+        for member in self.members:
+            if member.get("status") != "active":
+                continue
+            envelope = self.bootstrap_envelope(member["public_key"])
+            if envelope is not None:
+                envelopes[member["public_key"]] = envelope
+        return envelopes
+
+    def bootstrap_envelope(
+        self, public_key: str
+    ) -> dict[str, Any] | None:
+        """Build one self-contained bootstrap without rendering other views."""
+        if self._last_core is None or self._current_checkpoint is None:
+            return None
+        member = self.member(public_key)
+        if member is None or member.get("status") != "active":
+            return None
+        frame_hash = self._current_checkpoint["frame_hash"]
+        lowered = public_key.lower()
+        view = self._member_view(member)
+        return self._build_member_envelope(
+            core=self._last_core,
+            frame_hash=frame_hash,
+            events=self._last_events,
+            public_key=lowered,
+            view=view,
+            view_mode="full",
+            view_delta=[],
+            direct=[],
+            checkpoint=self._current_checkpoint,
+            checkpoint_mode="full",
+            checkpoint_delta=[],
+        )
 
     def acknowledge(
-        self, public_key: str, seq: int, frame_hash: str
+        self,
+        public_key: str,
+        seq: int,
+        frame_hash: str,
+        checkpoint_hash: str | None = None,
     ) -> bool:
         """Record proof that a non-Leader Member holds a recovery checkpoint."""
         member = self.member(public_key)
@@ -287,6 +345,10 @@ class GroupAuthority:
         if (
             checkpoint is None
             or checkpoint.get("frame_hash") != frame_hash
+            or (
+                checkpoint_hash is not None
+                and checkpoint.get("checkpoint_hash") != checkpoint_hash
+            )
             or seq < self._acknowledged_seq.get(public_key, -1)
         ):
             return False
@@ -502,6 +564,9 @@ class GroupAuthority:
             raise GroupProtocolError("checkpoint certificate is invalid") from exc
         if checkpoint.get("group_id") != self.group_id:
             raise GroupProtocolError("checkpoint group_id mismatch")
+        if checkpoint.get("version") != 1:
+            raise GroupProtocolError("checkpoint version is invalid")
+        _validate_checkpoint_state(_checkpoint_state_from(checkpoint))
         seq = checkpoint.get("seq")
         previous_hash = checkpoint.get("frame_hash")
         if not isinstance(seq, int) or seq < 0:
@@ -556,6 +621,103 @@ class GroupAuthority:
             "outcome": outcome,
         }
 
+    def _make_checkpoint_state(self) -> dict[str, Any]:
+        protocol_state = self.hooks.proto_group_recovery_snapshot(
+            copy.deepcopy(self.state)
+        )
+        if not isinstance(protocol_state, dict):
+            raise GroupProtocolError(
+                "proto_group_recovery_snapshot must return an object"
+            )
+        checkpoint_state = {
+            "members": copy.deepcopy(self.members),
+            "last_client_seq": dict(self.last_client_seq),
+            "recovery_mode": self.config.recovery_mode,
+            "protocol_state": protocol_state,
+            "completed": self.completed,
+            "outcome": self.outcome,
+        }
+        _validate_json(checkpoint_state)
+        return checkpoint_state
+
+    def _checkpoint_from_state(
+        self, checkpoint_state: dict[str, Any], frame_hash: str
+    ) -> dict[str, Any]:
+        checkpoint = {
+            "version": 1,
+            "group_id": self.group_id,
+            "leader_public_key": self.leader_public_key,
+            "leader_epoch": self.leader_epoch,
+            "seq": self.seq,
+            "frame_hash": frame_hash,
+            "membership_version": self.membership_version,
+            **copy.deepcopy(checkpoint_state),
+        }
+        checkpoint["checkpoint_hash"] = json_hash(checkpoint)
+        checkpoint["checkpoint_signature"] = sign_raw(
+            self.keypair.private_key,
+            checkpoint_certificate_canonical(checkpoint).encode("utf-8"),
+        )
+        return checkpoint
+
+    def _member_view(self, member: dict[str, Any]) -> dict[str, Any]:
+        view = self.hooks.proto_group_view(
+            copy.deepcopy(self.state), copy.deepcopy(member)
+        )
+        if not isinstance(view, dict):
+            raise GroupProtocolError("proto_group_view must return an object")
+        _validate_json(view)
+        return view
+
+    def _build_member_envelope(
+        self,
+        *,
+        core: dict[str, Any],
+        frame_hash: str,
+        events: list[dict[str, Any]],
+        public_key: str,
+        view: dict[str, Any],
+        view_mode: str,
+        view_delta: list[dict[str, Any]],
+        direct: Any,
+        checkpoint: dict[str, Any],
+        checkpoint_mode: str,
+        checkpoint_delta: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        private_payload = {
+            "viewer_public_key": public_key,
+            "view_mode": view_mode,
+            "view": copy.deepcopy(view) if view_mode == "full" else None,
+            "view_delta": copy.deepcopy(view_delta),
+            "view_state_hash": json_hash(view),
+            "direct": copy.deepcopy(direct),
+            "checkpoint_mode": checkpoint_mode,
+            "checkpoint": (
+                copy.deepcopy(checkpoint)
+                if checkpoint_mode == "full"
+                else None
+            ),
+            "checkpoint_delta": copy.deepcopy(checkpoint_delta),
+            "checkpoint_hash": checkpoint["checkpoint_hash"],
+            "checkpoint_signature": checkpoint["checkpoint_signature"],
+        }
+        view_hash = json_hash(private_payload)
+        signature_payload = {
+            "frame_hash": frame_hash,
+            "view_hash": view_hash,
+            "viewer_public_key": public_key,
+        }
+        return {
+            **core,
+            "frame_hash": frame_hash,
+            "events": copy.deepcopy(events),
+            **private_payload,
+            "view_hash": view_hash,
+            "signature": sign_raw(
+                self.keypair.private_key, canonical_json(signature_payload)
+            ),
+        }
+
     def _build_envelopes(
         self,
         *,
@@ -567,8 +729,10 @@ class GroupAuthority:
         direct = direct or {}
         if advance:
             self.seq += 1
+        checkpoint_state = self._make_checkpoint_state()
         core = {
             "_group": frame_kind,
+            "wire_version": 2,
             "group_id": self.group_id,
             "leader_public_key": self.leader_public_key,
             "leader_epoch": self.leader_epoch,
@@ -576,51 +740,93 @@ class GroupAuthority:
             "previous_hash": self.previous_hash,
             "membership_version": self.membership_version,
             "authority_state_hash": json_hash(self.state),
+            "recovery_state_hash": json_hash(checkpoint_state),
             "events_hash": json_hash(events),
             "completed": self.completed,
             "outcome": self.outcome,
         }
         frame_hash = json_hash(core)
-        checkpoint = self.persist_checkpoint(frame_hash=frame_hash)
-        self._checkpoint_history[self.seq] = copy.deepcopy(checkpoint)
-        while len(self._checkpoint_history) > 256:
-            self._checkpoint_history.pop(min(self._checkpoint_history))
+        checkpoint = self._checkpoint_from_state(checkpoint_state, frame_hash)
+        force_full_checkpoint = (
+            self._checkpoint_state is None
+            or frame_kind != "frame"
+            or self.completed
+            or self.seq % self.config.checkpoint_every_events == 0
+        )
+        checkpoint_mode = "full"
+        checkpoint_delta: list[dict[str, Any]] = []
+        if not force_full_checkpoint:
+            candidate_delta = make_json_delta(
+                self._checkpoint_state, checkpoint_state
+            )
+            if (
+                len(canonical_json(candidate_delta)) + 256
+                < len(canonical_json(checkpoint))
+            ):
+                checkpoint_mode = "delta"
+                checkpoint_delta = candidate_delta
+
         envelopes: dict[str, dict[str, Any]] = {}
+        current_views: dict[str, dict[str, Any]] = {}
         for member in self.members:
             if member.get("status") != "active":
                 continue
             public_key = member["public_key"]
-            view = self.hooks.proto_group_view(
-                copy.deepcopy(self.state), copy.deepcopy(member)
+            view = self._member_view(member)
+            current_views[public_key] = view
+            view_mode = "full"
+            view_delta: list[dict[str, Any]] = []
+            previous_view = self._last_views.get(public_key)
+            if previous_view is not None and frame_kind == "frame":
+                candidate_delta = make_json_delta(previous_view, view)
+                if (
+                    len(canonical_json(candidate_delta)) + 96
+                    < len(canonical_json(view))
+                ):
+                    view_mode = "delta"
+                    view_delta = candidate_delta
+            envelopes[public_key] = self._build_member_envelope(
+                core=core,
+                frame_hash=frame_hash,
+                events=events,
+                public_key=public_key,
+                view=view,
+                view_mode=view_mode,
+                view_delta=view_delta,
+                direct=direct.get(public_key, []),
+                checkpoint=checkpoint,
+                checkpoint_mode=checkpoint_mode,
+                checkpoint_delta=checkpoint_delta,
             )
-            if not isinstance(view, dict):
-                raise GroupProtocolError("proto_group_view must return an object")
-            private_payload = {
-                "viewer_public_key": public_key,
-                "view": view,
-                "direct": direct.get(public_key, []),
-                "checkpoint": checkpoint,
-            }
-            view_hash = json_hash(private_payload)
-            signature_payload = {
-                "frame_hash": frame_hash,
-                "view_hash": view_hash,
-                "viewer_public_key": public_key,
-            }
-            envelope = {
-                **core,
-                "frame_hash": frame_hash,
-                "checkpoint_hash": checkpoint["checkpoint_hash"],
-                "events": copy.deepcopy(events),
-                **private_payload,
-                "view_hash": view_hash,
-                "signature": sign_raw(
-                    self.keypair.private_key, canonical_json(signature_payload)
-                ),
-            }
-            envelopes[public_key] = envelope
+
+        _atomic_json(self.checkpoint_path, checkpoint)
+        self._checkpoint_history[self.seq] = copy.deepcopy(checkpoint)
+        while len(self._checkpoint_history) > 256:
+            self._checkpoint_history.pop(min(self._checkpoint_history))
         self.previous_hash = frame_hash
         self._last_envelopes = copy.deepcopy(envelopes)
+        self._last_views = copy.deepcopy(current_views)
+        self._last_core = copy.deepcopy(core)
+        self._last_events = copy.deepcopy(events)
+        self._checkpoint_state = copy.deepcopy(checkpoint_state)
+        self._current_checkpoint = copy.deepcopy(checkpoint)
+        self.details.append(
+            type="group_recovery_record",
+            group_id=self.group_id,
+            leader_public_key=self.leader_public_key,
+            leader_epoch=self.leader_epoch,
+            seq=self.seq,
+            frame_hash=frame_hash,
+            membership_version=self.membership_version,
+            recovery_state_hash=core["recovery_state_hash"],
+            checkpoint_mode=checkpoint_mode,
+            checkpoint=(
+                checkpoint if checkpoint_mode == "full" else None
+            ),
+            checkpoint_delta=checkpoint_delta,
+            checkpoint_hash=checkpoint["checkpoint_hash"],
+            checkpoint_signature=checkpoint["checkpoint_signature"],
+        )
         self.details.append(
             type="group_frame",
             group_id=self.group_id,
@@ -629,6 +835,12 @@ class GroupAuthority:
             frame_kind=frame_kind,
             frame_hash=frame_hash,
             events=events,
+            checkpoint_mode=checkpoint_mode,
+            checkpoint_delta_ops=len(checkpoint_delta),
+            max_envelope_bytes=max(
+                (len(canonical_json(item)) for item in envelopes.values()),
+                default=0,
+            ),
             completed=self.completed,
             outcome=self.outcome,
         )
@@ -640,26 +852,25 @@ class GroupAuthority:
                 "seq": self.seq,
                 "frame_kind": frame_kind,
                 "frame_hash": frame_hash,
+                "checkpoint_mode": checkpoint_mode,
                 "completed": self.completed,
             },
         )
         self._publish_local_snapshot(
             phase="group_completed" if self.completed else "group_active",
             events=events,
+            checkpoint_hash=checkpoint["checkpoint_hash"],
         )
         return envelopes
 
     def _publish_local_snapshot(
-        self, *, phase: str, events: list[dict[str, Any]] | None = None
+        self,
+        *,
+        phase: str,
+        checkpoint_hash: str,
+        events: list[dict[str, Any]] | None = None,
     ) -> None:
-        local_member = self.member(self.leader_public_key)
-        view: dict[str, Any] = {}
-        if local_member is not None:
-            candidate = self.hooks.proto_group_view(
-                copy.deepcopy(self.state), copy.deepcopy(local_member)
-            )
-            if isinstance(candidate, dict):
-                view = candidate
+        view = copy.deepcopy(self._last_views.get(self.leader_public_key, {}))
         self.snapshot.update(
             phase=phase,
             role="host",
@@ -671,7 +882,7 @@ class GroupAuthority:
                 "seq": self.seq,
                 "membership_version": self.membership_version,
                 "members": copy.deepcopy(self.members),
-                "checkpoint_hash": self.checkpoint().get("checkpoint_hash"),
+                "checkpoint_hash": checkpoint_hash,
                 "recovery_mode": self.config.recovery_mode,
             },
             group_view=view,
@@ -705,6 +916,7 @@ class GroupReplica:
         self.frame_hash: str | None = None
         self.membership_version = 0
         self.checkpoint: dict[str, Any] | None = None
+        self.view: dict[str, Any] | None = None
         self.snapshot = SnapshotBus(self.state_dir)
         self.details = DetailLog(self.state_dir)
         self.events = EventBus(self.state_dir)
@@ -720,6 +932,8 @@ class GroupReplica:
             raise GroupProtocolError("group envelope epoch mismatch")
         if envelope.get("viewer_public_key") != self.viewer_public_key:
             raise GroupProtocolError("group envelope viewer mismatch")
+        if envelope.get("wire_version") != 2:
+            raise GroupProtocolError("group envelope wire version mismatch")
         core = {key: envelope.get(key) for key in _CORE_FIELDS}
         frame_hash = envelope.get("frame_hash")
         if not _is_hash(frame_hash) or json_hash(core) != frame_hash:
@@ -728,10 +942,7 @@ class GroupReplica:
         if not isinstance(events, list) or json_hash(events) != envelope.get("events_hash"):
             raise GroupProtocolError("group events hash mismatch")
         private_payload = {
-            "viewer_public_key": envelope.get("viewer_public_key"),
-            "view": envelope.get("view"),
-            "direct": envelope.get("direct"),
-            "checkpoint": envelope.get("checkpoint"),
+            key: envelope.get(key) for key in _PRIVATE_PAYLOAD_FIELDS
         }
         view_hash = envelope.get("view_hash")
         if not _is_hash(view_hash) or json_hash(private_payload) != view_hash:
@@ -760,52 +971,28 @@ class GroupReplica:
                 raise GroupProtocolError("group frame sequence moved backwards")
             if not bootstrap and seq != self.seq + 1:
                 raise GroupProtocolError("group frame sequence has a gap")
-            if envelope.get("previous_hash") != self.frame_hash:
+            if (
+                not bootstrap
+                and envelope.get("previous_hash") != self.frame_hash
+            ):
                 raise GroupProtocolError("group frame hash chain mismatch")
         elif not bootstrap:
             raise GroupProtocolError("first group frame must be a bootstrap")
 
-        checkpoint = envelope.get("checkpoint")
-        if not isinstance(checkpoint, dict):
-            raise GroupProtocolError("group envelope checkpoint must be an object")
+        checkpoint = self._decode_checkpoint(
+            envelope,
+            seq=seq,
+            frame_hash=frame_hash,
+            bootstrap=bootstrap,
+        )
+        view = self._decode_view(envelope, bootstrap=bootstrap)
         expected_checkpoint_hash = checkpoint.get("checkpoint_hash")
-        checkpoint_signature = checkpoint.get("checkpoint_signature")
-        unsigned_checkpoint = dict(checkpoint)
-        unsigned_checkpoint.pop("checkpoint_hash", None)
-        unsigned_checkpoint.pop("checkpoint_signature", None)
-        if (
-            not _is_hash(expected_checkpoint_hash)
-            or json_hash(unsigned_checkpoint) != expected_checkpoint_hash
-            or envelope.get("checkpoint_hash") != expected_checkpoint_hash
-        ):
-            raise GroupProtocolError("group checkpoint hash mismatch")
-        if (
-            checkpoint.get("group_id") != self.group_id
-            or checkpoint.get("leader_public_key") != self.leader_public_key
-            or checkpoint.get("leader_epoch") != self.leader_epoch
-            or checkpoint.get("seq") != seq
-            or checkpoint.get("frame_hash") != frame_hash
-            or checkpoint.get("membership_version")
-            != envelope.get("membership_version")
-        ):
-            raise GroupProtocolError("group checkpoint does not certify this frame")
-        if not isinstance(checkpoint_signature, str):
-            raise GroupProtocolError("group checkpoint signature is missing")
-        try:
-            verify_raw(
-                self.leader_public_key,
-                checkpoint_certificate_canonical(checkpoint).encode("utf-8"),
-                checkpoint_signature,
-            )
-        except Exception as exc:
-            raise GroupProtocolError(
-                "group checkpoint certificate is invalid"
-            ) from exc
 
         self.seq = seq
         self.frame_hash = frame_hash
         self.membership_version = int(envelope.get("membership_version") or 0)
         self.checkpoint = copy.deepcopy(checkpoint)
+        self.view = copy.deepcopy(view)
         _atomic_json(self.state_dir / "group-checkpoint.json", checkpoint)
         phase = "group_completed" if envelope.get("completed") else "group_active"
         self.snapshot.update(
@@ -822,7 +1009,7 @@ class GroupReplica:
                 "checkpoint_hash": expected_checkpoint_hash,
                 "recovery_mode": checkpoint.get("recovery_mode"),
             },
-            group_view=envelope.get("view") or {},
+            group_view=view,
             group_events=envelope.get("events") or [],
             direct=envelope.get("direct") or [],
             completed=bool(envelope.get("completed", False)),
@@ -835,7 +1022,30 @@ class GroupReplica:
             seq=seq,
             frame_hash=frame_hash,
             frame_kind=envelope.get("_group"),
+            checkpoint_mode=envelope.get("checkpoint_mode"),
+            checkpoint_delta_ops=len(envelope.get("checkpoint_delta") or []),
+            view_mode=envelope.get("view_mode"),
+            view_delta_ops=len(envelope.get("view_delta") or []),
             completed=bool(envelope.get("completed", False)),
+        )
+        self.details.append(
+            type="group_recovery_record",
+            group_id=self.group_id,
+            leader_public_key=self.leader_public_key,
+            leader_epoch=self.leader_epoch,
+            seq=seq,
+            frame_hash=frame_hash,
+            membership_version=self.membership_version,
+            recovery_state_hash=envelope.get("recovery_state_hash"),
+            checkpoint_mode=envelope.get("checkpoint_mode"),
+            checkpoint=(
+                envelope.get("checkpoint")
+                if envelope.get("checkpoint_mode") == "full"
+                else None
+            ),
+            checkpoint_delta=envelope.get("checkpoint_delta") or [],
+            checkpoint_hash=expected_checkpoint_hash,
+            checkpoint_signature=checkpoint.get("checkpoint_signature"),
         )
         self.events.emit(
             "group_frame_received",
@@ -847,6 +1057,139 @@ class GroupReplica:
             },
         )
         return True
+
+    def _decode_checkpoint(
+        self,
+        envelope: dict[str, Any],
+        *,
+        seq: int,
+        frame_hash: str,
+        bootstrap: bool,
+    ) -> dict[str, Any]:
+        mode = envelope.get("checkpoint_mode")
+        checkpoint_delta = envelope.get("checkpoint_delta")
+        if not isinstance(checkpoint_delta, list):
+            raise GroupProtocolError("group checkpoint delta must be an array")
+        if mode == "full":
+            checkpoint = envelope.get("checkpoint")
+            if not isinstance(checkpoint, dict) or checkpoint_delta:
+                raise GroupProtocolError(
+                    "full group checkpoint payload is invalid"
+                )
+            checkpoint = copy.deepcopy(checkpoint)
+        elif mode == "delta":
+            if bootstrap or envelope.get("checkpoint") is not None:
+                raise GroupProtocolError(
+                    "bootstrap requires a full group checkpoint"
+                )
+            if self.checkpoint is None:
+                raise GroupProtocolError(
+                    "group checkpoint delta has no replay base"
+                )
+            try:
+                checkpoint_state = apply_json_delta(
+                    _checkpoint_state_from(self.checkpoint),
+                    checkpoint_delta,
+                )
+            except JsonDeltaError as exc:
+                raise GroupProtocolError(
+                    f"group checkpoint delta is invalid: {exc}"
+                ) from exc
+            _validate_checkpoint_state(checkpoint_state)
+            checkpoint = {
+                "version": 1,
+                "group_id": self.group_id,
+                "leader_public_key": self.leader_public_key,
+                "leader_epoch": self.leader_epoch,
+                "seq": seq,
+                "frame_hash": frame_hash,
+                "membership_version": envelope.get("membership_version"),
+                **copy.deepcopy(checkpoint_state),
+                "checkpoint_hash": envelope.get("checkpoint_hash"),
+                "checkpoint_signature": envelope.get(
+                    "checkpoint_signature"
+                ),
+            }
+        else:
+            raise GroupProtocolError("group checkpoint mode is invalid")
+
+        expected_checkpoint_hash = checkpoint.get("checkpoint_hash")
+        checkpoint_signature = checkpoint.get("checkpoint_signature")
+        unsigned_checkpoint = dict(checkpoint)
+        unsigned_checkpoint.pop("checkpoint_hash", None)
+        unsigned_checkpoint.pop("checkpoint_signature", None)
+        if (
+            checkpoint.get("version") != 1
+            or not _is_hash(expected_checkpoint_hash)
+            or json_hash(unsigned_checkpoint) != expected_checkpoint_hash
+            or envelope.get("checkpoint_hash") != expected_checkpoint_hash
+            or envelope.get("checkpoint_signature") != checkpoint_signature
+        ):
+            raise GroupProtocolError("group checkpoint hash mismatch")
+        if (
+            checkpoint.get("group_id") != self.group_id
+            or checkpoint.get("leader_public_key") != self.leader_public_key
+            or checkpoint.get("leader_epoch") != self.leader_epoch
+            or checkpoint.get("seq") != seq
+            or checkpoint.get("frame_hash") != frame_hash
+            or checkpoint.get("membership_version")
+            != envelope.get("membership_version")
+            or checkpoint.get("completed")
+            != envelope.get("completed")
+            or checkpoint.get("outcome") != envelope.get("outcome")
+        ):
+            raise GroupProtocolError(
+                "group checkpoint does not certify this frame"
+            )
+        checkpoint_state = _checkpoint_state_from(checkpoint)
+        _validate_checkpoint_state(checkpoint_state)
+        if json_hash(checkpoint_state) != envelope.get("recovery_state_hash"):
+            raise GroupProtocolError("group recovery state hash mismatch")
+        if not isinstance(checkpoint_signature, str):
+            raise GroupProtocolError("group checkpoint signature is missing")
+        try:
+            verify_raw(
+                self.leader_public_key,
+                checkpoint_certificate_canonical(checkpoint).encode("utf-8"),
+                checkpoint_signature,
+            )
+        except Exception as exc:
+            raise GroupProtocolError(
+                "group checkpoint certificate is invalid"
+            ) from exc
+        return checkpoint
+
+    def _decode_view(
+        self, envelope: dict[str, Any], *, bootstrap: bool
+    ) -> dict[str, Any]:
+        mode = envelope.get("view_mode")
+        view_delta = envelope.get("view_delta")
+        if not isinstance(view_delta, list):
+            raise GroupProtocolError("group view delta must be an array")
+        if mode == "full":
+            view = envelope.get("view")
+            if not isinstance(view, dict) or view_delta:
+                raise GroupProtocolError("full group view payload is invalid")
+            view = copy.deepcopy(view)
+        elif mode == "delta":
+            if bootstrap or envelope.get("view") is not None:
+                raise GroupProtocolError("bootstrap requires a full group view")
+            if self.view is None:
+                raise GroupProtocolError("group view delta has no replay base")
+            try:
+                view = apply_json_delta(self.view, view_delta)
+            except JsonDeltaError as exc:
+                raise GroupProtocolError(
+                    f"group view delta is invalid: {exc}"
+                ) from exc
+            if not isinstance(view, dict):
+                raise GroupProtocolError("group view delta produced a non-object")
+        else:
+            raise GroupProtocolError("group view mode is invalid")
+        _validate_json(view)
+        if json_hash(view) != envelope.get("view_state_hash"):
+            raise GroupProtocolError("group view state hash mismatch")
+        return view
 
     def advance_epoch(
         self, *, leader_public_key: str, leader_epoch: int
@@ -865,6 +1208,57 @@ class GroupReplica:
                 "leader_epoch": self.leader_epoch,
             },
         )
+
+
+def _checkpoint_state_from(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    missing = [key for key in _CHECKPOINT_STATE_FIELDS if key not in checkpoint]
+    if missing:
+        raise GroupProtocolError(
+            f"group checkpoint state is missing {missing[0]}"
+        )
+    return {
+        key: copy.deepcopy(checkpoint[key])
+        for key in _CHECKPOINT_STATE_FIELDS
+    }
+
+
+def _validate_checkpoint_state(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != set(
+        _CHECKPOINT_STATE_FIELDS
+    ):
+        raise GroupProtocolError("group checkpoint state fields are invalid")
+    members = value.get("members")
+    if not isinstance(members, list):
+        raise GroupProtocolError("group checkpoint members must be an array")
+    normalize_members(members)
+    last_client_seq = value.get("last_client_seq")
+    if not isinstance(last_client_seq, dict) or any(
+        not isinstance(public_key, str)
+        or not isinstance(seq, int)
+        or isinstance(seq, bool)
+        or seq < 0
+        for public_key, seq in last_client_seq.items()
+    ):
+        raise GroupProtocolError(
+            "group checkpoint last_client_seq is invalid"
+        )
+    if value.get("recovery_mode") not in {
+        "exact",
+        "restart_round",
+        "abort",
+    }:
+        raise GroupProtocolError("group checkpoint recovery_mode is invalid")
+    if not isinstance(value.get("protocol_state"), dict):
+        raise GroupProtocolError(
+            "group checkpoint protocol_state must be an object"
+        )
+    if not isinstance(value.get("completed"), bool):
+        raise GroupProtocolError("group checkpoint completed is invalid")
+    if value.get("outcome") is not None and not isinstance(
+        value.get("outcome"), str
+    ):
+        raise GroupProtocolError("group checkpoint outcome is invalid")
+    _validate_json(value)
 
 
 def _validate_json(value: Any, *, depth: int = 0) -> None:

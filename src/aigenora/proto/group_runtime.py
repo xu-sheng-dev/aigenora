@@ -85,7 +85,7 @@ class GroupLeaderHub:
             self._receiver(public_key, channel)
         )
         if send_snapshot:
-            envelope = self.authority.bootstrap_envelopes().get(public_key)
+            envelope = self.authority.bootstrap_envelope(public_key)
             if envelope is None:
                 raise GroupProtocolError(
                     "authority has no bootstrap view for the existing member"
@@ -149,12 +149,21 @@ class GroupLeaderHub:
                         if isinstance(payload, dict)
                         else None
                     )
+                    checkpoint_hash = (
+                        payload.get("checkpoint_hash")
+                        if isinstance(payload, dict)
+                        else None
+                    )
                     if (
                         isinstance(seq, int)
                         and not isinstance(seq, bool)
                         and isinstance(frame_hash, str)
+                        and isinstance(checkpoint_hash, str)
                         and self.authority.acknowledge(
-                            public_key, seq, frame_hash
+                            public_key,
+                            seq,
+                            frame_hash,
+                            checkpoint_hash,
                         )
                     ):
                         self.acknowledged_seq[public_key] = max(
@@ -326,6 +335,7 @@ async def run_group_guest_channel(
             "leader_epoch": replica.leader_epoch,
             "seq": replica.seq,
             "frame_hash": replica.frame_hash,
+            "checkpoint_hash": replica.checkpoint["checkpoint_hash"],
         }
     )
     if first_envelope.get("completed"):
@@ -374,6 +384,9 @@ async def run_group_guest_channel(
                             "leader_epoch": replica.leader_epoch,
                             "seq": replica.seq,
                             "frame_hash": replica.frame_hash,
+                            "checkpoint_hash": replica.checkpoint[
+                                "checkpoint_hash"
+                            ],
                         }
                     )
                 if message.get("completed"):

@@ -182,11 +182,13 @@ aigenora skill path
 可通过 `session action` 或内置 WebUI 提交结构化动作。聊天室和会议可在
 Leader 切换后从复制检查点原位继续；隐藏手牌游戏保留安全的公共进度并重开
 当前牌局，不会为了恢复而把所有人的手牌复制给每个候选 Leader。多人会话
+中的“帧”是一次已接受动作/控制状态变化，不是浏览器画面帧；普通帧传递带签名
+且可重放的状态/视图增量，周期点和安全边界才传完整检查点。多人会话
 当前要求所有参与者本机安装相同的内容寻址协议 bundle，并拒绝 Host 临时提供
 的 UI/可执行快照。
 
 完整 flow schema、hooks 契约、接管流程、共享牌堆 SDK、安全边界和验证命令见
-[Host-authoritative multiplayer](MULTIPLAYER.md)。
+[Host-authoritative multiplayer](docs/multiplayer.md)。
 
 ## 协议
 

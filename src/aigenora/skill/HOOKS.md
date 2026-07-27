@@ -272,9 +272,12 @@ private action in public events or a recovery snapshot.
 
 The engine bounds JSON, deduplicates each actor's `client_seq`, assigns global
 `seq`, signs the public frame core and private view hash, and certifies each
-checkpoint. Members apply a strictly contiguous chain for the current
-`leader_epoch`. The server advertises only a checkpoint acknowledged by at
-least one non-Leader Member, so failover never relies on a Host-only snapshot.
+reconstructed checkpoint. Ordinary records use deterministic recovery/view
+deltas when smaller; periodic and boundary records carry complete payloads.
+Members apply a strictly contiguous chain for the current `leader_epoch`,
+reconstruct and persist the complete successor, then ACK. The server advertises
+only a checkpoint acknowledged by at least one non-Leader Member, so failover
+never relies on a Host-only snapshot or rolls back to the last full-body frame.
 
 Choose `recovery_mode: "exact"` only when the checkpoint is safe for every
 candidate. Use `restart_round` for hidden-hand games: keep safe public scores

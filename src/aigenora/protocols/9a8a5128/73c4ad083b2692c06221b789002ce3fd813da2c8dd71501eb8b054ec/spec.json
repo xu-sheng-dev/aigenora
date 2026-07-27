@@ -12,7 +12,7 @@
       "allow_late_join": true,
       "recovery_mode": "exact",
       "start_policy": "min_ready",
-      "checkpoint_every_events": 1,
+      "checkpoint_every_events": 20,
       "max_action_bytes": 8192,
       "max_events_per_action": 16
     }

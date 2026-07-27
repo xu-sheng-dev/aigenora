@@ -16,6 +16,7 @@ You can play built-in games with the main SKILL.md alone. Read a companion file 
 
 - Writing `hooks.py` / completing a fetched skeleton → `HOOKS.md`
 - Designing a new protocol from scratch / `spec.json` → `PROTOCOL-DEV.md`
+- Hosting/joining/building a multi-member room → `MULTIPLAYER.md`
 - Developing a protocol Web UI / adapting a non-claude-code coach → `UI-DEV.md`
 - Full command list / runtime limits / mechanism depth → `REFERENCE.md`
 - Built-in game full rules / how-to-play → `GAMES.md`
@@ -242,7 +243,7 @@ $PY -m aigenora skill install --target codex          # Codex       → .agents/
 $PY -m aigenora skill install --target opencode       # Opencode    → .opencode/skills/aigenora/SKILL.md
 ```
 
-`install` also drops a `PERSONAL.md` template and all companion docs (`HOOKS.md`, `PROTOCOL-DEV.md`, `UI-DEV.md`, `REFERENCE.md`, `GAMES.md`, `ADVANCED.md`) next to SKILL.md. `PERSONAL.md` is never overwritten. Existing SKILL.md files are backed up as `SKILL.md.bak-<old-version>-<timestamp>` (last 3 kept) when overwritten.
+`install` also drops a `PERSONAL.md` template and all companion docs (`HOOKS.md`, `PROTOCOL-DEV.md`, `MULTIPLAYER.md`, `UI-DEV.md`, `REFERENCE.md`, `GAMES.md`, `ADVANCED.md`) next to SKILL.md. `PERSONAL.md` is never overwritten. Existing SKILL.md files are backed up as `SKILL.md.bak-<old-version>-<timestamp>` (last 3 kept) when overwritten.
 
 After every `pip install --upgrade aigenora`, refresh the installed SKILL.md and companion docs so they stay in sync with the package:
 
@@ -561,6 +562,12 @@ python -m aigenora session list
 
 ## Host-Authoritative Multiplayer
 
+When the user asks for a group chat, meeting, four-player Landlord game,
+shared-deck/private-hand card game, or a new multi-member protocol, **read
+`MULTIPLAYER.md` before acting**. It contains intent routing, Host/join
+workflows, action schemas for all four built-ins, failover behavior, authoring
+rules, and the independent-Agent release gate.
+
 The built-in aliases `community-room-v1`, `meeting-room-v1`,
 `four-player-landlord-v1`, and `aether-sigil-v1` use
 `flow.mode: "authoritative_group"`. The current Leader (initially the
@@ -575,15 +582,27 @@ new ticket. Never accept an old-epoch frame. Public rooms restore exactly.
 Hidden-hand games deliberately restart the current deal after migration so a
 checkpoint does not leak all hands to every candidate Leader.
 
+An authority frame is one accepted action/control transition, not a WebUI
+rendering frame. Ordinary frames carry signed deterministic deltas when they
+are smaller; periodic and safety-boundary frames carry complete checkpoints.
+Members acknowledge only after reconstructing and persisting the complete
+signed successor checkpoint, so failover remains zero-rollback.
+
 Submit a group action with:
 
 ```bash
 python -m aigenora session action --state-dir <state_dir> --action '{"kind":"..."}'
 ```
 
-For protocol authoring, read `PROTOCOL-DEV.md` and `HOOKS.md`; for the two
-multiplayer card examples, read `GAMES.md`. The network Leader is separate
-from business roles such as facilitator or Landlord.
+Do not invent card/member/item IDs: read `session snapshot --json` or use the
+bundled WebUI. Keep the daemon running after a disconnect so lease expiry,
+first-successful server CAS, Leader promotion, and reconnect can proceed
+automatically.
+
+For protocol authoring, read `MULTIPLAYER.md`, `PROTOCOL-DEV.md`, and
+`HOOKS.md`; for the two multiplayer card examples, also read `GAMES.md`. The
+network Leader is separate from business roles such as facilitator or
+Landlord.
 
 ## Session State: snapshot / details / strategy
 

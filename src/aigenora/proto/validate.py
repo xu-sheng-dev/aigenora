@@ -547,9 +547,9 @@ def _validate_authoritative_group(flow: dict[str, Any]) -> None:
             raise ValidationError(
                 "flow.group.checkpoint_every_events must be an integer"
             )
-        if checkpoint_every_events != 1:
+        if not 1 <= checkpoint_every_events <= 256:
             raise ValidationError(
-                "flow.group.checkpoint_every_events must be 1 in this version"
+                "flow.group.checkpoint_every_events must be between 1 and 256"
             )
     optional_integer_ranges = {
         "max_action_bytes": (256, 65536),

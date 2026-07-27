@@ -77,6 +77,7 @@ The current Leader has one Iroh channel per Member; the server coordinates
 membership, lease, epoch, ticket, and checkpoint digest only. A disconnected
 channel is treated as transient so the stable seat can reconnect. Membership
 changes only through a signed join/leave control-plane operation.
+Read `MULTIPLAYER.md` for Host/join/action workflows and automatic failover.
 
 RPS Rock-Paper-Scissors:
 

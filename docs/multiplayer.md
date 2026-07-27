@@ -29,9 +29,11 @@ message relay.
   meeting text, or chat text. It stores only room membership, the current
   Leader endpoint, a short lease, a fencing epoch, and the digest of a
   replicated recovery checkpoint.
-- One public frame core is combined with a separately hashed and signed
-  per-Member view. This allows a shared timeline and private hands at the same
-  time.
+- One public authority-record core is combined with a separately hashed and
+  signed per-Member view. Ordinary records carry replayable state/view deltas;
+  periodic and boundary records carry self-contained snapshots. This allows a
+  shared timeline and private hands without resending the full room state after
+  every action.
 
 `leader_epoch` is the fencing token. A Member accepts only frames signed by the
 Leader for its current epoch, with a strictly contiguous sequence and hash
@@ -40,18 +42,22 @@ new epoch.
 
 ## Failover
 
-The Leader renews a short server lease. Every authority frame also carries a
-Leader-signed checkpoint certificate. A Member acknowledges a frame only after
-validating its frame hash, private-view hash, signature, sequence, and
-checkpoint certificate.
+The Leader renews a short server lease. Every authority record also carries a
+Leader-signed checkpoint certificate. The record contains either a complete
+checkpoint or a deterministic delta from the preceding certified checkpoint.
+A Member acknowledges a record only after validating the frame hash,
+private-view hash, signature, sequence, applying any deltas, reconstructing the
+complete current checkpoint, and validating its certificate.
 
 Leader heartbeats and successful claims also renew the discovery invitation.
 Closing or failing the room closes that invitation, so an active room remains
 joinable without leaving a stale post after termination.
 
-The Leader advertises only a checkpoint acknowledged by at least one
-non-Leader Member. This makes the server digest a recovery floor that is known
-to exist outside the Host process.
+The Leader advertises only a reconstructed checkpoint acknowledged by at least
+one non-Leader Member. This makes the server digest a recovery floor that is
+known to exist outside the Host process. A delta record therefore does not
+weaken failover: each accepting Member persists the complete certified result,
+not just the delta.
 
 After the lease expires:
 
@@ -79,7 +85,7 @@ older than the server recovery floor.
       "allow_late_join": true,
       "start_policy": "min_ready",
       "recovery_mode": "exact",
-      "checkpoint_every_events": 1,
+      "checkpoint_every_events": 20,
       "max_action_bytes": 16384,
       "max_events_per_action": 64
     }
@@ -90,9 +96,12 @@ older than the server recovery floor.
 `start_policy` is `min_ready` for an open room, `full` when a room starts at
 its declared capacity, or `fixed_full` for a fixed-seat table.
 `max_participants` cannot exceed the server limit (32).
-In this version, `checkpoint_every_events` may be omitted (default `1`) but
-cannot be set to another value: every authority frame carries a checkpoint
-certificate so acknowledged recovery never requires a rollback.
+`checkpoint_every_events` is the maximum spacing between complete checkpoint
+bodies. It may be omitted (default `20`) and must be between `1` and `256`.
+Every record still carries a certificate for its fully reconstructed current
+checkpoint, so acknowledged recovery never rolls back. Membership changes,
+Leader changes, initial snapshots, and completion always force a complete
+checkpoint regardless of the interval.
 
 `recovery_mode` is one of:
 
@@ -101,6 +110,39 @@ certificate so acknowledged recovery never requires a rollback.
 - `restart_round`: preserve safe public progress, discard the current secret
   deal, and start a new round after migration.
 - `abort`: do not continue after a Leader loss.
+
+## Authority records and performance
+
+An authority "frame" is a logical accepted action or control transition, not a
+video, canvas, or browser rendering frame. A WebUI can render at 60 FPS without
+producing 60 signed protocol records per second.
+
+Every logical record keeps the small safety fields needed for deterministic
+ordering and fencing:
+
+- explicit group wire version;
+- contiguous `seq` and `previous_hash`;
+- authority/recovery/events hashes;
+- `membership_version` and `leader_epoch`;
+- one Leader signature for each Member's private envelope;
+- one common signed certificate for the resulting recovery checkpoint.
+
+The expensive payload is adaptive:
+
+- ordinary actions use deterministic JSON deltas for recovery state and each
+  Member view when the delta is smaller;
+- a full payload is used automatically when a delta would be larger;
+- a complete recovery checkpoint is sent every
+  `checkpoint_every_events` records and at every safety boundary;
+- reconnecting Members receive a self-contained current bootstrap rather than
+  replaying an unbounded history;
+- each Member writes the reconstructed complete checkpoint to
+  `group-checkpoint.json` and appends signed full/delta recovery records to
+  `details.jsonl`.
+
+This keeps the wire cost near the changed data for growing chat and meeting
+histories, while preserving a verifiable zero-rollback successor state after
+every acknowledged action.
 
 ## Hooks
 
@@ -168,6 +210,10 @@ be transferred independently, and the Landlord player need not be the Leader.
 
 ## Running a room
 
+For user-Agent operation, `aigenora skill install/update` installs the packaged
+`MULTIPLAYER.md` companion next to `SKILL.md`; the main skill routes group-room
+intents to that workflow.
+
 Resolve a built-in directory, then use the same `host` and `join` commands as
 other protocols:
 
@@ -228,7 +274,13 @@ python -m compileall -q src/aigenora tests
 
 `protocol test` runs a deterministic multi-Member smoke test, checks private
 views, and restores a new Leader epoch. The repository suite additionally
-covers concurrent channels, recovery-floor acknowledgement, certificate and
-view tampering, shared-deck conservation, all four example protocols, real
-four-Member Iroh failover, WebUI bridge contracts, and the existing 1:1
-runtime.
+covers full/delta replay, bounded FIFO deltas, periodic checkpoints,
+recovery-floor acknowledgement, certificate and view tampering, concurrent
+channels, shared-deck conservation, all four example protocols, a real-Iroh
+four-identity/four-node failover scenario, WebUI bridge contracts, and the
+existing 1:1 runtime.
+
+That real-Iroh test is an automated process-level integration test, not four
+independent user Agents. Release acceptance should additionally run isolated
+Host/Member CLI directories, followed by an independent-Agent black-box pass
+that relies only on the packaged Agent guide.
