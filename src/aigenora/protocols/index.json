@@ -467,6 +467,126 @@
       }
     },
     {
+      "alias": "community-room-v1",
+      "name": "Community Room",
+      "description": "Host-authoritative multi-member chat with one global message order, late join, stable seats, exact signed checkpoints, and lease-fenced Leader failover.",
+      "type": "chat",
+      "family": "community-room",
+      "tags": ["chat", "multiplayer", "authoritative-group", "failover", "webui"],
+      "capabilities": ["authoritative_group", "late_join", "global_order", "exact_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "cfdb68ff676771bf7136ba6b22aff9e74e2fbb704434a5575fe52c10b0e5c8ee",
+      "path": "cfdb68ff/676771bf7136ba6b22aff9e74e2fbb704434a5575fe52c10b0e5c8ee",
+      "parent_protocol_id": null,
+      "created_reason": "v025: Host-authoritative multiplayer foundation reference chat room",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "Public room with a 200-message retained timeline",
+          "options": {"history_limit": 200, "initial_topic": "Community room"}
+        },
+        "compact": {
+          "description": "Small retained timeline for short-lived rooms",
+          "options": {"history_limit": 50, "initial_topic": "Quick room"}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "meeting-room-v1",
+      "name": "Meeting Room",
+      "description": "Recoverable multi-member meeting with an agenda, FIFO speaking queue, replaceable ballots, action items, and a facilitator role independent from the network Leader.",
+      "type": "chat",
+      "family": "meeting-room",
+      "tags": ["meeting", "multiplayer", "agenda", "vote", "failover", "webui"],
+      "capabilities": ["authoritative_group", "agenda", "speaking_queue", "voting", "action_items", "exact_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "003b8033266c90efd18506a6126fd578fc410174b89fd084d0ee6b7c431cb306",
+      "path": "003b8033/266c90efd18506a6126fd578fc410174b89fd084d0ee6b7c431cb306",
+      "parent_protocol_id": null,
+      "created_reason": "v025: recoverable Host-authoritative meeting reference protocol",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "Working meeting with up to 20 agenda items",
+          "options": {"meeting_title": "Working session", "max_agenda_items": 20}
+        },
+        "workshop": {
+          "description": "Extended workshop agenda",
+          "options": {"meeting_title": "Workshop", "max_agenda_items": 40}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "four-player-landlord-v1",
+      "name": "Four-player Landlord",
+      "description": "Fixed four-seat, two-deck Landlord game with private hands, ordered bidding, supported combination validation, team scoring, and privacy-preserving round restart on Leader migration.",
+      "type": "game",
+      "family": "four-player-landlord",
+      "tags": ["game", "cards", "multiplayer", "landlord", "private-hands", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "team_scoring", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "1b1b7210e0cc1b7cba7cf7a24346c3c35167b392a3c51efdc6d5a5a432dc3f18",
+      "path": "1b1b7210/e0cc1b7cba7cf7a24346c3c35167b392a3c51efdc6d5a5a432dc3f18",
+      "parent_protocol_id": null,
+      "created_reason": "v025: four-player private-hand game over authoritative-group and shared-deck primitives",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "Two decks, 25 cards each, eight-card bottom",
+          "options": {}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "aether-sigil-v1",
+      "name": "Aether Sigil",
+      "description": "Original four-player tactical card battle with one shared draw pile, private hands, public units and relics, spells, fatigue, and privacy-preserving Leader recovery.",
+      "type": "game",
+      "family": "aether-sigil",
+      "tags": ["game", "cards", "multiplayer", "shared-deck", "private-hands", "original", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "public_zones", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "dab6b150d69a48d2932484690e1025d5eba53b4fad61aae6d52cb5c9b011aec4",
+      "path": "dab6b150/d69a48d2932484690e1025d5eba53b4fad61aae6d52cb5c9b011aec4",
+      "parent_protocol_id": null,
+      "created_reason": "v025: original shared-deck/private-hand card-game reference protocol",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "20 life, 72-card shared pile",
+          "options": {"starting_life": 20}
+        },
+        "long": {
+          "description": "30 life, 72-card shared pile",
+          "options": {"starting_life": 30}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
       "alias": "tank-battle-v1",
       "name": "Tank Battle · Authoritative Realtime",
       "description": "Host-authoritative real-time strategy reference game. Local Agents micro-control every owned tank while humans issue macro orders; rules, map, army size, balance and neutral powerups are match-configurable.",

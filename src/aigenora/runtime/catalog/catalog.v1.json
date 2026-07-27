@@ -1,8 +1,8 @@
 {
   "catalog_version": "1",
-  "catalog_digest": "sha256:8d3253124cfb3fff6bb6060b7205f92686f8544255bfc2cb5edb2c095b37a590",
+  "catalog_digest": "sha256:302deacb2f72116fce15a3c529cc11bb199e222a0fd133bb4e6c7c9e580fba10",
   "execution_trust": "builtin_pinned",
-  "index_sha256": "cd09729825927f68428393e04ff16109da286416560c1587a7eb8060f30a3857",
+  "index_sha256": "7cfb86187894a67288169a4b3219b5384f4ea9d30cba8270f78bcf7983427c0d",
   "wheel_version": "0.1.2",
   "protocols": [
     {

@@ -169,12 +169,16 @@ def _run_daemon(args) -> int:
     startup_data = startup_event.get("data") or {}
     post_id = str(startup_data.get("post_id") or "")
     protocol_id = str(startup_data.get("protocol_id") or "")
+    group_id = str(startup_data.get("group_id") or "")
     shared_ui_manifest_hash = str(startup_data.get("ui_manifest_hash") or "")
     shared_bundle_manifest_hash = str(
         startup_data.get("bundle_manifest_hash") or ""
     )
     session_meta["post_id"] = post_id
     session_meta["protocol_id"] = protocol_id
+    if group_id:
+        session_meta["group_id"] = group_id
+        session_meta["group_role"] = "leader"
     if shared_ui_manifest_hash:
         session_meta["shared_ui_manifest_hash"] = shared_ui_manifest_hash
     if shared_bundle_manifest_hash:
@@ -219,6 +223,8 @@ def _run_daemon(args) -> int:
         ),
         "share_bundle": bool(getattr(args, "share_bundle", False)),
     }
+    if group_id:
+        result["group_id"] = group_id
     if shared_ui_manifest_hash:
         result["ui_manifest_hash"] = shared_ui_manifest_hash
     if shared_bundle_manifest_hash:
@@ -247,6 +253,13 @@ async def _network_host(args) -> int:
         )
     spec = json.loads((protocol_dir / "spec.json").read_text(encoding="utf-8"))
     check_spec_version(spec, reject_unknown=True)
+    from aigenora.agent.group import (
+        is_authoritative_group,
+        run_group_host_command,
+    )
+
+    if is_authoritative_group(spec):
+        return await run_group_host_command(args, spec)
     assert_hooks_implemented(
         protocol_dir,
         allow_skeleton=getattr(args, "allow_skeleton_hooks", False),
@@ -317,7 +330,7 @@ async def _network_host(args) -> int:
             body["options"] = options
         data = rest_client.json("POST", "/api/v1/invitations", body, expected={201})
         post_id = data["post_id"]
-        print(f"invite_created: true")
+        print("invite_created: true")
         print(f"post_id: {post_id}")
         invite_event = {"post_id": post_id, "protocol_id": proto_id}
         if shared_ui_artifact is not None:

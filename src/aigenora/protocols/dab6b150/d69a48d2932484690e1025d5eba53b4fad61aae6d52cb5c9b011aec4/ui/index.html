@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Aether Sigil · Aigenora</title>
+  <style>
+    :root { --void:#111016; --panel:#1a1720; --panel2:#211d27; --brass:#c49a52; --brass-dark:#755c35; --paper:#e8dcc2; --muted:#948b9c; --teal:#53b7a6; --violet:#9b79c6; --ember:#d8664b; --line:#3d3546; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:#09090d; color:var(--paper); }
+    body { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    button { font:inherit; }
+    .observatory { width:min(1480px,100%); min-height:100vh; margin:auto; padding:18px; background:var(--void); border-inline:1px solid #2d2833; }
+    header { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:end; padding:13px 10px 20px; border-bottom:1px solid var(--brass-dark); }
+    .kicker { color:var(--brass); font-size:9px; letter-spacing:.24em; }
+    h1 { margin:5px 0 0; font:600 clamp(30px,5vw,58px)/.9 Georgia,serif; letter-spacing:-.04em; }
+    .telemetry { text-align:right; color:var(--muted); font-size:9px; line-height:1.8; }
+    .telemetry b { display:block; color:var(--teal); font-size:13px; }
+    .recovery { min-height:0; margin-top:10px; padding:0 12px; color:var(--brass); font-size:10px; line-height:0; overflow:hidden; transition:.2s; }
+    .recovery.show { min-height:36px; padding-block:10px; line-height:1.5; border:1px solid var(--brass-dark); }
+    .arena { display:grid; grid-template-columns:245px minmax(0,1fr); gap:13px; margin-top:13px; }
+    .roster { border:1px solid var(--line); background:var(--panel); }
+    .roster-title { padding:13px; color:var(--brass); border-bottom:1px solid var(--line); font-size:9px; letter-spacing:.15em; }
+    .channeler { position:relative; width:100%; padding:14px; color:var(--paper); background:transparent; border:0; border-bottom:1px solid var(--line); text-align:left; cursor:pointer; }
+    .channeler:hover,.channeler:focus-visible { background:#25202c; outline:none; }
+    .channeler.current { box-shadow:inset 5px 0 var(--brass); }
+    .channeler.target { background:#322137; box-shadow:inset 0 0 0 2px var(--violet); }
+    .channeler.defeated { opacity:.42; }
+    .channeler .seat { color:var(--muted); font-size:8px; letter-spacing:.12em; }
+    .channeler b { display:block; margin:5px 0 10px; overflow:hidden; text-overflow:ellipsis; font:600 15px Georgia,serif; }
+    .vitals { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+    .metric { padding:5px; border:1px solid var(--line); text-align:center; }
+    .metric span { display:block; color:var(--muted); font-size:7px; }
+    .metric strong { font-size:12px; }
+    .field { min-width:0; border:1px solid var(--line); background:var(--panel); }
+    .field-head { display:flex; justify-content:space-between; align-items:center; gap:15px; padding:11px 15px; border-bottom:1px solid var(--line); background:var(--panel2); }
+    .field-head strong { color:var(--brass); font:600 15px Georgia,serif; }
+    .field-head span { color:var(--muted); font-size:9px; }
+    .astrolabe { position:relative; min-height:300px; padding:30px 22px; overflow:hidden; }
+    .astrolabe::before,.astrolabe::after {
+      content:""; position:absolute; left:50%; top:50%; border:1px solid var(--brass-dark); border-radius:50%; pointer-events:none; transform:translate(-50%,-50%);
+    }
+    .astrolabe::before { width:430px; height:430px; }
+    .astrolabe::after { width:270px; height:270px; border-style:dashed; }
+    .boards { position:relative; z-index:1; display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .board { min-width:0; padding:11px; border:1px solid var(--line); background:rgba(17,16,22,.92); }
+    .board.active { border-color:var(--brass); }
+    .board h3 { margin:0 0 10px; color:var(--muted); font-size:9px; letter-spacing:.1em; }
+    .zone { display:flex; flex-wrap:wrap; gap:7px; min-height:94px; }
+    .zone + h3 { margin-top:12px; }
+    .card {
+      position:relative; width:112px; min-height:148px; padding:10px;
+      border:1px solid var(--brass-dark); color:var(--paper); background:#19151c;
+      text-align:left; cursor:default; overflow:hidden;
+    }
+    button.card { cursor:pointer; }
+    button.card:hover,button.card:focus-visible { border-color:var(--brass); transform:translateY(-4px); outline:none; }
+    .card.selected { box-shadow:inset 0 0 0 3px var(--brass); transform:translateY(-6px); }
+    .card.target { box-shadow:inset 0 0 0 3px var(--violet); }
+    .card.unit { border-top:5px solid var(--teal); }
+    .card.spell { border-top:5px solid var(--violet); }
+    .card.relic { border-top:5px solid var(--brass); }
+    .card.exhausted { opacity:.55; }
+    .card .type { color:var(--muted); font-size:7px; letter-spacing:.13em; }
+    .card h4 { margin:5px 0 10px; font:600 15px/1.1 Georgia,serif; }
+    .card .cost { position:absolute; right:8px; top:7px; display:grid; place-items:center; width:24px; height:24px; border:1px solid var(--brass); border-radius:50%; color:var(--brass); font-weight:800; }
+    .card .stats { position:absolute; left:8px; right:8px; bottom:8px; display:flex; justify-content:space-between; color:var(--teal); font-size:9px; }
+    .card .effect { color:#b6acbc; font-size:8px; line-height:1.45; }
+    .hand-panel { margin-top:13px; border:1px solid var(--line); background:var(--panel); }
+    .hand-head { display:flex; justify-content:space-between; gap:12px; padding:12px 15px; border-bottom:1px solid var(--line); }
+    .hand-head b { font:600 17px Georgia,serif; }
+    .hand-head span { color:var(--muted); font-size:9px; }
+    .hand-scroll { overflow-x:auto; padding:18px; }
+    .hand { display:flex; justify-content:center; gap:8px; min-width:max-content; }
+    .command {
+      display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center;
+      margin-top:13px; padding:13px; border:1px solid var(--line); background:var(--panel2);
+    }
+    .selection { color:var(--muted); font-size:9px; line-height:1.6; }
+    .selection b { color:var(--paper); }
+    .buttons { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+    .buttons button { border:1px solid var(--brass-dark); color:var(--paper); background:#17141b; padding:9px 12px; cursor:pointer; font-weight:700; }
+    .buttons button.primary { color:#17141b; background:var(--brass); border-color:var(--brass); }
+    .buttons button.danger { color:#f4a18f; border-color:var(--ember); }
+    .buttons button:hover:not(:disabled),.buttons button:focus-visible { background:var(--violet); color:white; outline:none; }
+    .buttons button:disabled { opacity:.3; cursor:not-allowed; }
+    .status { min-height:20px; padding:9px 2px; color:var(--teal); font-size:9px; }
+    .status.error { color:#f48b78; }
+    @media (max-width:900px) {
+      .arena { grid-template-columns:1fr; }
+      .roster { display:grid; grid-template-columns:1fr 1fr; }
+      .roster-title { grid-column:1/-1; }
+      .boards { grid-template-columns:1fr; }
+      .astrolabe::before,.astrolabe::after { display:none; }
+    }
+    @media (max-width:580px) {
+      .observatory { padding:8px; }
+      header { grid-template-columns:1fr; }
+      .telemetry { text-align:left; }
+      .roster { grid-template-columns:1fr; }
+      .command { grid-template-columns:1fr; }
+      .buttons { justify-content:flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <main class="observatory">
+    <header>
+      <div><div class="kicker">AIGENORA · SHARED DECK OBSERVATORY</div><h1>Aether Sigil</h1></div>
+      <div class="telemetry"><span id="bridge">ALIGNING RELAY</span><b id="turn">TURN —</b><span id="frame">E— · F— · DRAW —</span></div>
+    </header>
+    <div class="recovery" id="recovery"></div>
+    <section class="arena">
+      <aside class="roster"><div class="roster-title">CHANNELER ARRAY · SELECT A TARGET</div><div id="players"></div></aside>
+      <div class="field">
+        <div class="field-head"><strong>Public Constellation</strong><span>UNITS AND RELICS ARE VISIBLE · HANDS REMAIN PRIVATE</span></div>
+        <div class="astrolabe"><div class="boards" id="boards"></div></div>
+      </div>
+    </section>
+    <section class="hand-panel">
+      <div class="hand-head"><b>Your sealed hand</b><span id="hand-meta">0 CARDS</span></div>
+      <div class="hand-scroll"><div class="hand" id="hand"></div></div>
+    </section>
+    <section class="command">
+      <div class="selection" id="selection">Select a card, unit, or opposing target.</div>
+      <div class="buttons">
+        <button class="primary" id="play">PLAY CARD</button>
+        <button id="attack">ATTACK</button>
+        <button id="end-turn">END TURN</button>
+        <button class="danger" id="concede">CONCEDE</button>
+      </div>
+    </section>
+    <div class="status" id="status" role="status"></div>
+  </main>
+  <script>
+  (function(){
+    "use strict";
+    var PARENT_ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin;
+    var pending={},snapshot={},view={},ready=false,selectedCard="",selectedUnit="",targetPlayer="",targetUnit="";
+    function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),PARENT_ORIGIN);}
+    function request(method,body){return new Promise(function(resolve,reject){
+      var id="sigil_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+      var timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"));},5000);
+      pending[id]=function(response){clearTimeout(timer);resolve(response);};
+      post({type:"request",id:id,method:method,body:body});
+    });}
+    window.addEventListener("message",function(event){
+      if(event.origin!==PARENT_ORIGIN)return;var data=event.data||{};if(data.source!=="aigenora-broadcast")return;
+      if(data.type==="hello-ack"){ready=true;document.getElementById("bridge").textContent="SIGIL BRIDGE LOCKED";request("snapshot").then(receive).catch(fail);return;}
+      if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return;}
+      if(data.type==="push"&&data.event==="snapshot")apply(data.data);
+    });
+    function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)));}
+    function apply(next){
+      if(!next||typeof next!=="object")return;snapshot=next;view=next.group_view||{};
+      if(!(view.my_hand||[]).some(function(card){return card.card_id===selectedCard;}))selectedCard="";
+      if(!view.unit_state||!view.unit_state[selectedUnit])selectedUnit="";
+      if(!view.unit_state||!view.unit_state[targetUnit])targetUnit="";
+      render();
+    }
+    function alias(key){var player=(view.players||{})[key]||{};return "SEAT "+String(player.seat??"—").padStart(2,"0")+" · "+String(key||"").slice(0,6).toUpperCase();}
+    function render(){
+      var group=snapshot.group||{},you=view.you||{},players=view.players||{},mine=view.current_player===you.public_key&&!snapshot.completed;
+      document.getElementById("turn").textContent=(snapshot.completed?"MATCH COMPLETE":"TURN "+(view.turn_number||"—"))+" · "+(mine?"YOUR MOVE":alias(view.current_player));
+      document.getElementById("frame").textContent="E"+(group.leader_epoch??"—")+" · F"+(group.seq??"—")+" · DRAW "+(view.draw_count??"—");
+      var recovery=document.getElementById("recovery");recovery.textContent=view.recovery_notice||"";recovery.className="recovery"+(view.recovery_notice?" show":"");
+      var playerBox=document.getElementById("players");playerBox.replaceChildren();
+      Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat;}).forEach(function(key){
+        var p=players[key],button=document.createElement("button");button.className="channeler"+(key===view.current_player?" current":"")+(key===targetPlayer?" target":"")+(p.defeated?" defeated":"");
+        var seat=document.createElement("span");seat.className="seat";seat.textContent="SEAT "+String(p.seat).padStart(2,"0")+(key===you.public_key?" · YOU":"");
+        var name=document.createElement("b");name.textContent=String(key).slice(0,11).toUpperCase();
+        var vitals=document.createElement("div");vitals.className="vitals";
+        [["LIFE",p.life],["SHIELD",p.shield],["AETHER",p.energy+"/"+p.max_energy]].forEach(function(metric){var box=document.createElement("div");box.className="metric";var label=document.createElement("span"),value=document.createElement("strong");label.textContent=metric[0];value.textContent=metric[1];box.append(label,value);vitals.append(box);});
+        button.append(seat,name,vitals);button.disabled=key===you.public_key||p.defeated;button.onclick=function(){targetPlayer=targetPlayer===key?"":key;targetUnit="";render();};playerBox.append(button);
+      });
+      var boards=document.getElementById("boards");boards.replaceChildren();
+      Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat;}).forEach(function(key){
+        var board=document.createElement("article");board.className="board"+(key===view.current_player?" active":"");
+        var title=document.createElement("h3");title.textContent=alias(key)+" · "+((view.hand_counts||{})[key]??0)+" HIDDEN CARDS";board.append(title);
+        var units=document.createElement("div");units.className="zone";
+        ((view.units||{})[key]||[]).forEach(function(card){units.append(cardNode(card,key,"unit"));});
+        board.append(units);var relicTitle=document.createElement("h3");relicTitle.textContent="RELIC ARRAY";board.append(relicTitle);
+        var relics=document.createElement("div");relics.className="zone";((view.relics||{})[key]||[]).forEach(function(card){relics.append(cardNode(card,key,"relic"));});board.append(relics);boards.append(board);
+      });
+      renderHand();renderSelection();
+      document.getElementById("play").disabled=!ready||!mine||!selectedCard;
+      document.getElementById("attack").disabled=!ready||!mine||!selectedUnit||(!targetPlayer&&!targetUnit);
+      document.getElementById("end-turn").disabled=!ready||!mine;
+      document.getElementById("concede").disabled=!ready||!mine;
+    }
+    function cardNode(card,owner,zone){
+      var button=document.createElement("button");button.className="card "+card.card_type;
+      var state=(view.unit_state||{})[card.card_id]||{};
+      if(card.card_id===selectedUnit||card.card_id===selectedCard)button.classList.add("selected");
+      if(card.card_id===targetUnit)button.classList.add("target");
+      if(state.exhausted)button.classList.add("exhausted");
+      var type=document.createElement("span");type.className="type";type.textContent=String(card.card_type).toUpperCase();
+      var name=document.createElement("h4");name.textContent=card.name;var cost=document.createElement("span");cost.className="cost";cost.textContent=card.cost;
+      var effect=document.createElement("p");effect.className="effect";effect.textContent=description(card,state);
+      button.append(type,name,cost,effect);
+      if(card.card_type==="unit"){var stats=document.createElement("div");stats.className="stats";stats.textContent="POWER "+(Number(card.power)+Number(state.power_bonus||0))+" · GUARD "+Math.max(0,Number(card.guard)-Number(state.damage||0));button.append(stats);}
+      if(zone==="hand"){button.onclick=function(){selectedCard=selectedCard===card.card_id?"":card.card_id;render();};}
+      else if(zone==="unit"){
+        var mine=view.you&&owner===view.you.public_key;
+        button.onclick=function(){if(mine){selectedUnit=selectedUnit===card.card_id?"":card.card_id;targetUnit="";}else{targetUnit=targetUnit===card.card_id?"":card.card_id;targetPlayer="";}render();};
+      } else button.disabled=true;
+      return button;
+    }
+    function description(card,state){
+      if(card.card_type==="unit"){
+        var damage=Number(state.damage||0);
+        return (state.exhausted?"EXHAUSTED · ":"READY · ")+damage+" DAMAGE";
+      }
+      var labels={damage_player:"Deal damage to a channeler.",heal_self:"Restore your life.",draw:"Draw from the shared pile.",destroy_unit:"Dissolve a small opposing unit.",shield_self:"Raise a personal shield.",ready_all:"Ready every allied unit.",end_heal:"Heal when your turn ends.",spell_power:"Amplify damage spells.",unit_power:"Empower newly summoned units.",max_energy:"Expand maximum Aether."};
+      return labels[card.effect]||"Persistent aether effect.";
+    }
+    function renderHand(){
+      var hand=(view.my_hand||[]).slice().sort(function(a,b){return Number(a.cost)-Number(b.cost)||String(a.name).localeCompare(String(b.name));});
+      document.getElementById("hand-meta").textContent=hand.length+" PRIVATE CARDS · "+((view.discard||[]).length)+" DISCARDED";
+      var box=document.getElementById("hand");box.replaceChildren();hand.forEach(function(card){box.append(cardNode(card,view.you&&view.you.public_key,"hand"));});
+    }
+    function renderSelection(){
+      var hand=(view.my_hand||[]),card=hand.find(function(item){return item.card_id===selectedCard;});
+      var parts=[];if(card)parts.push("CARD: "+card.name);if(selectedUnit)parts.push("ATTACKER: "+cardName(selectedUnit));if(targetPlayer)parts.push("TARGET: "+alias(targetPlayer));if(targetUnit)parts.push("TARGET UNIT: "+cardName(targetUnit));
+      document.getElementById("selection").innerHTML=parts.length?"<b>SELECTION</b><br>"+parts.join(" · "):"Select a private card, allied unit, or opposing target.";
+    }
+    function cardName(cardId){
+      var found=(view.my_hand||[]).concat(view.discard||[]);
+      Object.values(view.units||{}).forEach(function(cards){found=found.concat(cards);});
+      var card=found.find(function(item){return item.card_id===cardId;});return card?card.name:String(cardId).slice(0,6);
+    }
+    function errorText(response){return (response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status);}
+    function status(message,error){var el=document.getElementById("status");el.textContent=message;el.className="status"+(error?" error":"");}
+    function fail(error){status(error.message||String(error),true);}
+    async function action(body){try{var response=await request("action",body);if(!response.ok)throw new Error(errorText(response));status("Action queued for authoritative validation.",false);}catch(error){fail(error);}}
+    document.getElementById("play").onclick=function(){action({kind:"play_card",card_id:selectedCard,target_public_key:targetPlayer,target_card_id:targetUnit});};
+    document.getElementById("attack").onclick=function(){action({kind:"attack",unit_id:selectedUnit,target_public_key:targetPlayer,target_card_id:targetUnit});};
+    document.getElementById("end-turn").onclick=function(){action({kind:"end_turn"});};
+    document.getElementById("concede").onclick=function(){if(confirm("Concede this match?"))action({kind:"concede"});};
+    post({type:"hello",capabilities:["snapshot","action"]});
+  })();
+  </script>
+</body>
+</html>

@@ -88,6 +88,25 @@ After loading, a business UI must call `GET /api/info` (or the `info` postMessag
 
 `/api/info` also provides `role`, `peer_control_mode`, `supported_control_modes`, `decision_schema`, `ui_artifact`, and current-Session `bundle_artifact` provenance when present. `/api/ui-available` exposes UI provenance so a page can label Local, Platform Author, Host P2P UI, or Host P2P Bundle. Peer mode is display-only. Cover every action window hooks may publish (including setup/draw/pass/forced pass), show its deadline, and render only local private information present in the snapshot. Submit through `/api/decide`; never construct P2P messages directly or mutate the Protocol.
 
+### Authoritative Group UI Bridge
+
+An `authoritative_group` UI negotiates `["snapshot", "action"]` in its
+`aigenora-ui` hello message. Read only the replacement snapshot delivered by
+the parent bridge, then submit the protocol action object directly with bridge
+method `action`; the parent maps it to local `POST /api/group/action`. Do not
+wrap the action, assign `client_seq`, sign a frame, or contact the Leader
+directly—the group runtime owns all of those steps.
+
+The snapshot contains the current Member's signed view, group/epoch/sequence
+metadata, and no complete authority state. Render only fields present in that
+view. Reset transient UI selections when the hand or legal-action set changes,
+show queued actions as pending Leader validation, and display a migration
+notice when `leader_epoch` increases. Never merge an older `(epoch, seq)` over
+a newer snapshot.
+
+Group bundles must be installed locally and content-addressed on every Member.
+The group runtime rejects Host P2P UI and executable bundle sharing.
+
 ### Embedded Tactical Coach (webui)
 
 The webui live page has a **tactical coach** chat panel — the human user talks tactics with their **own agent CLI** (claude-code / codex / opencode) during a live game. Unlike whisper (a one-way hint injected at the next decision point), the coach is a two-way Human↔LLM chat stored in `coach_workspace/coach_dialog.jsonl`; only the "Adopt as hint" button turns a coach reply into a whisper. **Coach red line**: it analyzes tactics only — must not call tools, edit files, or invoke the `aigenora` CLI (a slim `COACH_SKILL.md` role-locks it).

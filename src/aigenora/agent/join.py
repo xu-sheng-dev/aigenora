@@ -142,6 +142,9 @@ def _run_daemon(args) -> int:
     if startup_event is not None:
         startup_data = startup_event.get("data") or {}
         session_id = str(startup_data.get("session_id") or "")
+        group_id = str(startup_data.get("group_id") or "")
+        member_id = str(startup_data.get("member_id") or "")
+        seat = startup_data.get("seat")
         protocol_dir = str(startup_data.get("protocol_dir") or "")
         local_protocol_dir = str(startup_data.get("local_protocol_dir") or "")
         active_hooks_source = str(
@@ -153,6 +156,13 @@ def _run_daemon(args) -> int:
         ui_dir = str(startup_data.get("ui_dir") or "")
         if session_id:
             session_meta["session_id"] = session_id
+        if group_id:
+            session_meta["group_id"] = group_id
+            session_meta["group_role"] = "member"
+        if member_id:
+            session_meta["member_id"] = member_id
+        if isinstance(seat, int) and not isinstance(seat, bool):
+            session_meta["seat"] = seat
         if protocol_dir:
             session_meta["protocol_dir"] = protocol_dir
         if local_protocol_dir:
@@ -169,6 +179,9 @@ def _run_daemon(args) -> int:
             session_meta["ui_dir"] = ui_dir
         if (
             session_id
+            or group_id
+            or member_id
+            or isinstance(seat, int)
             or protocol_dir
             or local_protocol_dir
             or active_hooks_source
@@ -183,6 +196,10 @@ def _run_daemon(args) -> int:
                     key: session_meta[key]
                     for key in (
                         "session_id",
+                        "group_id",
+                        "group_role",
+                        "member_id",
+                        "seat",
                         "protocol_dir",
                         "local_protocol_dir",
                         "active_hooks_source",
@@ -273,6 +290,9 @@ def _run_daemon(args) -> int:
     }
     if session_id:
         result["session_id"] = session_id
+    if session_meta.get("group_id"):
+        result["group_id"] = session_meta["group_id"]
+        result["seat"] = session_meta.get("seat")
     if isinstance(session_meta.get("ui_artifact"), dict):
         result["ui_artifact"] = session_meta["ui_artifact"]
     if isinstance(session_meta.get("bundle_artifact"), dict):
@@ -314,9 +334,17 @@ async def _join(args) -> int:
         raise RuntimeError("invitation does not declare a protocol")
     ticket = _ticket_from_post(post)
     if not post.get("transport_binding_signature"):
-        raise RuntimeError("invitation has no transport_binding_signature — possible MITM attack")
-    canonical = transport_binding_canonical(post.get("public_key", ""), "iroh", ticket, proto_id)
-    verify_raw(post.get("public_key", ""), canonical.encode("utf-8"), post["transport_binding_signature"])
+        raise RuntimeError(
+            "invitation has no transport_binding_signature — possible MITM attack"
+        )
+    canonical = transport_binding_canonical(
+        post.get("public_key", ""), "iroh", ticket, proto_id
+    )
+    verify_raw(
+        post.get("public_key", ""),
+        canonical.encode("utf-8"),
+        post["transport_binding_signature"],
+    )
     proto_dir, created_hooks = prepare_protocol(
         client,
         proto_id,
@@ -326,6 +354,20 @@ async def _join(args) -> int:
     if is_received_bundle(proto_dir):
         raise RuntimeError(
             "a received Host bundle cannot be reused as a trusted local protocol"
+        )
+    spec = load_spec(proto_dir / "spec.json")
+    check_spec_version(spec, reject_unknown=True)
+    from aigenora.agent.group import (
+        is_authoritative_group,
+        run_group_join_command,
+    )
+
+    if is_authoritative_group(spec):
+        return await run_group_join_command(
+            args,
+            post=post,
+            protocol_dir=proto_dir,
+            spec=spec,
         )
     local_hooks_error: Exception | None = None
     try:
@@ -345,8 +387,6 @@ async def _join(args) -> int:
             if local_hooks_error is exc:
                 raise
             raise local_hooks_error from exc
-    spec = load_spec(proto_dir / "spec.json")
-    check_spec_version(spec, reject_unknown=True)
     validate_extra_args(spec, args.extra_args)
     options = post.get("options") if isinstance(post.get("options"), dict) else {}
     host_control_mode = post.get("host_control_mode") or "hybrid"

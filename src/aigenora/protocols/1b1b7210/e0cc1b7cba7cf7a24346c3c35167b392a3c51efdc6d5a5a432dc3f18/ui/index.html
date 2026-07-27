@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Four-player Landlord · Aigenora</title>
+  <style>
+    :root { --felt:#123f34; --felt-dark:#092c25; --cream:#f1e5c8; --paper:#fff8e9; --ink:#171713; --red:#b83b31; --gold:#d2a84d; --line:#497265; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:#071e1a; color:var(--cream); }
+    body { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    button { font:inherit; }
+    .club { width:min(1420px,100%); min-height:100vh; margin:auto; padding:16px clamp(10px,2.5vw,34px) 26px; background:var(--felt-dark); border-inline:1px solid #285247; }
+    header { display:flex; justify-content:space-between; align-items:end; gap:18px; padding:14px 4px 18px; border-bottom:1px solid var(--line); }
+    .kicker { color:var(--gold); font-size:9px; letter-spacing:.2em; }
+    h1 { margin:5px 0 0; font:700 clamp(27px,4vw,48px)/1 Georgia,serif; }
+    .ledger { text-align:right; font-size:10px; color:#91b3a7; line-height:1.7; }
+    .ledger b { display:block; color:var(--cream); font-size:13px; }
+    .recovery { display:none; margin:12px 0; padding:9px 12px; border:1px solid var(--gold); color:var(--gold); font-size:10px; }
+    .recovery.show { display:block; }
+    .table {
+      margin-top:14px; padding:18px; border:10px solid #573c27; outline:2px solid #bd8b4b;
+      background:var(--felt); box-shadow:inset 0 0 0 2px #25594b;
+    }
+    .players { display:grid; grid-template-columns:repeat(4,1fr); gap:9px; }
+    .player { min-width:0; padding:11px; border:1px solid var(--line); background:#0d352c; }
+    .player.current { border-color:var(--gold); box-shadow:inset 0 -4px var(--gold); }
+    .player.you { background:#174a3d; }
+    .player .seat { color:var(--gold); font-size:9px; letter-spacing:.12em; }
+    .player b { display:block; margin:5px 0; overflow:hidden; text-overflow:ellipsis; font:600 15px Georgia,serif; }
+    .player small { color:#8fb1a5; font-size:9px; }
+    .role { float:right; color:var(--red); font-weight:800; }
+    .center {
+      display:grid; grid-template-columns:minmax(160px,.7fr) minmax(280px,1.6fr) minmax(160px,.7fr);
+      gap:18px; align-items:center; min-height:290px; padding:26px 0;
+    }
+    .bottom,.trick,.bid-board { min-width:0; text-align:center; }
+    .label { color:#8fb1a5; font-size:9px; letter-spacing:.16em; text-transform:uppercase; }
+    .trick h2 { margin:8px 0 12px; font:600 22px Georgia,serif; }
+    .cards { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; }
+    .card {
+      position:relative; width:62px; height:88px; flex:0 0 auto; padding:7px;
+      border:1px solid #c9b995; border-radius:5px; color:var(--ink); background:var(--paper);
+      text-align:left; box-shadow:2px 3px 0 rgba(0,0,0,.25); user-select:none;
+    }
+    button.card { cursor:pointer; transition:transform .12s,border-color .12s; }
+    button.card:hover,button.card:focus-visible { transform:translateY(-7px); border-color:var(--gold); outline:none; }
+    button.card.selected { transform:translateY(-13px); border:3px solid var(--gold); padding:5px; }
+    .card.red { color:var(--red); }
+    .card strong { display:block; font:700 18px/1 Georgia,serif; }
+    .card .suit { display:block; margin-top:2px; font-size:17px; }
+    .card .copy { position:absolute; right:5px; bottom:4px; color:#847860; font-size:8px; }
+    .card.back { border-color:#b78d51; background:#7e2927; color:var(--cream); display:grid; place-items:center; text-align:center; }
+    .bid-board .bid { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dotted var(--line); font-size:10px; }
+    .bid-board .bid b { color:var(--gold); }
+    .hand-zone { padding:15px 0 8px; border-top:1px solid var(--line); }
+    .hand-head { display:flex; justify-content:space-between; align-items:end; margin-bottom:15px; }
+    .hand-head h2 { margin:3px 0 0; font:600 22px Georgia,serif; }
+    .hand-scroll { overflow-x:auto; overflow-y:visible; padding:16px 6px 4px; }
+    .hand { display:flex; min-width:max-content; justify-content:center; }
+    .hand .card { margin-left:-20px; }
+    .hand .card:first-child { margin-left:0; }
+    .controls { display:flex; flex-wrap:wrap; justify-content:center; gap:9px; min-height:46px; margin-top:15px; }
+    .controls button {
+      min-width:105px; border:1px solid var(--gold); color:var(--gold);
+      background:#0a2d25; padding:10px 15px; cursor:pointer; font-weight:800;
+    }
+    .controls button.primary { color:var(--ink); background:var(--gold); }
+    .controls button.pass { color:#e7c3b9; border-color:var(--red); }
+    .controls button:hover:not(:disabled),.controls button:focus-visible { color:var(--paper); background:var(--red); outline:none; }
+    .controls button:disabled { opacity:.3; cursor:not-allowed; }
+    .status { min-height:22px; padding-top:10px; text-align:center; color:#8fb1a5; font-size:10px; }
+    .status.error { color:#ff8f82; }
+    @media (max-width:850px) {
+      .players { grid-template-columns:1fr 1fr; }
+      .center { grid-template-columns:1fr; min-height:0; }
+      .table { padding:10px; border-width:6px; }
+      .bottom { order:2; }.trick{order:1}.bid-board{order:3}
+      .card { width:52px; height:76px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="club">
+    <header>
+      <div><div class="kicker">AIGENORA · FOUR SEAT CARD CLUB</div><h1>Four-player Landlord</h1></div>
+      <div class="ledger"><span id="bridge">SHUFFLING LINK</span><b id="phase">WAITING</b><span id="frame">E— · F—</span></div>
+    </header>
+    <div class="recovery" id="recovery"></div>
+    <section class="table">
+      <div class="players" id="players"></div>
+      <div class="center">
+        <div class="bottom"><div class="label">Eight-card Bottom</div><div class="cards" id="bottom"></div></div>
+        <div class="trick"><div class="label">Center Trick</div><h2 id="combination">Lead any supported combination</h2><div class="cards" id="trick"></div></div>
+        <div class="bid-board"><div class="label">Bidding Ledger</div><div id="bids"></div></div>
+      </div>
+      <div class="hand-zone">
+        <div class="hand-head"><div><div class="label">Your Private Hand</div><h2 id="hand-title">0 cards</h2></div><div class="label" id="turn">WAITING FOR TABLE</div></div>
+        <div class="hand-scroll"><div class="hand" id="hand"></div></div>
+        <div class="controls" id="controls"></div>
+        <div class="status" id="status" role="status"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+  (function(){
+    "use strict";
+    var PARENT_ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin;
+    var pending={},snapshot={},view={},selected=new Set(),ready=false,lastHandKey="";
+    function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),PARENT_ORIGIN);}
+    function request(method,body){return new Promise(function(resolve,reject){
+      var id="land_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+      var timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"));},5000);
+      pending[id]=function(response){clearTimeout(timer);resolve(response);};
+      post({type:"request",id:id,method:method,body:body});
+    });}
+    window.addEventListener("message",function(event){
+      if(event.origin!==PARENT_ORIGIN)return;var data=event.data||{};if(data.source!=="aigenora-broadcast")return;
+      if(data.type==="hello-ack"){ready=true;document.getElementById("bridge").textContent="SIGNED TABLE LINK";request("snapshot").then(receive).catch(fail);return;}
+      if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return;}
+      if(data.type==="push"&&data.event==="snapshot")apply(data.data);
+    });
+    function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)));}
+    function apply(next){if(!next||typeof next!=="object")return;snapshot=next;view=next.group_view||{};var key=(view.my_hand||[]).map(function(c){return c.card_id;}).join(",");if(key!==lastHandKey){selected=new Set();lastHandKey=key;}render();}
+    function alias(key){var p=(view.players||{})[key]||{};return "SEAT "+String(p.seat??"—").padStart(2,"0")+" · "+String(key||"").slice(0,6).toUpperCase();}
+    function cardNode(card,clickable){
+      var node=document.createElement(clickable?"button":"div");node.className="card "+(["diamonds","hearts"].includes(card.suit)?"red":"")+(selected.has(card.card_id)?" selected":"");
+      var rank=document.createElement("strong"),suit=document.createElement("span"),copy=document.createElement("span");
+      rank.textContent=card.rank||"?";suit.className="suit";suit.textContent=({clubs:"♣",diamonds:"♦",hearts:"♥",spades:"♠",joker:"★"})[card.suit]||"";
+      copy.className="copy";copy.textContent="#"+(Number(card.copy)+1);node.append(rank,suit,copy);
+      if(clickable)node.onclick=function(){selected.has(card.card_id)?selected.delete(card.card_id):selected.add(card.card_id);renderHand();renderControls();};
+      return node;
+    }
+    function render(){
+      var group=snapshot.group||{},you=view.you||{},players=view.players||{},current=view.current_player;
+      document.getElementById("phase").textContent=String(view.phase||"waiting").toUpperCase()+" · ROUND "+(view.round_number||"—");
+      document.getElementById("frame").textContent="E"+(group.leader_epoch??"—")+" · F"+(group.seq??"—");
+      var recovery=document.getElementById("recovery");recovery.textContent=view.recovery_notice||"";recovery.className="recovery"+(view.recovery_notice?" show":"");
+      var playerBox=document.getElementById("players");playerBox.replaceChildren();
+      Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat;}).forEach(function(key){
+        var player=players[key],row=document.createElement("article");row.className="player"+(key===current?" current":"")+(key===you.public_key?" you":"");
+        var seat=document.createElement("span");seat.className="seat";seat.textContent="SEAT "+String(player.seat).padStart(2,"0");
+        var role=document.createElement("span");role.className="role";role.textContent=String(player.role||"").toUpperCase();
+        var name=document.createElement("b");name.textContent=String(key).slice(0,10).toUpperCase()+(key===you.public_key?" · YOU":"");
+        var detail=document.createElement("small");detail.textContent=((view.hand_counts||{})[key]??0)+" CARDS · SCORE "+((view.scores||{})[key]??0);
+        row.append(seat,role,name,detail);playerBox.append(row);
+      });
+      var bottom=document.getElementById("bottom");bottom.replaceChildren();
+      if((view.bottom_revealed||[]).length)(view.bottom_revealed||[]).forEach(function(card){bottom.append(cardNode(card,false));});
+      else for(var i=0;i<8;i++){var back=document.createElement("div");back.className="card back";back.textContent="A";bottom.append(back);}
+      var trick=document.getElementById("trick");trick.replaceChildren();
+      if(view.last_play){(view.last_play.cards||[]).forEach(function(card){trick.append(cardNode(card,false));});document.getElementById("combination").textContent=String(view.last_play.combination.kind).replaceAll("_"," ").toUpperCase()+" · "+alias(view.last_play.public_key);}
+      else document.getElementById("combination").textContent="Lead any supported combination";
+      var bids=document.getElementById("bids");bids.replaceChildren();
+      Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat;}).forEach(function(key){
+        var row=document.createElement("div");row.className="bid";var left=document.createElement("span"),right=document.createElement("b");left.textContent=alias(key);right.textContent=Object.prototype.hasOwnProperty.call(view.bids||{},key)?String(view.bids[key]):"—";row.append(left,right);bids.append(row);
+      });
+      document.getElementById("turn").textContent=current===you.public_key?"YOUR TURN":"CURRENT · "+alias(current);
+      renderHand();renderControls();
+    }
+    function renderHand(){
+      var hand=(view.my_hand||[]).slice().sort(function(a,b){return Number(a.value)-Number(b.value)||String(a.suit).localeCompare(String(b.suit))||Number(a.copy)-Number(b.copy);});
+      document.getElementById("hand-title").textContent=hand.length+" cards"+(view.you&&view.you.is_landlord?" · LANDLORD":" · FARMER");
+      var box=document.getElementById("hand");box.replaceChildren();hand.forEach(function(card){box.append(cardNode(card,true));});
+    }
+    function button(label,body,className){var node=document.createElement("button");node.textContent=label;if(className)node.className=className;node.onclick=function(){action(body);};return node;}
+    function renderControls(){
+      var box=document.getElementById("controls");box.replaceChildren();var mine=view.you&&view.current_player===view.you.public_key&&!snapshot.completed;
+      if(view.phase==="bidding"){
+        [0,1,2,3].forEach(function(value){var b=button(value===0?"PASS BID":"BID "+value,{kind:"bid",value:value},value===3?"primary":"");b.disabled=!mine||!ready;box.append(b);});
+      } else if(view.phase==="playing"){
+        var play=button("PLAY "+selected.size+" CARD"+(selected.size===1?"":"S"),{kind:"play",card_ids:Array.from(selected)},"primary");play.disabled=!mine||!selected.size||!ready;box.append(play);
+        var pass=button("PASS",{kind:"pass"},"pass");pass.disabled=!mine||!view.last_play||!ready;box.append(pass);
+        var clear=document.createElement("button");clear.textContent="CLEAR";clear.disabled=!selected.size;clear.onclick=function(){selected.clear();renderHand();renderControls();};box.append(clear);
+      } else if(snapshot.completed){
+        var result=document.createElement("strong");result.textContent="GAME OVER · "+String(snapshot.outcome||"").toUpperCase()+" WIN";box.append(result);
+      }
+    }
+    function errorText(response){return (response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status);}
+    function status(message,error){var el=document.getElementById("status");el.textContent=message;el.className="status"+(error?" error":"");}
+    function fail(error){status(error.message||String(error),true);}
+    async function action(body){try{var response=await request("action",body);if(!response.ok)throw new Error(errorText(response));status("Move queued for authoritative validation.",false);}catch(error){fail(error);}}
+    post({type:"hello",capabilities:["snapshot","action"]});
+  })();
+  </script>
+</body>
+</html>

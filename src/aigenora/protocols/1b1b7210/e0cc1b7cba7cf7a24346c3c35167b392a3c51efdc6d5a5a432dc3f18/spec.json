@@ -1,0 +1,56 @@
+{
+  "name": "Four-player Landlord",
+  "spec_version": "1.0",
+  "description": "A fixed four-player, two-deck shedding game. One Landlord competes against three Farmers through ordered bidding, private hands, public tricks, bombs, and team scoring.",
+  "type": "game",
+  "family": "four-player-landlord",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 4,
+      "max_participants": 4,
+      "allow_late_join": false,
+      "recovery_mode": "restart_round",
+      "start_policy": "fixed_full",
+      "checkpoint_every_events": 1,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 32
+    }
+  },
+  "messages": [
+    {
+      "name": "landlord_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["landlord_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "landlord_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["landlord_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "deal_seed": {"type": "text", "max_length": 128}
+  },
+  "rules": {
+    "table": "Exactly four stable seats use two standard 54-card decks. Each Member receives 25 cards and the winning bidder receives the eight-card bottom, for 33 Landlord cards versus 25 for each Farmer.",
+    "bidding": "Seats bid once in order with 0, 1, 2, or 3. The first highest bid wins; a bid of 3 ends bidding immediately. If everyone passes, the authority redeals.",
+    "plays": "Supported combinations are single, pair, triple, triple with single, triple with pair, straight, consecutive pairs, pure airplane, airplane with distinct singles, airplane with pairs, four with two singles, four with two pairs, same-rank bombs of four through eight cards, and joker bombs of two through four jokers.",
+    "comparison": "A normal play must match the previous combination kind and card count and have a higher primary rank. A same-rank bomb beats every normal play; more cards beat fewer cards, then rank breaks ties. Joker bombs beat same-rank bombs; more jokers beat fewer jokers.",
+    "turns": "Three consecutive passes return initiative to the last player. The first empty hand ends the game. Farmers share one team result.",
+    "scoring": "Base score is max(1, winning bid) multiplied by two for every bomb. A winning Landlord gains three bases and each Farmer loses one; a Farmer win reverses those values.",
+    "privacy": "Only the current Leader stores the full deal. Every signed Member view contains that Member's hand and only public counts for other hands.",
+    "recovery": "A Leader change preserves public scores but abandons and redeals the current round. Hidden cards and draw order are never copied to all failover candidates."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_landlord_actions"
+  }
+}

@@ -30,6 +30,7 @@
 | `simultaneous_round` | engine owns commit-reveal | `proto_round_value` + `proto_round_judge` (+optional pure) | RPS / Coin Flip |
 | `free` | bidirectional free messages | `proto_on_message` / `proto_on_send` / `proto_on_end` | human-chat |
 | `mental_poker` | engine owns fair dealing | `proto_mp_*` (5 hooks, see Card Games) | Crazy Eights / Briscola |
+| `authoritative_group` | one Leader orders actions from 2–32 Members | `proto_group_*` (8 hooks) | Community Room / Meeting / Landlord / Aether Sigil |
 | `authoritative_realtime` | Host owns fixed tick; Guest queues future commands | `proto_realtime_*` (7 hooks) | Tank Battle |
 
 > There is no engine named `sequential_turn`. Turn-based games are built on `session_loop` (generic hooks driving a ping-pong loop) — e.g. Guess Number has the Host judge each guess via `proto_host_handle` and the Guest re-guess via `proto_guest_handle`.
@@ -243,6 +244,42 @@ Without a declaration, only `autonomous` and `hybrid` are supported. `BaseProtoc
 - `human`: await a strict explicit action for every local action; timeout, absence, or invalid input must raise and abort, never invoke a random/strategy picker.
 
 Human-capable hooks must publish current `legal_actions`, validate the choice, then translate it into the unchanged Protocol message. Setup secrets, draw, pass, and forced pass are actions too. Card games use the mental-poker local action adapter, and snapshots expose only the local hand—never peer hidden cards. Continuously ticking modes such as `authoritative_realtime` must not block on human input; do not declare `human` until a non-blocking micro-input queue exists.
+
+### authoritative_group (Host-authoritative multiplayer)
+
+Use this mode for a star room in which the current Leader has one P2P channel
+per Member and is the only process that applies business actions. The network
+Leader is not a business role: facilitator, Landlord, active player, and room
+owner remain protocol state.
+
+| Hook | Contract |
+|---|---|
+| `proto_group_initial_state(members)` | Create the complete authority state |
+| `proto_group_member_joined(state, member)` | Apply a signed admission |
+| `proto_group_member_left(state, member, reason)` | Apply an explicit departure |
+| `proto_group_handle(state, actor, action)` | Validate and apply one ordered action |
+| `proto_group_view(state, viewer)` | Return only the state visible to that Member |
+| `proto_group_recovery_snapshot(state)` | Return only state safe to replicate to failover candidates |
+| `proto_group_restore(checkpoint, members, new_epoch)` | Restore state on the new Leader |
+| `proto_group_on_leader_changed(state, old_leader, new_leader)` | Apply protocol-specific migration behavior |
+
+`proto_group_handle` and the membership hooks return a dictionary with
+`state`, and may also return `events`, `direct`, `completed`, and `outcome`.
+Public `events` are delivered to every Member. `direct` is routed only to the
+named Member, but protocol state exposed through `proto_group_view` is still
+the durable privacy boundary. Never put another Member's hand, secret, or
+private action in public events or a recovery snapshot.
+
+The engine bounds JSON, deduplicates each actor's `client_seq`, assigns global
+`seq`, signs the public frame core and private view hash, and certifies each
+checkpoint. Members apply a strictly contiguous chain for the current
+`leader_epoch`. The server advertises only a checkpoint acknowledged by at
+least one non-Leader Member, so failover never relies on a Host-only snapshot.
+
+Choose `recovery_mode: "exact"` only when the checkpoint is safe for every
+candidate. Use `restart_round` for hidden-hand games: keep safe public scores
+and membership, discard the secret deal, and generate a fresh round after
+Leader migration. Use `abort` when neither is safe.
 
 ### authoritative_realtime (Host-authoritative RTS)
 

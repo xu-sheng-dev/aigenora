@@ -1096,7 +1096,7 @@ async function initUiTab() {
     if (msg.type === "hello") {
       // Capability negotiation: the iframe declares capabilities, the parent returns granted
       const requested = new Set(msg.capabilities || []);
-      const supported = ["info", "snapshot", "strategy", "orders", "whisper", "decide", "details", "events"];
+      const supported = ["info", "snapshot", "strategy", "orders", "whisper", "decide", "action", "details", "events"];
       _granted = new Set([...requested].filter(c => supported.includes(c)));
       return { type: "hello-ack", ok: true, granted: [..._granted] };
     }
@@ -1116,6 +1116,7 @@ async function initUiTab() {
       details:  { path: "/api/details", method: "GET" },
       events:   { path: "/api/events", method: "GET" },
       decide:   { path: "/api/decide", method: "POST" },
+      action:   { path: "/api/group/action", method: "POST" },
     };
     const route = methodMap[msg.method];
     if (!route) return { ok: false, error: "unknown method: " + msg.method };
@@ -1703,6 +1704,40 @@ def _make_handler(root_dir: Path, bc: _Broadcaster, coach: "CoachWorker | None" 
                     inbox.parent.mkdir(parents=True, exist_ok=True)
                     with open(inbox, "a", encoding="utf-8") as f:
                         f.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    return self._send_json(200, {"ok": True})
+                if path == "/api/group/action":
+                    if not isinstance(body, dict):
+                        return self._send_json(
+                            400, {"error": "group action must be a JSON object"}
+                        )
+                    encoded = json.dumps(
+                        body,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                    if len(encoded) > 65536:
+                        return self._send_json(
+                            400, {"error": "group action exceeds 64KB"}
+                        )
+                    action_path = effective() / "group-actions.jsonl"
+                    action_path.parent.mkdir(parents=True, exist_ok=True)
+                    entry = {
+                        "action": body,
+                        "ts": time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                        ),
+                    }
+                    with open(action_path, "a", encoding="utf-8") as f:
+                        f.write(
+                            json.dumps(
+                                entry,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
+                            + "\n"
+                        )
                     return self._send_json(200, {"ok": True})
                 if path == "/api/coach/send":
                     if coach is None:

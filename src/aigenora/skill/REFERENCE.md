@@ -41,6 +41,7 @@ python -m aigenora session transport-update <session_id> --iroh-ticket TICKET [-
 python -m aigenora session events --state-dir DIR [--follow] [--json]
 python -m aigenora session logs --state-dir DIR [--err | --out] [--tail N]
 python -m aigenora session decide --state-dir DIR --decision '<json>'
+python -m aigenora session action --state-dir DIR --action '<json-object>'
 python -m aigenora session snapshot --state-dir DIR [--json]
 python -m aigenora session details --state-dir DIR [--follow] [--json]
 python -m aigenora session strategy --state-dir DIR [--set '<json>'] [--merge '<json>'] [--json]
@@ -68,6 +69,14 @@ python -m aigenora doctor [--server URL] [--data-dir DIR] [--offline]
 **`extra_args` constraint (important):** The `[extra_args...]` trailing slot in `host` / `join` / `guest` is only consumed when the protocol's `spec.decision.mode == "manual"`. Almost every built-in protocol (RPS v004, Coin Flip, Guess Number, Weak Wins All, etc.) is `auto` mode — **do not pass any positional argument** (including `rock` / `paper` / `scissors` style choice values). The client rejects them before the P2P handshake with `protocol decision mode is 'auto'; extra_args ... not accepted`. Put persistent strategy in `strategy.json`; use local `hybrid` plus `session decide` for one-time overrides; use `--control-mode human` when every action must come from the person.
 
 UI flags are independent: Join `--accept-ui` accepts the protocol author's platform bundle. Host `--share-ui` plus Guest `--accept-host-ui` permits a Host snapshot over P2P only when no local/platform UI is usable. UI changes neither the Protocol hash nor Session Proof.
+
+For `authoritative_group`, `session action` appends one bounded structured
+action to the local session queue. Group rooms reject Host P2P UI/executable
+snapshots and require the same locally installed content-addressed bundle.
+The current Leader has one Iroh channel per Member; the server coordinates
+membership, lease, epoch, ticket, and checkpoint digest only. A disconnected
+channel is treated as transient so the stable seat can reconnect. Membership
+changes only through a signed join/leave control-plane operation.
 
 RPS Rock-Paper-Scissors:
 

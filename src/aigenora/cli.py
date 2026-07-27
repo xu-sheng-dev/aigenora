@@ -424,6 +424,11 @@ def build_parser() -> argparse.ArgumentParser:
     sd = sess_sub.add_parser("decide")
     sd.add_argument("--state-dir", required=True)
     sd.add_argument("--decision", required=True)
+    sga = sess_sub.add_parser(
+        "action", help="Submit a structured action to an authoritative group session"
+    )
+    sga.add_argument("--state-dir", required=True)
+    sga.add_argument("--action", required=True, help="Group action JSON object")
     sl_cmd = sess_sub.add_parser("list")
     sl_cmd.add_argument("--data-dir")
     sl_cmd.add_argument("--json", action="store_true", dest="json_output")
@@ -739,6 +744,8 @@ def main(argv: list[str] | None = None) -> int:
             run = sess_mod.cmd_events
         elif args.session_cmd == "decide":
             run = sess_mod.cmd_decide
+        elif args.session_cmd == "action":
+            run = sess_mod.cmd_group_action
         elif args.session_cmd == "list":
             run = sess_mod.cmd_list
         elif args.session_cmd == "logs":

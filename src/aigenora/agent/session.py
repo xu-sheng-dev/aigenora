@@ -11,7 +11,7 @@ from aigenora.engine.config import get_server
 from aigenora.engine.keys import load_keys
 from aigenora.engine.rest import RestClient
 from aigenora.proto.decide_gateway import submit_decision
-from aigenora.proto.sdk import EventBus, SnapshotBus, StrategyStore, WhisperLog
+from aigenora.proto.sdk import EventBus, StrategyStore, WhisperLog
 from aigenora.services import SessionStateService
 
 
@@ -330,6 +330,37 @@ def cmd_decide(args) -> int:
         }, ensure_ascii=False))
         return 1
     print(json.dumps({"status": "ok", "decision": decision}, ensure_ascii=False))
+    return 0
+
+
+def cmd_group_action(args) -> int:
+    action = json.loads(args.action)
+    if not isinstance(action, dict):
+        raise ValueError("--action must be a JSON object")
+    encoded = json.dumps(
+        action,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    if len(encoded) > 65536:
+        raise ValueError("--action exceeds 64KB")
+    state_dir = _resolve_state_dir(args.state_dir)
+    path = state_dir / "group-actions.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "action": action,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                entry, ensure_ascii=False, separators=(",", ":")
+            )
+            + "\n"
+        )
+    print(json.dumps({"status": "ok", "action": action}, ensure_ascii=False))
     return 0
 
 

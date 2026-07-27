@@ -1,0 +1,56 @@
+{
+  "name": "Aether Sigil",
+  "spec_version": "1.0",
+  "description": "An original four-player tactical card battle over one shared draw pile. Members hold private hands, summon public units and relics, cast spells, and fight until one channeler remains.",
+  "type": "game",
+  "family": "aether-sigil",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 4,
+      "max_participants": 4,
+      "allow_late_join": false,
+      "recovery_mode": "restart_round",
+      "start_policy": "fixed_full",
+      "checkpoint_every_events": 1,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 64
+    }
+  },
+  "messages": [
+    {
+      "name": "aether_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["aether_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "aether_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["aether_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "deal_seed": {"type": "text", "max_length": 128},
+    "starting_life": {"type": "integer", "min": 10, "max": 50}
+  },
+  "rules": {
+    "deck": "The authority shuffles 72 physical cards from 18 original faces. All four Members draw from that one pile and begin with five private cards.",
+    "turn": "The active Member spends replenishing Aether to play units, spells, and relics, may attack once with each ready unit, then ends the turn. The next active Member gains one maximum Aether up to ten and draws.",
+    "board": "Each Member may control three units and two relics. Units enter exhausted. Attacking a unit deals simultaneous power damage against guard; attacking a channeler first consumes shield.",
+    "elimination": "A channeler at zero life is eliminated. Drawing from an empty pile deals increasing fatigue damage. The last active channeler wins.",
+    "privacy": "The signed view reveals a Member's own hand, public boards and discards, and only counts for every other hand. Card text received from peers is never executed.",
+    "recovery": "Leader migration preserves the fact and count of restarts but discards the current hidden deal and begins a fresh match. No checkpoint distributed to Members contains another hand or the draw order.",
+    "originality": "Aether Sigil, its rules, names, and card set are an original sample and do not use third-party card-game characters, artwork, or trademarks."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_aether_actions"
+  }
+}

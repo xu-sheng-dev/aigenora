@@ -196,6 +196,92 @@ class ProtocolHooks(ABC):
         """
         return None
 
+    # -- authoritative_group hooks --
+
+    def proto_group_initial_state(
+        self, members: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Leader only: create the complete multiplayer authority state."""
+        raise NotImplementedError(
+            "proto_group_initial_state must be overridden for authoritative_group"
+        )
+
+    def proto_group_member_joined(
+        self,
+        state: dict[str, Any],
+        member: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a newly admitted member and return a group hook result."""
+        return {"state": state, "events": [{"kind": "member_joined", "member": member}]}
+
+    def proto_group_member_left(
+        self,
+        state: dict[str, Any],
+        member: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        """Apply a member departure/disconnect and return a group hook result."""
+        return {
+            "state": state,
+            "events": [
+                {"kind": "member_left", "member": member, "reason": reason[:64]}
+            ],
+        }
+
+    def proto_group_handle(
+        self,
+        state: dict[str, Any],
+        actor: dict[str, Any],
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Leader only: validate and apply one ordered member action."""
+        raise NotImplementedError(
+            "proto_group_handle must be overridden for authoritative_group"
+        )
+
+    def proto_group_view(
+        self,
+        state: dict[str, Any],
+        viewer: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the authority state projection visible to one member."""
+        return state
+
+    def proto_group_recovery_snapshot(
+        self,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the protocol state copied to failover candidates."""
+        return state
+
+    def proto_group_restore(
+        self,
+        checkpoint: dict[str, Any],
+        members: list[dict[str, Any]],
+        new_epoch: int,
+    ) -> dict[str, Any]:
+        """New Leader only: restore protocol state from a replicated checkpoint."""
+        del members, new_epoch
+        return checkpoint
+
+    def proto_group_on_leader_changed(
+        self,
+        state: dict[str, Any],
+        old_leader: str,
+        new_leader: str,
+    ) -> dict[str, Any]:
+        """Apply protocol-specific recovery after the fencing epoch changes."""
+        return {
+            "state": state,
+            "events": [
+                {
+                    "kind": "leader_changed",
+                    "old_leader": old_leader,
+                    "new_leader": new_leader,
+                }
+            ],
+        }
+
     def proto_parse_whisper_intent(
         self,
         text: str,

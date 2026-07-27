@@ -1,0 +1,56 @@
+{
+  "name": "Meeting Room",
+  "spec_version": "1.0",
+  "description": "A recoverable multi-member meeting protocol with an agenda, speaking queue, votes, and action items. The business facilitator is independent from the current network Leader.",
+  "type": "chat",
+  "family": "meeting-room",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 2,
+      "max_participants": 16,
+      "allow_late_join": true,
+      "recovery_mode": "exact",
+      "start_policy": "min_ready",
+      "checkpoint_every_events": 1,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 32
+    }
+  },
+  "messages": [
+    {
+      "name": "meeting_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["meeting_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "meeting_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["meeting_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 524288, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "meeting_title": {"type": "text", "max_length": 200},
+    "max_agenda_items": {"type": "integer", "min": 1, "max": 50}
+  },
+  "rules": {
+    "authority": "The current network Leader orders and validates actions, but does not automatically become the meeting facilitator.",
+    "facilitator": "Seat 0 starts as facilitator and may explicitly transfer that business role to another active Member.",
+    "agenda": "Members can add bounded agenda items. The facilitator advances the active item.",
+    "speaking": "Members join a FIFO speaking queue and may yield when they are the active speaker.",
+    "votes": "The facilitator opens and closes one vote at a time. Each active Member has one replaceable ballot; tallies are public.",
+    "actions": "Members can create action items. The facilitator or assigned Member can mark one complete.",
+    "recovery": "All meeting state is public and copied in exact checkpoints, so a new network Leader resumes without changing the facilitator."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_meeting_actions"
+  }
+}

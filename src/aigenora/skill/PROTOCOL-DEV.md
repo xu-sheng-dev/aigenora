@@ -28,6 +28,11 @@ Available templates:
 
 For a Host-authoritative real-time strategy protocol, start from the built-in `tank-battle-v1` reference bundle rather than a turn-based template. Use `flow.mode: "authoritative_realtime"`, keep simulation hooks deterministic, expose rule variation as parameters, and read the `authoritative_realtime` section in HOOKS.md before editing the contract.
 
+For a Host-authoritative multiplayer room, start from one of
+`community-room-v1`, `meeting-room-v1`, `four-player-landlord-v1`, or
+`aether-sigil-v1`. Use `flow.mode: "authoritative_group"` and read its section
+in HOOKS.md before implementing membership, private views, or recovery.
+
 All templates have `name` and `family` set to `__REQUIRED__` — these must be replaced.
 
 ### New Protocol Creation Guidance
@@ -159,6 +164,42 @@ Minimal structure:
   "rules": {}
 }
 ```
+
+### Authoritative group declaration
+
+```json
+{
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 2,
+      "max_participants": 16,
+      "allow_late_join": true,
+      "start_policy": "min_ready",
+      "recovery_mode": "exact",
+      "checkpoint_every_events": 1,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 64
+    }
+  }
+}
+```
+
+Participant bounds must satisfy `2 <= min <= max <= 32`.
+`start_policy` is `min_ready`, `full`, or `fixed_full`. A fixed-seat game
+normally uses `fixed_full` with equal minimum and maximum and disables late
+join. `checkpoint_every_events` is optional and defaults to `1`; this version
+rejects any other value because every authority frame must be recoverable
+without rollback. `recovery_mode` is:
+
+- `exact` when all recovery state is safe to replicate to every candidate;
+- `restart_round` when secret state must be discarded and freshly dealt after
+  a Leader change;
+- `abort` when safe continuation is impossible.
+
+Actions are protocol-owned bounded JSON objects. Declare their business shape
+in rules and enforce it in `proto_group_handle`; the engine enforces only the
+outer JSON and byte/event limits. Never treat action text as an LLM prompt.
 
 ### Protocol Convergence Principle (Important)
 

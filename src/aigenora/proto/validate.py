@@ -362,7 +362,7 @@ def _validate_table_node(value: Any, node_schema: dict[str, Any], path: str, err
 # v016 adds "mental_poker" (layered AEAD + Blind-RSA token OT fair-dealing engine).
 IMPLEMENTED_FLOW_MODES: tuple[str, ...] = (
     "session_loop", "free", "request_response", "simultaneous_round", "mental_poker",
-    "authoritative_realtime",
+    "authoritative_realtime", "authoritative_group",
 )
 
 # repeat field values allowed at the P1 stage (see docs/design/flow-modes.md §3 and the P1 design).
@@ -419,6 +419,8 @@ def validate_flow(spec: dict[str, Any]) -> None:
         _validate_simultaneous_round(flow)
     elif mode == "authoritative_realtime":
         _validate_authoritative_realtime(flow)
+    elif mode == "authoritative_group":
+        _validate_authoritative_group(flow)
     phases = flow.get("phases")
     if phases is None:
         return
@@ -494,6 +496,75 @@ def _validate_authoritative_realtime(flow: dict[str, Any]) -> None:
         raise ValidationError(
             "flow.realtime.disconnect_policy must be 'abort' or 'continue'"
         )
+
+
+def _validate_authoritative_group(flow: dict[str, Any]) -> None:
+    """Validate Host-authoritative multiplayer membership and recovery policy."""
+    group = flow.get("group")
+    if not isinstance(group, dict):
+        raise ValidationError(
+            "flow.group must be an object when mode=authoritative_group"
+        )
+    allowed = {
+        "min_participants",
+        "max_participants",
+        "allow_late_join",
+        "recovery_mode",
+        "start_policy",
+        "checkpoint_every_events",
+        "max_action_bytes",
+        "max_events_per_action",
+    }
+    unknown = sorted(set(group) - allowed)
+    if unknown:
+        raise ValidationError(f"flow.group has unknown fields: {unknown!r}")
+    minimum = group.get("min_participants")
+    maximum = group.get("max_participants")
+    if not isinstance(minimum, int) or isinstance(minimum, bool):
+        raise ValidationError("flow.group.min_participants must be an integer")
+    if not isinstance(maximum, int) or isinstance(maximum, bool):
+        raise ValidationError("flow.group.max_participants must be an integer")
+    if minimum < 2 or minimum > maximum or maximum > 32:
+        raise ValidationError(
+            "flow.group participant bounds must satisfy 2 <= min <= max <= 32"
+        )
+    if not isinstance(group.get("allow_late_join"), bool):
+        raise ValidationError("flow.group.allow_late_join must be boolean")
+    if group.get("recovery_mode") not in ("exact", "restart_round", "abort"):
+        raise ValidationError(
+            "flow.group.recovery_mode must be exact, restart_round, or abort"
+        )
+    if group.get("start_policy") not in ("min_ready", "full", "fixed_full"):
+        raise ValidationError(
+            "flow.group.start_policy must be min_ready, full, or fixed_full"
+        )
+    checkpoint_every_events = group.get("checkpoint_every_events")
+    if checkpoint_every_events is not None:
+        if (
+            not isinstance(checkpoint_every_events, int)
+            or isinstance(checkpoint_every_events, bool)
+        ):
+            raise ValidationError(
+                "flow.group.checkpoint_every_events must be an integer"
+            )
+        if checkpoint_every_events != 1:
+            raise ValidationError(
+                "flow.group.checkpoint_every_events must be 1 in this version"
+            )
+    optional_integer_ranges = {
+        "max_action_bytes": (256, 65536),
+        "max_events_per_action": (1, 256),
+    }
+    for key, (lower, upper) in optional_integer_ranges.items():
+        value = group.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValidationError(f"flow.group.{key} must be an integer")
+        if value < lower or value > upper:
+            raise ValidationError(
+                f"flow.group.{key} must be between {lower} and {upper}"
+            )
 
 
 def validate_timing(spec: dict[str, Any]) -> None:

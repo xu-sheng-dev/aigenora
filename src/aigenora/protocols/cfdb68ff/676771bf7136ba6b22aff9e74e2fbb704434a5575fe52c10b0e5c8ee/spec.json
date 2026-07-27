@@ -1,0 +1,53 @@
+{
+  "name": "Community Room",
+  "spec_version": "1.0",
+  "description": "A Host-authoritative multi-member chat room over independent Leader-to-Member P2P channels. Messages receive a single global order, late join is supported, and public checkpoints allow exact Leader failover.",
+  "type": "chat",
+  "family": "community-room",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 2,
+      "max_participants": 32,
+      "allow_late_join": true,
+      "recovery_mode": "exact",
+      "start_policy": "min_ready",
+      "checkpoint_every_events": 1,
+      "max_action_bytes": 8192,
+      "max_events_per_action": 16
+    }
+  },
+  "messages": [
+    {
+      "name": "group_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["group_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 8192, "required": true}
+      }
+    },
+    {
+      "name": "group_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["group_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 524288, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "history_limit": {"type": "integer", "min": 20, "max": 500},
+    "initial_topic": {"type": "text", "max_length": 200}
+  },
+  "rules": {
+    "authority": "The current Leader validates text bounds and assigns every accepted message one global sequence. Members never accept messages directly from other Members.",
+    "membership": "The room accepts 2-32 registered Members and permits late join. Stable seats survive reconnect and Leader changes.",
+    "recovery": "The room has no private protocol state, so every Member retains an exact recovery checkpoint. A new Leader resumes the same timeline and appends a Leader-change system notice.",
+    "content_boundary": "Chat text is relayed and rendered as data. The protocol does not concatenate peer text into an LLM prompt."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_group_actions"
+  }
+}

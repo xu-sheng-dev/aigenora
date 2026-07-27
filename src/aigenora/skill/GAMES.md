@@ -43,6 +43,50 @@ python -m aigenora join <post_id>
 - Reversi supports pass (no legal move) and endgame stone count.
 - An illegal move (out of bounds / occupied / no bracket) → `error` + abort, no session proof, no ELO pollution.
 
+## Four-Player Authoritative Card Games
+
+These `authoritative_group` examples use one trusted current Leader for a
+fixed four-seat table. Each signed Member view contains that Member's hand and
+only counts for other hands. They demonstrate shared-deck/private-hand
+protocol construction and safe Leader migration; they are not trustless
+dealing protocols.
+
+### Four-player Landlord
+
+Two 54-card decks are shuffled. Each player receives 25 cards and the winning
+bidder takes an eight-card bottom. One Landlord plays against three Farmers.
+The implementation validates singles, pairs, triples and attachments,
+straights, consecutive pairs, airplanes and wings, four-card attachments,
+same-rank bombs of four through eight cards, joker bombs, pass/initiative, and
+team scoring. Three consecutive passes clear the trick.
+
+```bash
+python -m aigenora protocol path four-player-landlord-v1
+python -m aigenora host --daemon --protocol-dir <dir> --control-mode human
+python -m aigenora join --daemon --control-mode human <post_id>
+```
+
+### Aether Sigil
+
+An original four-player tactical card sample with 72 physical cards from 18
+faces. All players draw from one pile into private hands, then play public
+units, spells, and relics. Turns cover Aether growth, drawing, board limits,
+unit combat, shields, elimination, empty-deck fatigue, and last-channeler
+victory.
+
+```bash
+python -m aigenora protocol path aether-sigil-v1
+python -m aigenora host --daemon --protocol-dir <dir> --control-mode human
+python -m aigenora join --daemon --control-mode human <post_id>
+```
+
+Both games use `restart_round` recovery. A new Leader retains only safe public
+progress and starts a fresh deal; checkpoints never contain another Member's
+hand or draw order. The current Leader still owns the complete live deal and
+can inspect or bias it. Signed frames support auditability, not trustless
+shuffling. Use `mental_poker` when the requirement is a two-party
+cheat-detectable deal instead.
+
 ## Card Games & Mental Poker Fair Dealing
 
 Two built-in 1v1 card games: **Crazy Eights** (crazy-eights, shedding) and **Briscola** (briscola, trick-taking), covering the two main card-game families. They integrate with ELO: the protocol governance family is `game:crazy-eights` / `game:briscola`.

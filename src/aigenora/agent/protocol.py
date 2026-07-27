@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from aigenora.agent.skeleton import (
     assert_hooks_implemented,
     write_sidecar,
 )
-from aigenora.engine.config import get_server, protocols_root, templates_root, data_protocols_root
+from aigenora.engine.config import data_protocols_root, get_server, templates_root
 from aigenora.engine.crypto import protocol_hash, protocol_hash_from_obj
 from aigenora.engine.keys import load_keys
 from aigenora.engine.p2p import memory_duplex, run_in_threads
@@ -124,7 +125,6 @@ def fetch_protocol(client: RestClient, protocol_id: str, data_dir: str | None = 
         # (may itself 404, handled by the caller)
         data = client.json("GET", f"/api/v1/protocols/{protocol_id}", expected={200})
         spec = _extract_spec(data)
-        ui_manifest = None
         ui_files: list[dict[str, Any]] = []
         ui_manifest_hash = None
         source_server = client.server
@@ -133,7 +133,6 @@ def fetch_protocol(client: RestClient, protocol_id: str, data_dir: str | None = 
     else:
         data = bundle_resp.json()
         spec = _extract_spec(data)
-        ui_manifest = data.get("ui_manifest")
         ui_files = data.get("ui_files") or []
         ui_manifest_hash = data.get("ui_manifest_hash")
         source_server = client.server
@@ -283,7 +282,6 @@ def run(args) -> int:
             print(f"[fetch] generated local hooks skeleton: {out / 'hooks.py'}")
         return 0
     if args.protocol_cmd == "test":
-        host_ch, guest_ch = memory_duplex()
         protocol_dir = Path(args.protocol_dir)
         spec = json.loads((protocol_dir / "spec.json").read_text(encoding="utf-8"))
         check_spec_version(spec, reject_unknown=True)
@@ -293,10 +291,15 @@ def run(args) -> int:
         )
         from aigenora.proto.engine import parse_options
         opts = parse_options(getattr(args, "options", None))
-        run_in_threads(
-            lambda: run_host(protocol_dir, host_ch, options=opts, state_base=args.state_base),
-            lambda: run_guest(protocol_dir, guest_ch, options=opts, state_base=args.state_base),
-        )
+        flow = spec.get("flow") if isinstance(spec.get("flow"), dict) else {}
+        if flow.get("mode") == "authoritative_group":
+            _run_group_protocol_smoke(protocol_dir, spec, opts)
+        else:
+            host_ch, guest_ch = memory_duplex()
+            run_in_threads(
+                lambda: run_host(protocol_dir, host_ch, options=opts, state_base=args.state_base),
+                lambda: run_guest(protocol_dir, guest_ch, options=opts, state_base=args.state_base),
+            )
         print("[OK] protocol test passed")
         if getattr(args, "adversarial", False):
             from aigenora.agent.protocol_adversarial import run_adversarial_suite
@@ -340,6 +343,88 @@ def run(args) -> int:
     if args.protocol_cmd == "profile":
         return _cmd_profile(args)
     raise RuntimeError(f"unknown protocol command: {args.protocol_cmd}")
+
+
+def _run_group_protocol_smoke(
+    protocol_dir: Path,
+    spec: dict[str, Any],
+    options: dict[str, Any],
+) -> None:
+    """Exercise initialization, every private view, and one Leader migration."""
+    from aigenora.engine.keys import keygen
+    from aigenora.proto.group import GroupAuthority, GroupConfig, GroupReplica
+    from aigenora.proto.loader import load_hooks
+
+    config = GroupConfig.from_spec(spec)
+    participant_count = (
+        config.max_participants
+        if config.start_policy in {"full", "fixed_full"}
+        else config.min_participants
+    )
+    with tempfile.TemporaryDirectory(prefix="aigenora-group-test-") as root_value:
+        root = Path(root_value)
+        keys = [
+            keygen(str(root / f"member-{index}"), force=True)
+            for index in range(participant_count)
+        ]
+        members = [
+            {
+                "member_id": f"member-{index}",
+                "public_key": key.public_key,
+                "seat": index,
+                "status": "active",
+            }
+            for index, key in enumerate(keys)
+        ]
+        authority = GroupAuthority(
+            spec=spec,
+            hooks=load_hooks(protocol_dir),
+            options=options,
+            state_dir=root / "leader-0",
+            group_id="protocol-test-group",
+            leader_public_key=keys[0].public_key,
+            leader_epoch=0,
+            membership_version=participant_count,
+            members=members,
+            keypair=keys[0],
+        )
+        replicas = []
+        for index, key in enumerate(keys):
+            replica = GroupReplica(
+                state_dir=root / f"replica-{index}",
+                group_id="protocol-test-group",
+                viewer_public_key=key.public_key,
+                leader_public_key=keys[0].public_key,
+                leader_epoch=0,
+                protocol_name=str(spec.get("name") or "Group Protocol"),
+            )
+            replica.apply(
+                authority.bootstrap_envelopes()[key.public_key],
+                bootstrap=True,
+            )
+            replicas.append(replica)
+        if config.recovery_mode == "abort":
+            return
+        checkpoint = authority.checkpoint()
+        successor = keys[1]
+        resumed = GroupAuthority(
+            spec=spec,
+            hooks=load_hooks(protocol_dir),
+            options=options,
+            state_dir=root / "leader-1",
+            group_id="protocol-test-group",
+            leader_public_key=successor.public_key,
+            leader_epoch=1,
+            membership_version=participant_count,
+            members=members,
+            keypair=successor,
+            checkpoint=checkpoint,
+        )
+        for replica, key in zip(replicas, keys):
+            replica.advance_epoch(
+                leader_public_key=successor.public_key, leader_epoch=1
+            )
+            replica.apply(resumed.bootstrap_envelopes()[key.public_key])
 
 
 def _cmd_preflight(args) -> int:

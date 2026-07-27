@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Community Room · Aigenora</title>
+  <style>
+    :root {
+      --night:#071116; --panel:#0d1b21; --panel-2:#10252c; --line:#25404a;
+      --cream:#f1ead9; --muted:#7f9aa4; --amber:#f2a93b; --cyan:#48c6c8;
+      --danger:#ef6b63;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:var(--night); color:var(--cream); }
+    body {
+      font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+      background-image:linear-gradient(rgba(72,198,200,.035) 1px,transparent 1px);
+      background-size:100% 24px;
+    }
+    button,input { font:inherit; }
+    button { color:inherit; }
+    .station { width:min(1240px,100%); min-height:100vh; margin:auto; padding:22px; }
+    header {
+      display:grid; grid-template-columns:1fr auto; gap:18px; align-items:end;
+      padding:17px 20px; border:1px solid var(--line); border-top:4px solid var(--amber);
+      background:var(--panel);
+    }
+    .eyebrow { color:var(--amber); font-size:10px; letter-spacing:.22em; text-transform:uppercase; }
+    h1 { margin:7px 0 0; font:600 clamp(28px,5vw,52px)/.95 Georgia,serif; letter-spacing:-.035em; }
+    .frequency { color:var(--cyan); text-align:right; font-size:11px; line-height:1.8; }
+    .frequency b { display:block; font-size:19px; letter-spacing:.08em; }
+    .dial {
+      display:grid; grid-template-columns:minmax(0,1fr) 260px; min-height:calc(100vh - 150px);
+      margin-top:14px; border:1px solid var(--line); background:var(--panel);
+    }
+    .main { min-width:0; display:grid; grid-template-rows:auto 1fr auto; border-right:1px solid var(--line); }
+    .topic {
+      display:flex; gap:12px; align-items:center; padding:13px 16px;
+      border-bottom:1px solid var(--line); background:var(--panel-2);
+    }
+    .topic span { color:var(--muted); font-size:10px; letter-spacing:.14em; }
+    .topic strong { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:600 17px Georgia,serif; }
+    .icon-button,.send,.topic button {
+      border:1px solid var(--line); background:transparent; padding:8px 11px; cursor:pointer;
+    }
+    button:hover:not(:disabled),button:focus-visible { border-color:var(--amber); outline:none; }
+    button:disabled { opacity:.38; cursor:not-allowed; }
+    .transcript { overflow:auto; padding:22px 18px 35px; }
+    .message {
+      display:grid; grid-template-columns:72px minmax(0,1fr); gap:13px;
+      padding:10px 0; border-bottom:1px dotted #20343c;
+    }
+    .message .call { color:var(--cyan); font-size:10px; padding-top:3px; }
+    .message p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; font:15px/1.55 Georgia,serif; }
+    .message.system { color:var(--muted); }
+    .message.system .call { color:var(--amber); }
+    .composer {
+      display:grid; grid-template-columns:1fr auto; gap:10px; padding:14px;
+      border-top:1px solid var(--line); background:#09171c;
+    }
+    .composer input,.topic-editor input {
+      width:100%; color:var(--cream); border:1px solid var(--line);
+      background:#071217; padding:12px 13px; outline:none;
+    }
+    input:focus { border-color:var(--cyan); }
+    .send { min-width:120px; border-color:var(--amber); color:var(--amber); font-weight:700; }
+    aside { padding:18px; background:#09171c; }
+    .side-title { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; letter-spacing:.14em; }
+    .member {
+      display:grid; grid-template-columns:12px 1fr; gap:9px; align-items:center;
+      padding:12px 0; border-bottom:1px solid #1c3037;
+    }
+    .lamp { width:8px; height:8px; border-radius:50%; background:var(--cyan); box-shadow:0 0 12px var(--cyan); }
+    .member.off .lamp { background:#415158; box-shadow:none; }
+    .member b { display:block; font-size:12px; }
+    .member small { color:var(--muted); font-size:9px; }
+    .leader-note,.recovery {
+      margin-top:18px; padding:12px; border-left:3px solid var(--amber);
+      background:#102128; color:var(--muted); font-size:10px; line-height:1.6;
+    }
+    .topic-editor { display:none; gap:8px; margin-top:16px; }
+    .topic-editor.open { display:grid; }
+    .danger { width:100%; margin-top:20px; border:1px solid #693a38; color:var(--danger); background:transparent; padding:10px; }
+    .status { min-height:18px; margin-top:12px; color:var(--muted); font-size:10px; }
+    .status.error { color:var(--danger); }
+    @media (max-width:760px) {
+      .station { padding:10px; }
+      header { grid-template-columns:1fr; }
+      .frequency { text-align:left; }
+      .dial { grid-template-columns:1fr; }
+      .main { min-height:72vh; border-right:0; border-bottom:1px solid var(--line); }
+      .message { grid-template-columns:54px 1fr; }
+      .composer { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="station">
+    <header>
+      <div><div class="eyebrow">Aigenora Public Frequency</div><h1>Community Room</h1></div>
+      <div class="frequency"><span id="link">TUNING BRIDGE</span><b id="epoch">EPOCH —</b><span id="sequence">FRAME —</span></div>
+    </header>
+    <section class="dial">
+      <div class="main">
+        <div class="topic">
+          <span>ON AIR</span><strong id="topic">Waiting for room state</strong>
+          <button id="edit-topic" aria-label="Edit topic">EDIT</button>
+        </div>
+        <div class="transcript" id="messages" aria-live="polite"></div>
+        <form class="composer" id="composer">
+          <input id="message" maxlength="2000" autocomplete="off" placeholder="Transmit a message to every Member…">
+          <button class="send" type="submit">TRANSMIT</button>
+        </form>
+      </div>
+      <aside>
+        <div class="side-title"><span>RECEIVERS</span><span id="member-count">0 LIVE</span></div>
+        <div id="members"></div>
+        <div class="leader-note">Messages are globally ordered by the current Leader. A lease-fenced successor can continue the same signed timeline.</div>
+        <form class="topic-editor" id="topic-editor">
+          <input id="new-topic" maxlength="200" placeholder="New room topic">
+          <button type="submit">SET TOPIC</button>
+        </form>
+        <button class="danger" id="close-room" hidden>CLOSE FREQUENCY</button>
+        <div class="status" id="status"></div>
+      </aside>
+    </section>
+  </main>
+  <script>
+  (function () {
+    "use strict";
+    var PARENT_ORIGIN = new URLSearchParams(location.search).get("parent") || location.origin;
+    var pending = {}, snapshot = {}, view = {}, ready = false;
+    function post(message) { parent.postMessage(Object.assign({source:"aigenora-ui"},message),PARENT_ORIGIN); }
+    function request(method, body) {
+      return new Promise(function(resolve,reject){
+        var id="room_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+        var timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"));},5000);
+        pending[id]=function(response){clearTimeout(timer);resolve(response);};
+        post({type:"request",id:id,method:method,body:body});
+      });
+    }
+    window.addEventListener("message",function(event){
+      if(event.origin!==PARENT_ORIGIN)return;
+      var data=event.data||{}; if(data.source!=="aigenora-broadcast")return;
+      if(data.type==="hello-ack"){ready=true;document.getElementById("link").textContent="BRIDGE LOCKED";request("snapshot").then(receive).catch(fail);return;}
+      if(data.type==="response"&&pending[data.id]){var callback=pending[data.id];delete pending[data.id];callback(data);return;}
+      if(data.type==="push"&&data.event==="snapshot")apply(data.data);
+    });
+    function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)));}
+    function apply(next){
+      if(!next||typeof next!=="object")return;
+      snapshot=next; view=next.group_view||{}; render();
+    }
+    function alias(publicKey,seat){return "SEAT "+String(seat).padStart(2,"0")+" · "+String(publicKey||"").slice(0,6).toUpperCase();}
+    function render(){
+      var group=snapshot.group||{}, you=view.you||{}, presence=view.presence||{};
+      document.getElementById("epoch").textContent="EPOCH "+(group.leader_epoch==null?"—":group.leader_epoch);
+      document.getElementById("sequence").textContent="FRAME "+(group.seq==null?"—":String(group.seq).padStart(5,"0"));
+      document.getElementById("topic").textContent=view.topic||"Untitled frequency";
+      document.getElementById("new-topic").value=view.topic||"";
+      var memberBox=document.getElementById("members"); memberBox.replaceChildren();
+      var active=0;
+      Object.keys(presence).sort(function(a,b){return presence[a].seat-presence[b].seat;}).forEach(function(key){
+        var item=presence[key]||{}, online=item.status==="online"; if(online)active++;
+        var row=document.createElement("div"); row.className="member"+(online?"":" off");
+        var lamp=document.createElement("span"); lamp.className="lamp";
+        var words=document.createElement("div"), name=document.createElement("b"), state=document.createElement("small");
+        name.textContent=alias(key,item.seat)+(key===you.public_key?" · YOU":"");
+        state.textContent=online?"LINK ACTIVE":"LEFT ROOM"; words.append(name,state); row.append(lamp,words); memberBox.append(row);
+      });
+      document.getElementById("member-count").textContent=active+" LIVE";
+      var messages=document.getElementById("messages"), nearBottom=messages.scrollHeight-messages.scrollTop-messages.clientHeight<80;
+      messages.replaceChildren();
+      (view.messages||[]).forEach(function(message){
+        var row=document.createElement("article"); row.className="message "+(message.kind==="system"?"system":"");
+        var call=document.createElement("div"); call.className="call"; call.textContent=message.kind==="system"?"SYSTEM":"S"+String(message.seat).padStart(2,"0");
+        var text=document.createElement("p"); text.textContent=message.text||""; row.append(call,text); messages.append(row);
+      });
+      if(nearBottom)messages.scrollTop=messages.scrollHeight;
+      document.getElementById("close-room").hidden=Number(you.seat)!==0||!!view.closed;
+      document.querySelector(".send").disabled=!ready||!!view.closed;
+      document.getElementById("message").disabled=!!view.closed;
+    }
+    function errorText(response){return (response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status);}
+    function status(text,error){var el=document.getElementById("status");el.textContent=text;el.className="status"+(error?" error":"");}
+    function fail(error){status(error.message||String(error),true);}
+    async function action(body){
+      try { var response=await request("action",body); if(!response.ok)throw new Error(errorText(response)); status("Queued for Leader validation.",false); }
+      catch(error){fail(error);}
+    }
+    document.getElementById("composer").addEventListener("submit",function(event){
+      event.preventDefault(); var input=document.getElementById("message"),text=input.value.trim();if(!text)return;input.value="";action({kind:"send",text:text});
+    });
+    document.getElementById("edit-topic").onclick=function(){document.getElementById("topic-editor").classList.toggle("open");document.getElementById("new-topic").focus();};
+    document.getElementById("topic-editor").addEventListener("submit",function(event){
+      event.preventDefault();var topic=document.getElementById("new-topic").value.trim();if(topic)action({kind:"set_topic",topic:topic});
+    });
+    document.getElementById("close-room").onclick=function(){if(confirm("Close this room for every Member?"))action({kind:"close_room"});};
+    post({type:"hello",capabilities:["snapshot","action"]});
+  })();
+  </script>
+</body>
+</html>
