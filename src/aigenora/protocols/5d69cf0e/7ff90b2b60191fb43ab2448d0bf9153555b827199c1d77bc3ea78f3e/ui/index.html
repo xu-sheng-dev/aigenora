@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Contract Bridge · Aigenora</title>
+  <style>
+    :root{--navy:#102a43;--deep:#071b2c;--paper:#f5efd9;--ink:#172027;--red:#a5322e;--blue:#1e5d86;--gold:#c49a45;--rule:#b8af96}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--deep);color:var(--paper)}
+    body{font-family:Georgia,"Times New Roman",serif;background-image:linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px);background-size:24px 24px}
+    button,select{font:inherit}.shell{width:min(1420px,100%);min-height:100vh;margin:auto;padding:20px clamp(12px,3vw,42px) 34px}
+    header{display:grid;grid-template-columns:1fr auto;align-items:end;padding:10px 0 18px;border-bottom:3px double var(--gold)}
+    .eyebrow{font:700 10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.23em;color:var(--gold)}
+    h1{margin:7px 0 0;font-size:clamp(30px,5vw,58px);font-weight:400;letter-spacing:-.04em}.folio{text-align:right;font:11px/1.6 ui-monospace,Consolas,monospace;color:#9fb4c3}.folio b{display:block;color:var(--paper);font-size:14px}
+    .notice{display:none;margin:12px 0 0;padding:9px 12px;border-left:5px solid var(--gold);background:#173650;font:11px ui-monospace,Consolas,monospace}.notice.show{display:block}
+    .layout{display:grid;grid-template-columns:260px minmax(440px,1fr) 300px;gap:16px;margin-top:16px}
+    .panel{background:var(--paper);color:var(--ink);border:1px solid var(--rule);box-shadow:5px 6px 0 rgba(0,0,0,.26)}
+    .panel-title{padding:9px 12px;border-bottom:1px solid var(--rule);font:800 10px ui-monospace,Consolas,monospace;letter-spacing:.17em;color:var(--blue)}
+    .seats{padding:8px 12px}.seat{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px dotted var(--rule);font:11px ui-monospace,Consolas,monospace}.seat:last-child{border:0}.seat.current{color:var(--red);font-weight:800}.seat.you{background:#e7dfc4;margin-inline:-7px;padding-inline:7px}.wind{font:700 20px Georgia,serif}.key{overflow:hidden;text-overflow:ellipsis}.team{color:#6b6a62}
+    .score{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--rule)}.score div{padding:13px;text-align:center}.score div+div{border-left:1px solid var(--rule)}.score b{display:block;font-size:25px}.score small{font:9px ui-monospace,Consolas,monospace;color:#777}
+    .table{min-height:530px;padding:18px;background:#144d46;color:var(--paper);border:12px solid #8b6540;outline:2px solid var(--gold);box-shadow:inset 0 0 32px #082f2b}
+    .contract{text-align:center;min-height:66px}.contract .big{font-size:27px}.contract small{display:block;margin-top:4px;font:10px ui-monospace,Consolas,monospace;color:#b7d2cc}
+    .trick-grid{display:grid;grid-template:100px 100px 100px/1fr 1fr 1fr;place-items:center;margin:10px auto 18px;max-width:440px}.play:nth-child(1){grid-area:1/2}.play:nth-child(2){grid-area:2/3}.play:nth-child(3){grid-area:3/2}.play:nth-child(4){grid-area:2/1}
+    .card{width:63px;height:89px;padding:7px;border:1px solid #d3c8a9;border-radius:4px;background:#fffdf5;color:#111;box-shadow:2px 3px 0 #07312d;text-align:left}.card.red{color:var(--red)}button.card{cursor:pointer;transition:.14s transform,.14s box-shadow}button.card:hover,button.card:focus-visible{transform:translateY(-7px);outline:2px solid var(--gold)}button.card.selected{transform:translateY(-12px);box-shadow:0 0 0 4px var(--gold)}.card strong{font-size:18px}.card span{display:block;font-size:21px}
+    .hand-label{display:flex;justify-content:space-between;align-items:end;padding-top:12px;border-top:1px solid #5e8e85;font:10px ui-monospace,Consolas,monospace;color:#b7d2cc}.hand-label b{color:white;font:18px Georgia,serif}
+    .hand-scroll{overflow-x:auto;padding:18px 5px 3px}.hand{display:flex;justify-content:center;min-width:max-content}.hand .card{margin-left:-18px}.hand .card:first-child{margin-left:0}
+    .controls{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:18px}.controls button,.controls select{min-height:38px;padding:8px 12px;border:1px solid var(--gold);background:#0b3531;color:var(--paper);cursor:pointer}.controls button.primary{background:var(--gold);color:var(--ink);font-weight:800}.controls button:disabled{opacity:.35;cursor:not-allowed}
+    .auction{max-height:390px;overflow:auto}.call{display:grid;grid-template-columns:34px 1fr auto;gap:7px;padding:8px 11px;border-bottom:1px dotted var(--rule);font:10px ui-monospace,Consolas,monospace}.call b{color:var(--red);font-size:12px}.facts{padding:11px;font:10px/1.8 ui-monospace,Consolas,monospace}.facts strong{float:right;color:var(--blue)}
+    .status{min-height:24px;padding:12px 2px;text-align:center;font:10px ui-monospace,Consolas,monospace;color:#a9c0ce}.status.error{color:#ff8e85}
+    @media(max-width:1000px){.layout{grid-template-columns:1fr 1fr}.table{grid-column:1/-1;grid-row:1}.left,.right{grid-row:2}.hand{justify-content:flex-start}}
+    @media(max-width:650px){header{grid-template-columns:1fr}.folio{text-align:left;margin-top:10px}.layout{display:block}.panel{margin-bottom:13px}.table{min-height:480px;border-width:7px;padding:10px}.left,.right{display:block}.card{width:53px;height:77px}.trick-grid{grid-template-rows:82px 82px 82px}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header><div><div class="eyebrow">AIGENORA · DUPLICATE TABLE</div><h1>Contract Bridge</h1></div><div class="folio"><span id="link">CONNECTING TABLE</span><b id="phase">WAITING</b><span id="frame">E— · F—</span></div></header>
+  <div class="notice" id="notice"></div>
+  <section class="layout">
+    <aside class="panel left"><div class="panel-title">TABLE DIRECTORY</div><div class="seats" id="seats"></div><div class="score"><div><small>NORTH · SOUTH</small><b id="ns-score">0</b></div><div><small>EAST · WEST</small><b id="ew-score">0</b></div></div></aside>
+    <section class="table">
+      <div class="contract"><div class="big" id="contract">Auction in progress</div><small id="contract-detail">Dealer and vulnerability pending</small></div>
+      <div class="trick-grid" id="trick"></div>
+      <div class="hand-label"><span id="hand-kind">YOUR PRIVATE HAND</span><b id="turn">WAITING</b></div>
+      <div class="hand-scroll"><div class="hand" id="hand"></div></div>
+      <div class="controls" id="controls"></div>
+      <div class="status" id="status" role="status"></div>
+    </section>
+    <aside class="panel right"><div class="panel-title">AUCTION RECORD</div><div class="auction" id="auction"></div><div class="facts" id="facts"></div></aside>
+  </section>
+</main>
+<script>
+(function(){
+  "use strict";
+  var ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin,pending={},snapshot={},view={},ready=false,selected="";
+  function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),ORIGIN)}
+  function request(method,body){return new Promise(function(resolve,reject){var id="bridge_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"))},5000);pending[id]=function(value){clearTimeout(timer);resolve(value)};post({type:"request",id:id,method:method,body:body})})}
+  window.addEventListener("message",function(event){if(event.origin!==ORIGIN)return;var data=event.data||{};if(data.source!=="aigenora-broadcast")return;if(data.type==="hello-ack"){ready=true;document.getElementById("link").textContent="SIGNED TABLE LINK";request("snapshot").then(receive).catch(fail);return}if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return}if(data.type==="push"&&data.event==="snapshot")apply(data.data)});
+  function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)))}
+  function apply(next){if(!next||typeof next!=="object")return;snapshot=next;view=next.group_view||{};selected="";render()}
+  function shortKey(key){return String(key||"").slice(0,8).toUpperCase()}
+  function rank(card){return ({11:"J",12:"Q",13:"K",14:"A"})[card.rank]||String(card.rank)}
+  function suit(card){return ({clubs:"♣",diamonds:"♦",hearts:"♥",spades:"♠"})[card.suit]||""}
+  function cardNode(card,active){var el=document.createElement(active?"button":"div");el.className="card "+(["diamonds","hearts"].includes(card.suit)?"red":"")+(selected===card.card_id?" selected":"");var a=document.createElement("strong"),b=document.createElement("span");a.textContent=rank(card);b.textContent=suit(card);el.append(a,b);if(active)el.onclick=function(){selected=selected===card.card_id?"":card.card_id;renderHand();renderControls()};return el}
+  function render(){
+    var group=snapshot.group||{},players=view.players||{},you=view.you||{};
+    document.getElementById("phase").textContent=String(view.phase||"waiting").toUpperCase()+" · BOARD "+(view.board_number||"—");
+    document.getElementById("frame").textContent="E"+(group.leader_epoch??"—")+" · F"+(group.seq??"—");
+    var notice=document.getElementById("notice");notice.textContent=view.recovery_notice||"";notice.className="notice"+(view.recovery_notice?" show":"");
+    var seats=document.getElementById("seats");seats.replaceChildren();Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat}).forEach(function(key){var p=players[key],row=document.createElement("div");row.className="seat"+(key===view.current_hand_owner?" current":"")+(key===you.public_key?" you":"");row.innerHTML='<span class="wind">'+String(p.compass||"?").charAt(0).toUpperCase()+'</span><span class="key">'+shortKey(key)+(key===you.public_key?" · YOU":"")+'</span><span class="team">'+String(p.partnership||"").toUpperCase()+" · "+((view.hand_counts||{})[key]??0)+'</span>';seats.append(row)});
+    document.getElementById("ns-score").textContent=(view.scores||{}).ns??0;document.getElementById("ew-score").textContent=(view.scores||{}).ew??0;
+    var c=view.contract;if(c){document.getElementById("contract").textContent=c.level+" "+String(c.denomination).toUpperCase()+(c.doubled===1?" ×":c.doubled===2?" ××":"");document.getElementById("contract-detail").textContent="DECLARER "+shortKey(view.declarer)+" · DUMMY "+shortKey(view.dummy)}else{document.getElementById("contract").textContent=view.phase==="completed"?"BOARD PASSED OUT":"Auction in progress";document.getElementById("contract-detail").textContent="DEALER "+shortKey(view.dealer)+" · "+String(view.vulnerability||"none").toUpperCase()+" VULNERABLE"}
+    var trick=document.getElementById("trick");trick.replaceChildren();(view.current_trick||[]).forEach(function(play){var wrap=document.createElement("div");wrap.className="play";wrap.title=String(play.hand_owner||"").slice(0,8);wrap.append(cardNode(play.card,false));trick.append(wrap)});
+    var auction=document.getElementById("auction");auction.replaceChildren();(view.auction||[]).forEach(function(call){var row=document.createElement("div");row.className="call";var label=call.kind==="bid"?call.level+" "+String(call.denomination).toUpperCase():String(call.kind).toUpperCase();row.innerHTML="<span>"+String(call.seat)+"</span><span>"+shortKey(call.public_key)+"</span><b>"+label+"</b>";auction.append(row)});
+    document.getElementById("facts").innerHTML="TRICKS NS <strong>"+((view.tricks||{}).ns??0)+"</strong><br>TRICKS EW <strong>"+((view.tricks||{}).ew??0)+"</strong><br>VULNERABILITY <strong>"+String(view.vulnerability||"none").toUpperCase()+"</strong>";
+    var dummyTurn=view.current_hand_owner===view.dummy&&view.you&&view.you.public_key===view.declarer;document.getElementById("hand-kind").textContent=dummyTurn?"DUMMY · DECLARER CONTROLS":"YOUR PRIVATE HAND";document.getElementById("turn").textContent=view.current_player===you.public_key?(dummyTurn?"PLAY FROM DUMMY":"YOUR TURN"):"WAITING · "+shortKey(view.current_player);
+    renderHand();renderControls()
+  }
+  function renderHand(){var cards=(view.phase==="playing"?(view.playable_hand||[]):(view.my_hand||[])).slice().sort(function(a,b){return String(a.suit).localeCompare(String(b.suit))||Number(a.rank)-Number(b.rank)}),box=document.getElementById("hand");box.replaceChildren();cards.forEach(function(card){box.append(cardNode(card,true))})}
+  function makeButton(label,body,primary){var el=document.createElement("button");el.textContent=label;if(primary)el.className="primary";el.onclick=function(){action(body)};return el}
+  function renderControls(){var box=document.getElementById("controls");box.replaceChildren();var mine=view.current_player===(view.you||{}).public_key&&!snapshot.completed;if(view.phase==="auction"){var level=document.createElement("select");for(var i=1;i<=7;i++){var option=document.createElement("option");option.value=i;option.textContent="LEVEL "+i;level.append(option)}var denom=document.createElement("select");["clubs","diamonds","hearts","spades","nt"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value.toUpperCase();denom.append(option)});var bid=document.createElement("button");bid.className="primary";bid.textContent="PLACE BID";bid.onclick=function(){action({kind:"bid",level:Number(level.value),denomination:denom.value})};[level,denom,bid].forEach(function(el){el.disabled=!mine||!ready;box.append(el)});["pass","double","redouble"].forEach(function(kind){var el=makeButton(kind.toUpperCase(),{kind:kind},false);el.disabled=!mine||!ready;box.append(el)})}else if(view.phase==="playing"){var play=makeButton("PLAY SELECTED CARD",{kind:"play",card_id:selected},true);play.disabled=!mine||!selected||!ready;box.append(play)}else if(snapshot.completed){var done=document.createElement("strong");done.textContent="BOARD COMPLETE · "+String(snapshot.outcome||"").toUpperCase();box.append(done)}}
+  function errorText(response){return(response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status)}
+  function fail(error){var el=document.getElementById("status");el.textContent=error.message||String(error);el.className="status error"}
+  async function action(body){try{var response=await request("action",body);if(!response.ok)throw new Error(errorText(response));document.getElementById("status").textContent="Call or play submitted for authoritative validation."}catch(error){fail(error)}}
+  post({type:"hello",capabilities:["snapshot","action"]});
+})();
+</script>
+</body>
+</html>

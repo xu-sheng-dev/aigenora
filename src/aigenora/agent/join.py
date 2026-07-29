@@ -13,7 +13,15 @@ from typing import Any
 from aigenora.agent.protocol import prepare_protocol
 from aigenora.control import HUMAN, control_mode_from_args, ensure_control_mode_supported
 from aigenora.agent.skeleton import assert_hooks_implemented
-from aigenora.agent._daemon import read_log_excerpt, terminate_process, wait_for_event, update_session_meta, write_session_meta
+from aigenora.agent._daemon import (
+    DEFAULT_JOIN_STARTUP_WAIT_SECONDS,
+    read_log_excerpt,
+    startup_wait_seconds,
+    terminate_process,
+    update_session_meta,
+    wait_for_event,
+    write_session_meta,
+)
 from aigenora.engine.config import get_server
 from aigenora.engine.crypto import session_canonical, transport_binding_canonical
 from aigenora.engine.keys import load_keys
@@ -136,6 +144,9 @@ def _run_daemon(args) -> int:
     startup_event = wait_for_event(
         state_dir,
         "peer_joined",
+        timeout_seconds=startup_wait_seconds(
+            DEFAULT_JOIN_STARTUP_WAIT_SECONDS
+        ),
         required_data_keys=("session_id",),
     )
     session_id = ""

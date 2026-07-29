@@ -219,7 +219,14 @@ def run(args) -> int:
         # default preflight unless skipped
         if not getattr(args, "skip_preflight", False):
             from aigenora.agent.protocol_preflight import preflight as do_preflight
-            result = do_preflight(spec, family=spec.get("family"), allow_new=True, reason=getattr(args, "reason", ""), data_dir=args.data_dir)
+            result = do_preflight(
+                spec,
+                family=spec.get("family"),
+                allow_new=True,
+                allow_existing_hash=True,
+                reason=getattr(args, "reason", ""),
+                data_dir=args.data_dir,
+            )
             if result["status"] == "blocked":
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 1

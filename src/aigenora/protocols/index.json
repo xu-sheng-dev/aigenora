@@ -587,6 +587,126 @@
       }
     },
     {
+      "alias": "upgrade-tractor-v1",
+      "name": "Upgrade (Tractor)",
+      "description": "Fixed four-seat partnership Upgrade with two decks, trump declarations, a hidden kitty, pairs and tractors, structured following, point capture, and level progression.",
+      "type": "game",
+      "family": "upgrade-tractor",
+      "tags": ["game", "cards", "multiplayer", "upgrade", "tractor", "partnership", "private-hands", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "partnership_scoring", "structured_tricks", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "acdf987218b5382bbf5f4c0008d6766e97ca6c1ae12f3cf2becd2afa9ad6f88e",
+      "path": "acdf9872/18b5382bbf5f4c0008d6766e97ca6c1ae12f3cf2becd2afa9ad6f88e",
+      "parent_protocol_id": null,
+      "created_reason": "v026: classic partnership trick game on authoritative-group shared-deck primitives",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "Short level race from 2 through 4",
+          "options": {"start_level": 2, "target_level": 4, "max_hands": 8}
+        },
+        "standard": {
+          "description": "Full level race from 2 through A",
+          "options": {"start_level": 2, "target_level": 14, "max_hands": 16}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "contract-bridge-v1",
+      "name": "Contract Bridge",
+      "description": "Fixed four-seat bridge board with a legal auction, declarer-controlled dummy, strict follow-suit tricks, duplicate scoring, and private-hand recovery.",
+      "type": "game",
+      "family": "contract-bridge",
+      "tags": ["game", "cards", "multiplayer", "bridge", "partnership", "private-hands", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "auction", "dummy_control", "duplicate_scoring", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "5d69cf0e7ff90b2b60191fb43ab2448d0bf9153555b827199c1d77bc3ea78f3e",
+      "path": "5d69cf0e/7ff90b2b60191fb43ab2448d0bf9153555b827199c1d77bc3ea78f3e",
+      "parent_protocol_id": null,
+      "created_reason": "v026: classic partnership auction and trick protocol on authoritative-group",
+      "default_profile": "standard",
+      "profiles": {
+        "standard": {
+          "description": "One duplicate-scored board",
+          "options": {"board_number": 1}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "classical-mahjong-v1",
+      "name": "Classical Mahjong Core",
+      "description": "Fixed four-seat 136-tile Mahjong core with private hands, public rivers and melds, deterministic claim priority, three winning shapes, and transparent compact scoring.",
+      "type": "game",
+      "family": "classical-mahjong",
+      "tags": ["game", "tiles", "multiplayer", "mahjong", "shared-deck", "private-hands", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "public_melds", "claim_priority", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "b4b52ae592fb2fe9808c0bc4976eaee7ca1ce9fdb4638dc72bd88f18403def01",
+      "path": "b4b52ae5/92fb2fe9808c0bc4976eaee7ca1ce9fdb4638dc72bd88f18403def01",
+      "parent_protocol_id": null,
+      "created_reason": "v026: shared-wall and public-claim card-game foundation on authoritative-group",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "One hand with 25,000 starting points",
+          "options": {"starting_points": 25000, "max_hands": 1}
+        },
+        "standard": {
+          "description": "Four hands with rotating dealer",
+          "options": {"starting_points": 25000, "max_hands": 4}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
+      "alias": "texas-holdem-v1",
+      "name": "Four-seat No-limit Texas Hold'em",
+      "description": "Fixed four-seat no-limit Hold'em with blinds, four betting streets, all-ins, short-raise reopening rules, side pots, split pots, and private hole cards.",
+      "type": "game",
+      "family": "texas-holdem",
+      "tags": ["game", "cards", "multiplayer", "poker", "holdem", "private-hands", "webui"],
+      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "no_limit_betting", "side_pots", "showdown", "restart_round_recovery", "webui"],
+      "status": "active",
+      "protocol_id": "ba17afdceb178d206e7f3ba614b29751f36ec749f3039fa471995707f6fd66c7",
+      "path": "ba17afdc/eb178d206e7f3ba614b29751f36ec749f3039fa471995707f6fd66c7",
+      "parent_protocol_id": null,
+      "created_reason": "v026: no-limit betting and side-pot foundation on authoritative-group",
+      "default_profile": "standard",
+      "profiles": {
+        "quick": {
+          "description": "One 500-chip hand at 5/10 blinds",
+          "options": {"starting_stack": 500, "small_blind": 5, "big_blind": 10, "max_hands": 1}
+        },
+        "standard": {
+          "description": "Eight 1,000-chip hands at 5/10 blinds",
+          "options": {"starting_stack": 1000, "small_blind": 5, "big_blind": 10, "max_hands": 8}
+        }
+      },
+      "entrypoints": {
+        "host": "aigenora host --protocol-dir",
+        "guest": "aigenora join <post_id>",
+        "hooks": "hooks.py",
+        "webui": "ui/index.html"
+      }
+    },
+    {
       "alias": "tank-battle-v1",
       "name": "Tank Battle · Authoritative Realtime",
       "description": "Host-authoritative real-time strategy reference game. Local Agents micro-control every owned tank while humans issue macro orders; rules, map, army size, balance and neutral powerups are match-configurable.",

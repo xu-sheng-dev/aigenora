@@ -49,6 +49,7 @@ jobs:
           grep -Fqx 'aigenora = aigenora.cli:main' <<<"$entry_points"
           grep -Fqx 'aigenora-runtime = aigenora.runtime.__main__:main' <<<"$entry_points"
           grep -Fqx 'aigenora-protocol-worker = aigenora.protocol_worker.main:main' <<<"$entry_points"
+          python .github/scripts/check_wheel_protocol_inventory.py "$wheel"
 
       - name: Upload distributions
         uses: actions/upload-artifact@v7

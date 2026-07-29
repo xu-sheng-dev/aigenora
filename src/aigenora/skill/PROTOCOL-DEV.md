@@ -30,8 +30,12 @@ For a Host-authoritative real-time strategy protocol, start from the built-in `t
 
 For a Host-authoritative multiplayer room, start from one of
 `community-room-v1`, `meeting-room-v1`, `four-player-landlord-v1`, or
-`aether-sigil-v1`. Use `flow.mode: "authoritative_group"` and read its section
-in HOOKS.md before implementing membership, private views, or recovery.
+`aether-sigil-v1`. For classic card rules, use `upgrade-tractor-v1`,
+`contract-bridge-v1`, `classical-mahjong-v1`, or `texas-holdem-v1` as the
+closer reference. Use `flow.mode: "authoritative_group"` and read its section
+in HOOKS.md before implementing membership, private views, or recovery. Reuse
+the pure helpers in `aigenora.proto.card_games`, `.tractor`, `.poker`,
+`.mahjong`, and `.shared_deck` instead of copying card logic.
 
 All templates have `name` and `family` set to `__REQUIRED__` — these must be replaced.
 
@@ -110,7 +114,7 @@ python -m aigenora host --daemon --protocol-dir <protocol-dir> --options "{\"bes
 # Response example: {"status":"hosting","state_dir":".../sessions/host-xxx","post_id":"ab12...","protocol_id":"..."}
 ```
 
-Host prints `post_id` and `waiting_for_peer: true`. With `--daemon` the subprocess keeps running in the background, while the parent CLI returns once the subprocess writes `invite_created` to events.jsonl (typically 100ms-1s); stdout already contains `post_id`, `protocol_id`, and `state_dir` — **Agents do not need to cat events.jsonl for post_id**. If `invite_created` is not received within 15 seconds, the CLI returns `{"status":"error","reason":"timeout ..."}` with exit code 1.
+Host prints `post_id` and `waiting_for_peer: true`. With `--daemon` the subprocess keeps running in the background, while the parent CLI returns once the subprocess writes `invite_created` to events.jsonl (typically 100ms-1s); stdout already contains `post_id`, `protocol_id`, and `state_dir` — **Agents do not need to cat events.jsonl for post_id**. The default readiness window is 30 seconds for Host startup and 60 seconds for Guest join (concurrent group admission is serialized); either can be overridden with `AIGENORA_DAEMON_STARTUP_TIMEOUT`. A timeout returns `{"status":"error","reason":"timeout ..."}` with exit code 1.
 
 ## Pre-Creation Check
 
@@ -132,7 +136,11 @@ Classification results:
 | `compatible_extension` | New optional fields or non-breaking phases | Allow but warn |
 | `contract_change` | Messages, flow, or rules changed | Allow creating new protocol |
 
-`protocol register` automatically runs preflight by default. If blocked, registration is refused. Bypassing is allowed but must be explicit:
+`protocol register` automatically runs preflight by default. A matching contract
+in the local library is allowed because registering publishes that known bundle
+to the selected server; it does not prove that the remote server already has
+it. Other blocked classifications still refuse registration. Bypassing those
+checks is allowed but must be explicit:
 
 ```bash
 python -m aigenora protocol register <spec.json> --skip-preflight --reason "contract change: adds timeout phase"

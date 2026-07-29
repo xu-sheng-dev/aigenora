@@ -19,12 +19,19 @@ from aigenora.engine.crypto import (
 from aigenora.engine.keys import KeyPair, load_keys, sign_raw, verify_raw
 from aigenora.engine.p2p import (
     AsyncJsonLineChannel,
+    ChannelClosed,
     connect_by_ticket,
     create_host_node,
 )
 from aigenora.engine.rest import RestClient
 from aigenora.proto.engine import parse_options
-from aigenora.proto.group import GroupAuthority, GroupConfig, GroupProtocolError, GroupReplica
+from aigenora.proto.group import (
+    GroupAuthority,
+    GroupConfig,
+    GroupProtocolError,
+    GroupReplica,
+    canonical_json,
+)
 from aigenora.proto.group_control import (
     admission_canonical,
     admit_member,
@@ -195,13 +202,27 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
             except asyncio.TimeoutError:
                 group = await asyncio.to_thread(get_group, rest, group_id)
                 continue
-            member = await _leader_admit_channel(
-                channel=channel,
-                rest=rest,
-                keypair=keypair,
-                group=group,
-                event_bus=event_bus,
-            )
+            try:
+                member = await _leader_admit_channel(
+                    channel=channel,
+                    rest=rest,
+                    keypair=keypair,
+                    group=group,
+                    event_bus=event_bus,
+                )
+            except Exception as exc:
+                event_bus.emit(
+                    "group_join_rejected",
+                    {"reason": str(exc)[:256]},
+                )
+                try:
+                    await asyncio.wait_for(channel.close(), timeout=1.0)
+                except Exception:
+                    pass
+                group = await asyncio.to_thread(
+                    get_group, rest, group_id
+                )
+                continue
             pending[str(member["public_key"]).lower()] = (member, channel)
             group = await asyncio.to_thread(get_group, rest, group_id)
 
@@ -288,78 +309,111 @@ async def run_group_join_command(
     replica: GroupReplica | None = None
     try:
         while True:
-            (
-                current_node,
-                channel,
-                group,
-                member,
-                first_envelope,
-            ) = await _connect_and_admit(
-                rest=rest,
-                keypair=keypair,
-                group=group,
-                protocol_dir=protocol_dir,
-                control_mode=control_mode,
-            )
-            if replica is None:
-                replica = GroupReplica(
-                    state_dir=state_dir,
-                    group_id=str(group["group_id"]),
-                    viewer_public_key=keypair.public_key,
-                    leader_public_key=str(group["leader_public_key"]),
-                    leader_epoch=int(group["leader_epoch"]),
-                    protocol_name=str(spec.get("name") or "Group Protocol"),
+            try:
+                (
+                    current_node,
+                    channel,
+                    group,
+                    member,
+                ) = await _connect_and_admit(
+                    rest=rest,
+                    keypair=keypair,
+                    group=group,
+                    protocol_dir=protocol_dir,
+                    control_mode=control_mode,
                 )
+                if replica is None:
+                    replica = GroupReplica(
+                        state_dir=state_dir,
+                        group_id=str(group["group_id"]),
+                        viewer_public_key=keypair.public_key,
+                        leader_public_key=str(group["leader_public_key"]),
+                        leader_epoch=int(group["leader_epoch"]),
+                        protocol_name=str(
+                            spec.get("name") or "Group Protocol"
+                        ),
+                    )
+                    event_bus.emit(
+                        "peer_joined",
+                        {
+                            "host_public_key": group["leader_public_key"],
+                            "session_id": group["group_id"],
+                            "group_id": group["group_id"],
+                            "member_id": member["member_id"],
+                            "seat": member["seat"],
+                            "protocol_dir": str(protocol_dir),
+                            "local_protocol_dir": str(protocol_dir),
+                            "local_control_mode": control_mode,
+                            "peer_control_mode": "hybrid",
+                            "active_hooks_source": "trusted_local",
+                        },
+                    )
+                    update_session_meta(
+                        state_dir,
+                        session_id=group["group_id"],
+                        group_id=group["group_id"],
+                        group_role="member",
+                        member_id=member["member_id"],
+                        seat=member["seat"],
+                        leader_epoch=group["leader_epoch"],
+                        protocol_dir=str(protocol_dir),
+                        local_protocol_dir=str(protocol_dir),
+                        active_hooks_source="trusted_local",
+                    )
+                elif int(group["leader_epoch"]) > replica.leader_epoch:
+                    replica.advance_epoch(
+                        leader_public_key=str(group["leader_public_key"]),
+                        leader_epoch=int(group["leader_epoch"]),
+                    )
+                    update_session_meta(
+                        state_dir,
+                        group_role=(
+                            "leader"
+                            if group["leader_public_key"]
+                            == keypair.public_key
+                            else "member"
+                        ),
+                        leader_epoch=group["leader_epoch"],
+                    )
+
+                first_envelope = await _receive_first_group_envelope(
+                    current_node, channel
+                )
+                result = await run_group_guest_channel(
+                    channel=channel,
+                    replica=replica,
+                    state_dir=state_dir,
+                    first_envelope=first_envelope,
+                )
+            except asyncio.CancelledError:
+                raise
+            except (
+                ChannelClosed,
+                TimeoutError,
+                OSError,
+                RuntimeError,
+                GroupProtocolError,
+            ) as exc:
+                if replica is None:
+                    raise
                 event_bus.emit(
-                    "peer_joined",
+                    "group_reconnect_failed",
                     {
-                        "host_public_key": group["leader_public_key"],
-                        "session_id": group["group_id"],
-                        "group_id": group["group_id"],
-                        "member_id": member["member_id"],
-                        "seat": member["seat"],
-                        "protocol_dir": str(protocol_dir),
-                        "local_protocol_dir": str(protocol_dir),
-                        "local_control_mode": control_mode,
-                        "peer_control_mode": "hybrid",
-                        "active_hooks_source": "trusted_local",
+                        "group_id": replica.group_id,
+                        "leader_epoch": replica.leader_epoch,
+                        "reason": (
+                            f"{type(exc).__name__}:{str(exc)[:192]}"
+                        ),
                     },
                 )
-                update_session_meta(
-                    state_dir,
-                    session_id=group["group_id"],
-                    group_id=group["group_id"],
-                    group_role="member",
-                    member_id=member["member_id"],
-                    seat=member["seat"],
-                    leader_epoch=group["leader_epoch"],
-                    protocol_dir=str(protocol_dir),
-                    local_protocol_dir=str(protocol_dir),
-                    active_hooks_source="trusted_local",
-                )
-            elif int(group["leader_epoch"]) > replica.leader_epoch:
-                replica.advance_epoch(
-                    leader_public_key=str(group["leader_public_key"]),
-                    leader_epoch=int(group["leader_epoch"]),
-                )
-                update_session_meta(
-                    state_dir,
-                    group_role=(
-                        "leader"
-                        if group["leader_public_key"] == keypair.public_key
-                        else "member"
-                    ),
-                    leader_epoch=group["leader_epoch"],
-                )
-
-            result = await run_group_guest_channel(
-                channel=channel,
-                replica=replica,
-                state_dir=state_dir,
-                first_envelope=first_envelope,
-            )
-            await current_node.node().shutdown()
-            current_node = None
+                result = {
+                    "completed": False,
+                    "seq": replica.seq,
+                    "reason": "reconnect_failed",
+                }
+            if current_node is not None:
+                await current_node.node().shutdown()
+                current_node = None
             if result.get("completed"):
                 update_session_meta(
                     state_dir,
@@ -404,6 +458,7 @@ async def run_group_join_command(
                 )
                 return 0 if completed else 1
             group = recovery["group"]
+            await asyncio.sleep(0.5)
     finally:
         member_task.cancel()
         await asyncio.gather(member_task, return_exceptions=True)
@@ -574,12 +629,44 @@ async def _late_accept_loop(
                 {"reason": str(exc)[:256]},
             )
             try:
-                await channel.send(
-                    {"_group": "error", "reason": str(exc)[:256]}
+                await asyncio.wait_for(
+                    channel.send(
+                        {"_group": "error", "reason": str(exc)[:256]}
+                    ),
+                    timeout=1.0,
                 )
-                await channel.close()
             except Exception:
                 pass
+            try:
+                await asyncio.wait_for(channel.close(), timeout=1.0)
+            except Exception:
+                pass
+
+
+def _channel_ready_canonical(
+    *,
+    group_id: str,
+    protocol_id: str,
+    leader_epoch: int,
+    member_public_key: str,
+    member_id: str,
+    seat: int,
+    join_nonce: str,
+    channel_challenge: str,
+) -> bytes:
+    """Bind one member-key proof to one freshly challenged P2P channel."""
+    return b"aigenora-group-channel-ready-v1:" + canonical_json(
+        {
+            "group_id": group_id,
+            "protocol_id": protocol_id,
+            "leader_epoch": leader_epoch,
+            "member_public_key": member_public_key,
+            "member_id": member_id,
+            "seat": seat,
+            "join_nonce": join_nonce,
+            "channel_challenge": channel_challenge,
+        }
+    )
 
 
 async def _leader_admit_channel(
@@ -622,6 +709,7 @@ async def _leader_admit_channel(
     leader_signature = sign_raw(
         keypair.private_key, canonical.encode("utf-8")
     )
+    channel_challenge = secrets.token_hex(16)
     await channel.send(
         {
             "_group": "admission",
@@ -630,6 +718,7 @@ async def _leader_admit_channel(
             "leader_public_key": keypair.public_key,
             "leader_epoch": group["leader_epoch"],
             "join_nonce": join_nonce,
+            "channel_challenge": channel_challenge,
             "leader_signature": leader_signature,
         }
     )
@@ -637,13 +726,51 @@ async def _leader_admit_channel(
     if (
         not isinstance(ready, dict)
         or ready.get("_group") != "ready"
+        or ready.get("group_id") != group_id
+        or ready.get("protocol_id") != group["protocol_id"]
+        or ready.get("leader_epoch") != group["leader_epoch"]
         or ready.get("member_public_key") != member_public_key
+        or ready.get("join_nonce") != join_nonce
+        or ready.get("channel_challenge") != channel_challenge
     ):
         raise GroupProtocolError("member did not complete server admission")
+    member_id = ready.get("member_id")
+    seat = ready.get("seat")
+    member_signature = ready.get("member_signature")
+    if (
+        not isinstance(member_id, str)
+        or not member_id
+        or len(member_id) > 128
+        or not isinstance(seat, int)
+        or isinstance(seat, bool)
+        or seat < 0
+        or not isinstance(member_signature, str)
+    ):
+        raise GroupProtocolError("member channel proof is invalid")
+    member_proof = _channel_ready_canonical(
+        group_id=group_id,
+        protocol_id=str(group["protocol_id"]),
+        leader_epoch=int(group["leader_epoch"]),
+        member_public_key=member_public_key,
+        member_id=member_id,
+        seat=seat,
+        join_nonce=join_nonce,
+        channel_challenge=channel_challenge,
+    )
+    try:
+        verify_raw(member_public_key, member_proof, member_signature)
+    except Exception as exc:
+        raise GroupProtocolError(
+            "member channel proof signature is invalid"
+        ) from exc
     latest = await asyncio.to_thread(get_group, rest, group_id)
     member = _find_active_member(latest, member_public_key)
     if member is None:
         raise GroupProtocolError("server does not list the admitted member")
+    if member.get("member_id") != member_id or member.get("seat") != seat:
+        raise GroupProtocolError(
+            "member channel proof does not match server admission"
+        )
     event_bus.emit(
         "group_member_admitted",
         {
@@ -663,7 +790,7 @@ async def _connect_and_admit(
     group: dict[str, Any],
     protocol_dir: Path,
     control_mode: str,
-) -> tuple[Any, AsyncJsonLineChannel, dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[Any, AsyncJsonLineChannel, dict[str, Any], dict[str, Any]]:
     del protocol_dir
     leader_public_key = str(group["leader_public_key"])
     protocol_id = str(group["protocol_id"])
@@ -676,59 +803,102 @@ async def _connect_and_admit(
         leader_public_key, binding.encode("utf-8"), binding_signature
     )
     _, node, channel = await connect_by_ticket(ticket)
-    join_nonce = secrets.token_hex(16)
-    await channel.send(
-        {
-            "_group": "join",
-            "group_id": group["group_id"],
-            "member_public_key": keypair.public_key,
-            "join_nonce": join_nonce,
-            "member_control_mode": control_mode,
-        }
-    )
-    admission = await channel.recv(timeout=30.0)
-    if not isinstance(admission, dict) or admission.get("_group") != "admission":
+    try:
+        join_nonce = secrets.token_hex(16)
+        await channel.send(
+            {
+                "_group": "join",
+                "group_id": group["group_id"],
+                "member_public_key": keypair.public_key,
+                "join_nonce": join_nonce,
+                "member_control_mode": control_mode,
+            }
+        )
+        admission = await channel.recv(timeout=30.0)
+        if (
+            not isinstance(admission, dict)
+            or admission.get("_group") != "admission"
+        ):
+            raise GroupProtocolError(
+                "leader did not return a group admission"
+            )
+        if (
+            admission.get("group_id") != group["group_id"]
+            or admission.get("protocol_id") != protocol_id
+            or admission.get("leader_public_key") != leader_public_key
+            or admission.get("leader_epoch") != group["leader_epoch"]
+            or admission.get("join_nonce") != join_nonce
+        ):
+            raise GroupProtocolError(
+                "group admission does not match server state"
+            )
+        channel_challenge = admission.get("channel_challenge")
+        if (
+            not isinstance(channel_challenge, str)
+            or len(channel_challenge) != 32
+            or any(
+                character not in "0123456789abcdef"
+                for character in channel_challenge
+            )
+        ):
+            raise GroupProtocolError("group channel challenge is invalid")
+        canonical = admission_canonical(
+            str(group["group_id"]),
+            leader_public_key,
+            keypair.public_key,
+            protocol_id,
+            int(group["leader_epoch"]),
+            join_nonce,
+        )
+        verify_raw(
+            leader_public_key,
+            canonical.encode("utf-8"),
+            str(admission.get("leader_signature") or ""),
+        )
+        member = await asyncio.to_thread(
+            admit_member,
+            rest,
+            keypair,
+            group=group,
+            join_nonce=join_nonce,
+            leader_signature=str(admission["leader_signature"]),
+        )
+        member_proof = _channel_ready_canonical(
+            group_id=str(group["group_id"]),
+            protocol_id=protocol_id,
+            leader_epoch=int(group["leader_epoch"]),
+            member_public_key=keypair.public_key,
+            member_id=str(member["member_id"]),
+            seat=int(member["seat"]),
+            join_nonce=join_nonce,
+            channel_challenge=channel_challenge,
+        )
+        await channel.send(
+            {
+                "_group": "ready",
+                "group_id": group["group_id"],
+                "protocol_id": protocol_id,
+                "leader_epoch": group["leader_epoch"],
+                "member_public_key": keypair.public_key,
+                "member_id": member["member_id"],
+                "seat": member["seat"],
+                "join_nonce": join_nonce,
+                "channel_challenge": channel_challenge,
+                "member_signature": sign_raw(
+                    keypair.private_key, member_proof
+                ),
+            }
+        )
+        return node, channel, group, member
+    except BaseException:
         await node.node().shutdown()
-        raise GroupProtocolError("leader did not return a group admission")
-    if (
-        admission.get("group_id") != group["group_id"]
-        or admission.get("protocol_id") != protocol_id
-        or admission.get("leader_public_key") != leader_public_key
-        or admission.get("leader_epoch") != group["leader_epoch"]
-        or admission.get("join_nonce") != join_nonce
-    ):
-        await node.node().shutdown()
-        raise GroupProtocolError("group admission does not match server state")
-    canonical = admission_canonical(
-        str(group["group_id"]),
-        leader_public_key,
-        keypair.public_key,
-        protocol_id,
-        int(group["leader_epoch"]),
-        join_nonce,
-    )
-    verify_raw(
-        leader_public_key,
-        canonical.encode("utf-8"),
-        str(admission.get("leader_signature") or ""),
-    )
-    member = await asyncio.to_thread(
-        admit_member,
-        rest,
-        keypair,
-        group=group,
-        join_nonce=join_nonce,
-        leader_signature=str(admission["leader_signature"]),
-    )
-    await channel.send(
-        {
-            "_group": "ready",
-            "group_id": group["group_id"],
-            "member_public_key": keypair.public_key,
-            "member_id": member["member_id"],
-            "seat": member["seat"],
-        }
-    )
+        raise
+
+
+async def _receive_first_group_envelope(
+    node: Any, channel: AsyncJsonLineChannel
+) -> dict[str, Any]:
+    """Wait for gameplay state after admission has already been announced."""
     first_envelope = await channel.recv(timeout=60.0)
     if not isinstance(first_envelope, dict) or first_envelope.get("_group") not in {
         "snapshot",
@@ -738,7 +908,7 @@ async def _connect_and_admit(
     }:
         await node.node().shutdown()
         raise GroupProtocolError("leader did not send an authority snapshot")
-    return node, channel, group, member, first_envelope
+    return first_envelope
 
 
 async def _recover_or_follow(
@@ -761,8 +931,7 @@ async def _recover_or_follow(
         if int(group["leader_epoch"]) > replica.leader_epoch:
             return {"role": "follower", "group": group}
         if not _lease_expired(group):
-            await asyncio.sleep(0.5)
-            continue
+            return {"role": "follower", "group": group}
         checkpoint = replica.checkpoint
         if not isinstance(checkpoint, dict):
             raise GroupProtocolError("cannot claim leadership without a checkpoint")

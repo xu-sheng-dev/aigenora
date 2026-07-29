@@ -177,7 +177,11 @@ aigenora skill path
 - `community-room-v1`：2–32 人有序聊天室；
 - `meeting-room-v1`：2–16 人议程、发言队列、投票和行动项会议；
 - `four-player-landlord-v1`：固定四席、两副牌的斗地主变体；
-- `aether-sigil-v1`：原创固定四席共享牌堆战术卡牌。
+- `aether-sigil-v1`：原创固定四席共享牌堆战术卡牌；
+- `upgrade-tractor-v1`：固定四席、两副牌的升级/拖拉机；
+- `contract-bridge-v1`：固定四席的叫牌、明手和复式计分桥牌；
+- `classical-mahjong-v1`：固定四席、136 张牌和公开声明的古典核心麻将；
+- `texas-holdem-v1`：固定四席、支持边池的无限注德州扑克。
 
 可通过 `session action` 或内置 WebUI 提交结构化动作。聊天室和会议可在
 Leader 切换后从复制检查点原位继续；隐藏手牌游戏保留安全的公共进度并重开

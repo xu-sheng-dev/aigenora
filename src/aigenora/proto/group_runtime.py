@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import os
+import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,22 +14,196 @@ from aigenora.proto.group import GroupAuthority, GroupProtocolError, GroupReplic
 from aigenora.proto.sdk import EventBus
 
 
+class _GroupActionOutbox:
+    """Durable single-flight queue for local authoritative-group actions.
+
+    The append-only action log belongs to the user-facing session API.  This
+    sidecar records which byte range is in flight and the exact ``client_seq``
+    assigned to it.  Reconnects therefore retry an unacknowledged action with
+    the same sequence number instead of replaying the whole log as new input.
+    """
+
+    VERSION = 2
+
+    def __init__(self, state_dir: str | Path, *, accepted_client_seq: int):
+        self.root = Path(state_dir)
+        self.action_path = self.root / "group-actions.jsonl"
+        self.state_path = self.root / "group-action-outbox.json"
+        self.sequence_path = self.root / "group-client-seq"
+        self.accepted_client_seq = max(0, int(accepted_client_seq))
+        self.committed_offset = 0
+        self.pending: dict[str, Any] | None = None
+        if not self._load():
+            self.committed_offset = _legacy_committed_offset(
+                self.action_path, self.accepted_client_seq
+            )
+        self.reconcile(self.accepted_client_seq)
+
+    def reconcile(self, accepted_client_seq: int) -> None:
+        """Align an in-flight action with an authoritative checkpoint."""
+        accepted = max(0, int(accepted_client_seq))
+        changed = False
+        if self.pending is not None:
+            pending_seq = int(self.pending["client_seq"])
+            if pending_seq <= accepted:
+                self.committed_offset = max(
+                    self.committed_offset, int(self.pending["end_offset"])
+                )
+                self.pending = None
+                changed = True
+            elif pending_seq != accepted + 1:
+                self.pending["client_seq"] = accepted + 1
+                changed = True
+        self.accepted_client_seq = accepted
+        if changed or not self.state_path.exists():
+            self._persist()
+        self._write_sequence()
+
+    def prepare(self) -> dict[str, Any] | None:
+        """Return the sole in-flight action, allocating it durably if needed."""
+        if self.pending is not None:
+            return copy.deepcopy(self.pending)
+        records, scanned_offset = _read_jsonl_records(
+            self.action_path, self.committed_offset
+        )
+        for entry, end_offset in records:
+            action = entry.get("action") if isinstance(entry, dict) else None
+            if not isinstance(action, dict):
+                continue
+            self.pending = {
+                "client_seq": self.accepted_client_seq + 1,
+                "action_id": secrets.token_hex(16),
+                "end_offset": end_offset,
+                "action": copy.deepcopy(action),
+            }
+            self._persist()
+            self._write_sequence()
+            return copy.deepcopy(self.pending)
+        if scanned_offset > self.committed_offset:
+            self.committed_offset = scanned_offset
+            self._persist()
+        return None
+
+    def handle_receipt(self, receipt: dict[str, Any]) -> bool:
+        """Commit one action after a terminal receipt.
+
+        ``False`` means the receipt is unrelated or explicitly retryable, so
+        the sender keeps the same pending action and sequence number.
+        """
+        if self.pending is None:
+            return False
+        client_seq = receipt.get("client_seq")
+        action_id = receipt.get("action_id")
+        if (
+            not isinstance(client_seq, int)
+            or isinstance(client_seq, bool)
+            or client_seq != self.pending["client_seq"]
+            or action_id != self.pending["action_id"]
+        ):
+            return False
+        status = receipt.get("status")
+        if status not in {"accepted", "duplicate", "rejected"}:
+            return False
+        if status == "rejected" and receipt.get("retryable") is True:
+            return False
+        if status in {"accepted", "duplicate"}:
+            self.accepted_client_seq = max(
+                self.accepted_client_seq, client_seq
+            )
+        self.committed_offset = max(
+            self.committed_offset, int(self.pending["end_offset"])
+        )
+        self.pending = None
+        self._persist()
+        self._write_sequence()
+        return True
+
+    def _load(self) -> bool:
+        try:
+            value = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(value, dict):
+            return False
+        version = value.get("version")
+        if (
+            not isinstance(version, int)
+            or isinstance(version, bool)
+            or version not in {1, self.VERSION}
+        ):
+            return False
+        committed_offset = value.get("committed_offset")
+        pending = value.get("pending")
+        if (
+            not isinstance(committed_offset, int)
+            or isinstance(committed_offset, bool)
+            or committed_offset < 0
+        ):
+            return False
+        if pending is not None:
+            if version == 1:
+                if not _valid_legacy_pending_action(pending):
+                    return False
+                pending = copy.deepcopy(pending)
+                pending["action_id"] = secrets.token_hex(16)
+            elif not _valid_pending_action(pending):
+                return False
+        self.committed_offset = committed_offset
+        self.pending = copy.deepcopy(pending)
+        if version == 1:
+            self._persist()
+        return True
+
+    def _persist(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        _atomic_json(
+            self.state_path,
+            {
+                "version": self.VERSION,
+                "committed_offset": self.committed_offset,
+                "pending": self.pending,
+            },
+        )
+
+    def _write_sequence(self) -> None:
+        sequence = self.accepted_client_seq
+        if self.pending is not None:
+            sequence = max(sequence, int(self.pending["client_seq"]))
+        _atomic_text(self.sequence_path, str(sequence))
+
+
 class GroupLeaderHub:
     """Multiplex independent Guest channels into one ordered authority queue."""
 
-    def __init__(self, authority: GroupAuthority):
+    def __init__(
+        self,
+        authority: GroupAuthority,
+        *,
+        ack_timeout: float = 15.0,
+        ack_check_interval: float = 0.5,
+        send_timeout: float = 5.0,
+    ):
         self.authority = authority
         self.channels: dict[str, AsyncJsonLineChannel] = {}
         self.receivers: dict[str, asyncio.Task[None]] = {}
         self.queue: asyncio.Queue[tuple[str, str, Any]] = asyncio.Queue()
         self.stopped = asyncio.Event()
-        self.local_client_seq = authority.last_client_seq.get(
-            authority.leader_public_key, 0
+        self.local_outbox = _GroupActionOutbox(
+            authority.state_dir,
+            accepted_client_seq=authority.last_client_seq.get(
+                authority.leader_public_key, 0
+            ),
         )
-        self.action_path = authority.state_dir / "group-actions.jsonl"
-        self.action_offset = 0
+        self.local_action_inflight: int | None = None
+        self.local_action_ready = asyncio.Event()
         self.events = EventBus(authority.state_dir)
         self.acknowledged_seq: dict[str, int] = {}
+        self.pending_ack: dict[str, tuple[int, float]] = {}
+        self.ack_timeout = max(0.05, float(ack_timeout))
+        self.ack_check_interval = max(0.01, float(ack_check_interval))
+        self.send_timeout = max(0.05, float(send_timeout))
+        self._broadcast_lock = asyncio.Lock()
+        self._send_locks: dict[str, asyncio.Lock] = {}
 
     async def attach(
         self,
@@ -35,23 +213,23 @@ class GroupLeaderHub:
         membership_version: int,
     ) -> None:
         public_key = str(member["public_key"]).lower()
+        self._reset_ack_tracking(public_key)
         previous = self.channels.pop(public_key, None)
         if previous is not None:
-            try:
-                await previous.close()
-            except Exception:
-                pass
+            await self._bounded_close(previous)
         old_task = self.receivers.pop(public_key, None)
         if old_task is not None:
             old_task.cancel()
+        self._send_locks[public_key] = asyncio.Lock()
         self.channels[public_key] = channel
         self.receivers[public_key] = asyncio.create_task(
             self._receiver(public_key, channel)
         )
-        envelopes = self.authority.add_member(
-            member, membership_version=membership_version
-        )
-        await self.broadcast(envelopes)
+        async with self._broadcast_lock:
+            envelopes = self.authority.add_member(
+                member, membership_version=membership_version
+            )
+            await self._broadcast_unlocked(envelopes)
         self.events.emit(
             "group_member_connected",
             {
@@ -71,26 +249,34 @@ class GroupLeaderHub:
     ) -> None:
         """Attach/re-attach an already represented authority member."""
         public_key = str(member["public_key"]).lower()
+        self._reset_ack_tracking(public_key)
         previous = self.channels.pop(public_key, None)
         if previous is not None:
-            try:
-                await previous.close()
-            except Exception:
-                pass
+            await self._bounded_close(previous)
         old_task = self.receivers.pop(public_key, None)
         if old_task is not None:
             old_task.cancel()
+        self._send_locks[public_key] = asyncio.Lock()
         self.channels[public_key] = channel
         self.receivers[public_key] = asyncio.create_task(
             self._receiver(public_key, channel)
         )
         if send_snapshot:
-            envelope = self.authority.bootstrap_envelope(public_key)
-            if envelope is None:
-                raise GroupProtocolError(
-                    "authority has no bootstrap view for the existing member"
+            async with self._broadcast_lock:
+                envelope = self.authority.bootstrap_envelope(public_key)
+                if envelope is None:
+                    raise GroupProtocolError(
+                        "authority has no bootstrap view for the existing member"
+                    )
+                sent = await self._send_to_member(
+                    public_key,
+                    channel,
+                    envelope,
+                    failure_reason="bootstrap_send_failed",
+                    track_envelope=True,
                 )
-            await channel.send(envelope)
+            if not sent:
+                return
         self.events.emit(
             "group_member_reconnected",
             {
@@ -103,28 +289,82 @@ class GroupLeaderHub:
     async def broadcast(
         self, envelopes: dict[str, dict[str, Any]]
     ) -> None:
-        failures: list[str] = []
-        for public_key, channel in list(self.channels.items()):
-            envelope = envelopes.get(public_key)
-            if envelope is None:
-                continue
+        async with self._broadcast_lock:
+            await self._broadcast_unlocked(envelopes)
+
+    async def _broadcast_unlocked(
+        self, envelopes: dict[str, dict[str, Any]]
+    ) -> None:
+        sends = [
+            self._send_to_member(
+                public_key,
+                channel,
+                envelope,
+                failure_reason="send_failed",
+                track_envelope=True,
+            )
+            for public_key, channel in list(self.channels.items())
+            if (envelope := envelopes.get(public_key)) is not None
+        ]
+        if sends:
+            await asyncio.gather(*sends)
+
+    async def _send_to_member(
+        self,
+        public_key: str,
+        channel: AsyncJsonLineChannel,
+        message: dict[str, Any],
+        *,
+        failure_reason: str,
+        track_envelope: bool = False,
+    ) -> bool:
+        lock = self._send_locks.setdefault(public_key, asyncio.Lock())
+        async with lock:
+            if self.channels.get(public_key) is not channel:
+                return False
             try:
-                await channel.send(envelope)
-            except (ChannelClosed, OSError):
-                failures.append(public_key)
-        for public_key in failures:
-            await self.detach(public_key, reason="send_failed")
+                await asyncio.wait_for(
+                    channel.send(message), timeout=self.send_timeout
+                )
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
+                if self.channels.get(public_key) is channel:
+                    await self.detach(
+                        public_key, reason=f"{failure_reason}_timeout"
+                    )
+                return False
+            except Exception:
+                if self.channels.get(public_key) is channel:
+                    await self.detach(public_key, reason=failure_reason)
+                return False
+            if self.channels.get(public_key) is not channel:
+                return False
+            if track_envelope:
+                self._track_sent_envelope(public_key, message)
+            return True
+
+    async def _bounded_close(
+        self, channel: AsyncJsonLineChannel
+    ) -> None:
+        try:
+            await asyncio.wait_for(
+                channel.close(), timeout=self.send_timeout
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
     async def detach(self, public_key: str, *, reason: str) -> None:
         channel = self.channels.pop(public_key, None)
         task = self.receivers.pop(public_key, None)
+        self._send_locks.pop(public_key, None)
+        self._reset_ack_tracking(public_key)
         if task is not None and task is not asyncio.current_task():
             task.cancel()
         if channel is not None:
-            try:
-                await channel.close()
-            except Exception:
-                pass
+            await self._bounded_close(channel)
         self.events.emit(
             "group_member_disconnected",
             {
@@ -136,6 +376,7 @@ class GroupLeaderHub:
 
     async def run(self) -> dict[str, Any]:
         action_task = asyncio.create_task(self._local_action_reader())
+        ack_task = asyncio.create_task(self._ack_watchdog())
         try:
             while not self.stopped.is_set():
                 source, public_key, payload = await self.queue.get()
@@ -166,28 +407,48 @@ class GroupLeaderHub:
                             checkpoint_hash,
                         )
                     ):
+                        previous_seq = self.acknowledged_seq.get(public_key, -1)
                         self.acknowledged_seq[public_key] = max(
-                            seq, self.acknowledged_seq.get(public_key, -1)
+                            seq, previous_seq
                         )
+                        pending = self.pending_ack.get(public_key)
+                        if pending is not None:
+                            required_seq, pending_since = pending
+                            if seq >= required_seq:
+                                self.pending_ack.pop(public_key, None)
+                            elif seq > previous_seq:
+                                self.pending_ack[public_key] = (
+                                    required_seq,
+                                    time.monotonic(),
+                                )
                     continue
                 if source != "action" or not isinstance(payload, dict):
                     continue
+                receipt: dict[str, Any]
+                action_id = payload.get("action_id")
                 try:
-                    envelopes, receipt = self.authority.apply_input(
-                        actor_public_key=public_key,
-                        client_seq=int(payload["client_seq"]),
-                        action=payload["action"],
-                    )
+                    if not _valid_action_id(action_id):
+                        raise GroupProtocolError(
+                            "action_id must be 32-char lowercase hex"
+                        )
+                    async with self._broadcast_lock:
+                        envelopes, receipt = self.authority.apply_input(
+                            actor_public_key=public_key,
+                            client_seq=int(payload["client_seq"]),
+                            action=payload["action"],
+                        )
+                        if receipt.get("status") != "duplicate":
+                            await self._broadcast_unlocked(envelopes)
                 except (KeyError, TypeError, ValueError, GroupProtocolError) as exc:
-                    await self._send_receipt(
-                        public_key,
-                        {
-                            "_group": "receipt",
-                            "status": "rejected",
-                            "reason": str(exc)[:256],
-                            "client_seq": payload.get("client_seq"),
-                        },
-                    )
+                    receipt = {
+                        "_group": "receipt",
+                        "status": "rejected",
+                        "reason": str(exc)[:256],
+                        "client_seq": payload.get("client_seq"),
+                        "action_id": action_id,
+                    }
+                    self._finish_local_action(public_key, receipt)
+                    await self._send_receipt(public_key, receipt)
                     self.events.emit(
                         "group_action_rejected",
                         {
@@ -196,10 +457,13 @@ class GroupLeaderHub:
                         },
                     )
                     continue
-                await self.broadcast(envelopes)
-                await self._send_receipt(
-                    public_key, {"_group": "receipt", **receipt}
-                )
+                wire_receipt = {
+                    "_group": "receipt",
+                    **receipt,
+                    "action_id": action_id,
+                }
+                self._finish_local_action(public_key, wire_receipt)
+                await self._send_receipt(public_key, wire_receipt)
                 if self.authority.completed:
                     self.stopped.set()
             return {
@@ -210,10 +474,14 @@ class GroupLeaderHub:
             }
         finally:
             action_task.cancel()
+            ack_task.cancel()
             for task in list(self.receivers.values()):
                 task.cancel()
             await asyncio.gather(
-                action_task, *self.receivers.values(), return_exceptions=True
+                action_task,
+                ack_task,
+                *self.receivers.values(),
+                return_exceptions=True,
             )
 
     async def close(self) -> None:
@@ -244,6 +512,8 @@ class GroupLeaderHub:
                                 "status": "rejected",
                                 "reason": "group, epoch, or actor mismatch",
                                 "client_seq": message.get("client_seq"),
+                                "action_id": message.get("action_id"),
+                                "retryable": True,
                             },
                         )
                         continue
@@ -251,13 +521,16 @@ class GroupLeaderHub:
                 elif kind == "ack":
                     await self.queue.put(("ack", public_key, message))
                 elif kind == "ping":
-                    await channel.send(
+                    await self._send_to_member(
+                        public_key,
+                        channel,
                         {
                             "_group": "pong",
                             "group_id": self.authority.group_id,
                             "leader_epoch": self.authority.leader_epoch,
                             "nonce": message.get("nonce"),
-                        }
+                        },
+                        failure_reason="pong_send_failed",
                     )
         except (ChannelClosed, asyncio.CancelledError):
             if not self.stopped.is_set():
@@ -277,36 +550,81 @@ class GroupLeaderHub:
         channel = self.channels.get(public_key)
         if channel is None:
             return
-        try:
-            await channel.send(receipt)
-        except (ChannelClosed, OSError):
-            await self.detach(public_key, reason="receipt_send_failed")
+        await self._send_to_member(
+            public_key,
+            channel,
+            receipt,
+            failure_reason="receipt_send_failed",
+        )
 
     async def _local_action_reader(self) -> None:
         while not self.stopped.is_set():
-            entries, self.action_offset = _read_jsonl(
-                self.action_path, self.action_offset
-            )
-            for entry in entries:
-                action = entry.get("action") if isinstance(entry, dict) else None
-                if not isinstance(action, dict):
-                    continue
-                self.local_client_seq += 1
-                await self.queue.put(
-                    (
-                        "action",
-                        self.authority.leader_public_key,
-                        {
-                            "_group": "input",
-                            "group_id": self.authority.group_id,
-                            "leader_epoch": self.authority.leader_epoch,
-                            "actor_public_key": self.authority.leader_public_key,
-                            "client_seq": self.local_client_seq,
-                            "action": action,
-                        },
-                    )
+            pending = self.local_outbox.prepare()
+            if pending is None:
+                await asyncio.sleep(0.1)
+                continue
+            self.local_action_inflight = int(pending["client_seq"])
+            await self.queue.put(
+                (
+                    "action",
+                    self.authority.leader_public_key,
+                    {
+                        "_group": "input",
+                        "group_id": self.authority.group_id,
+                        "leader_epoch": self.authority.leader_epoch,
+                        "actor_public_key": self.authority.leader_public_key,
+                        "client_seq": pending["client_seq"],
+                        "action_id": pending["action_id"],
+                        "action": pending["action"],
+                    },
                 )
-            await asyncio.sleep(0.1)
+            )
+            await self.local_action_ready.wait()
+            self.local_action_ready.clear()
+
+    def _finish_local_action(
+        self, public_key: str, receipt: dict[str, Any]
+    ) -> None:
+        if public_key != self.authority.leader_public_key:
+            return
+        if self.local_outbox.handle_receipt(receipt):
+            self.local_action_inflight = None
+            self.local_action_ready.set()
+
+    def _track_sent_envelope(
+        self, public_key: str, envelope: dict[str, Any]
+    ) -> None:
+        seq = envelope.get("seq")
+        if not isinstance(seq, int) or isinstance(seq, bool):
+            return
+        if seq <= self.acknowledged_seq.get(public_key, -1):
+            return
+        pending = self.pending_ack.get(public_key)
+        if pending is None:
+            self.pending_ack[public_key] = (seq, time.monotonic())
+            return
+        required_seq, pending_since = pending
+        self.pending_ack[public_key] = (
+            max(required_seq, seq),
+            pending_since,
+        )
+
+    def _reset_ack_tracking(self, public_key: str) -> None:
+        self.acknowledged_seq.pop(public_key, None)
+        self.pending_ack.pop(public_key, None)
+
+    async def _ack_watchdog(self) -> None:
+        while not self.stopped.is_set():
+            await asyncio.sleep(self.ack_check_interval)
+            now = time.monotonic()
+            stale = [
+                public_key
+                for public_key, (_, pending_since) in self.pending_ack.items()
+                if now - pending_since >= self.ack_timeout
+            ]
+            for public_key in stale:
+                if public_key in self.channels:
+                    await self.detach(public_key, reason="frame_ack_timeout")
 
 
 async def run_group_guest_channel(
@@ -319,15 +637,14 @@ async def run_group_guest_channel(
     """Run one Guest connection until completion or Leader disconnect."""
     root = Path(state_dir)
     events = EventBus(root)
-    action_path = root / "group-actions.jsonl"
-    action_offset = 0
-    client_seq_path = root / "group-client-seq"
-    try:
-        client_seq = int(client_seq_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        client_seq = 0
 
     replica.apply(first_envelope, bootstrap=True)
+    accepted_client_seq = _checkpoint_client_seq(
+        replica.checkpoint, replica.viewer_public_key
+    )
+    outbox = _GroupActionOutbox(
+        root, accepted_client_seq=accepted_client_seq
+    )
     await channel.send(
         {
             "_group": "ack",
@@ -346,31 +663,63 @@ async def run_group_guest_channel(
         }
 
     async def sender() -> None:
-        nonlocal action_offset, client_seq
         while True:
-            entries, action_offset = _read_jsonl(action_path, action_offset)
-            for entry in entries:
-                action = entry.get("action") if isinstance(entry, dict) else None
-                if not isinstance(action, dict):
-                    continue
-                client_seq += 1
-                client_seq_path.write_text(str(client_seq), encoding="utf-8")
-                await channel.send(
-                    {
-                        "_group": "input",
-                        "group_id": replica.group_id,
-                        "leader_epoch": replica.leader_epoch,
-                        "actor_public_key": replica.viewer_public_key,
-                        "client_seq": client_seq,
-                        "action": action,
-                    }
-                )
-            await asyncio.sleep(0.1)
+            pending = outbox.prepare()
+            if pending is None:
+                await asyncio.sleep(0.1)
+                continue
+            await channel.send(
+                {
+                    "_group": "input",
+                    "group_id": replica.group_id,
+                    "leader_epoch": replica.leader_epoch,
+                    "actor_public_key": replica.viewer_public_key,
+                    "client_seq": pending["client_seq"],
+                    "action_id": pending["action_id"],
+                    "action": pending["action"],
+                }
+            )
+            try:
+                await asyncio.wait_for(action_ready.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            action_ready.clear()
 
+    action_ready = asyncio.Event()
     sender_task = asyncio.create_task(sender())
+    terminal_result: dict[str, Any] | None = None
+    terminal_client_seq: int | None = None
+    terminal_action_id: str | None = None
+
+    def finish_from_terminal_checkpoint() -> dict[str, Any]:
+        assert terminal_result is not None
+        assert terminal_client_seq is not None
+        assert terminal_action_id is not None
+        events.emit(
+            "group_action_receipt",
+            {
+                "_group": "receipt",
+                "status": "accepted",
+                "client_seq": terminal_client_seq,
+                "action_id": terminal_action_id,
+                "authority_seq": replica.seq,
+                "frame_hash": replica.frame_hash,
+                "completed": True,
+                "source": "terminal_checkpoint",
+            },
+        )
+        return terminal_result
+
     try:
         while True:
-            message = await channel.recv()
+            try:
+                message = await channel.recv(
+                    timeout=2.0 if terminal_result is not None else None
+                )
+            except TimeoutError:
+                if terminal_result is not None:
+                    return finish_from_terminal_checkpoint()
+                raise
             if not isinstance(message, dict):
                 continue
             kind = message.get("_group")
@@ -390,13 +739,40 @@ async def run_group_guest_channel(
                         }
                     )
                 if message.get("completed"):
-                    return {
+                    result = {
                         "completed": True,
                         "outcome": message.get("outcome"),
                         "checkpoint": replica.checkpoint,
                     }
+                    pending = outbox.pending
+                    accepted_seq = _checkpoint_client_seq(
+                        replica.checkpoint, replica.viewer_public_key
+                    )
+                    if (
+                        isinstance(pending, dict)
+                        and int(pending["client_seq"]) <= accepted_seq
+                    ):
+                        terminal_result = result
+                        terminal_client_seq = int(pending["client_seq"])
+                        terminal_action_id = str(pending["action_id"])
+                        outbox.reconcile(accepted_seq)
+                        sender_task.cancel()
+                        await asyncio.gather(
+                            sender_task, return_exceptions=True
+                        )
+                        continue
+                    return result
             elif kind == "receipt":
                 events.emit("group_action_receipt", message)
+                if outbox.handle_receipt(message):
+                    action_ready.set()
+                if (
+                    terminal_result is not None
+                    and message.get("client_seq") == terminal_client_seq
+                    and message.get("action_id") == terminal_action_id
+                    and message.get("status") in {"accepted", "duplicate"}
+                ):
+                    return terminal_result
             elif kind == "pong":
                 events.emit(
                     "group_pong",
@@ -407,6 +783,8 @@ async def run_group_guest_channel(
                     },
                 )
     except ChannelClosed:
+        if terminal_result is not None:
+            return finish_from_terminal_checkpoint()
         return {
             "completed": False,
             "reason": "leader_disconnected",
@@ -420,6 +798,13 @@ async def run_group_guest_channel(
 
 
 def _read_jsonl(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+    records, new_offset = _read_jsonl_records(path, offset)
+    return [entry for entry, _end_offset in records], new_offset
+
+
+def _read_jsonl_records(
+    path: Path, offset: int
+) -> tuple[list[tuple[dict[str, Any], int]], int]:
     if not path.exists():
         return [], offset
     try:
@@ -435,8 +820,11 @@ def _read_jsonl(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
         return [], offset
     complete = chunk[: last_newline + 1]
     new_offset = offset + len(complete)
-    result: list[dict[str, Any]] = []
-    for raw in complete.splitlines():
+    result: list[tuple[dict[str, Any], int]] = []
+    line_offset = offset
+    for raw_with_newline in complete.splitlines(keepends=True):
+        line_offset += len(raw_with_newline)
+        raw = raw_with_newline.rstrip(b"\r\n")
         if not raw.strip():
             continue
         try:
@@ -444,5 +832,86 @@ def _read_jsonl(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
         if isinstance(value, dict):
-            result.append(value)
+            result.append((value, line_offset))
     return result, new_offset
+
+
+def _legacy_committed_offset(path: Path, accepted_client_seq: int) -> int:
+    """Migrate the old cursor-less format using checkpoint sequence evidence."""
+    if accepted_client_seq <= 0:
+        return 0
+    records, scanned_offset = _read_jsonl_records(path, 0)
+    consumed = 0
+    committed_offset = 0
+    for entry, end_offset in records:
+        if isinstance(entry.get("action"), dict):
+            consumed += 1
+            committed_offset = end_offset
+            if consumed >= accepted_client_seq:
+                return committed_offset
+    return scanned_offset
+
+
+def _checkpoint_client_seq(
+    checkpoint: dict[str, Any] | None, public_key: str
+) -> int:
+    if not isinstance(checkpoint, dict):
+        return 0
+    values = checkpoint.get("last_client_seq")
+    if not isinstance(values, dict):
+        return 0
+    value = values.get(public_key.lower(), values.get(public_key))
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return 0
+    return value
+
+
+def _valid_pending_action(value: Any) -> bool:
+    return _valid_legacy_pending_action(value) and _valid_action_id(
+        value.get("action_id")
+    )
+
+
+def _valid_legacy_pending_action(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    client_seq = value.get("client_seq")
+    end_offset = value.get("end_offset")
+    return (
+        isinstance(client_seq, int)
+        and not isinstance(client_seq, bool)
+        and client_seq > 0
+        and isinstance(end_offset, int)
+        and not isinstance(end_offset, bool)
+        and end_offset >= 0
+        and isinstance(value.get("action"), dict)
+    )
+
+
+def _valid_action_id(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 32
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _atomic_json(path: Path, value: Any) -> None:
+    _atomic_text(
+        path,
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def _atomic_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    )
+    temporary.write_text(value, encoding="utf-8")
+    os.replace(temporary, path)

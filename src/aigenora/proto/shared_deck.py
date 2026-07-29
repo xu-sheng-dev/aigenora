@@ -151,29 +151,83 @@ def discard_cards(deck: dict[str, Any], card_ids: list[str]) -> None:
 def put_in_zone(
     deck: dict[str, Any], zone: str, owner: str, card_ids: list[str]
 ) -> None:
-    if not zone or len(zone) > 64:
-        raise SharedDeckError("zone is invalid")
-    zones = deck.get("zones")
-    if not isinstance(zones, dict):
-        raise SharedDeckError("zones is invalid")
-    zone_map = zones.setdefault(zone, {})
-    if not isinstance(zone_map, dict):
-        raise SharedDeckError("zone map is invalid")
-    owner_cards = zone_map.setdefault(owner, [])
-    if not isinstance(owner_cards, list):
-        raise SharedDeckError("owner zone is invalid")
+    owner_cards = _zone_cards(deck, zone, owner, create=True)
     owner_cards.extend(card_ids)
     validate_conservation(deck)
+
+
+def move_hand_to_zone(
+    deck: dict[str, Any],
+    public_key: str,
+    zone: str,
+    owner: str,
+    card_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Atomically move unique cards from a private hand into a named zone."""
+    _validate_card_ids(card_ids)
+    hands = deck.get("hands")
+    catalog = deck.get("catalog")
+    if not isinstance(hands, dict) or public_key not in hands:
+        raise SharedDeckError("unknown hand owner")
+    if not isinstance(catalog, dict):
+        raise SharedDeckError("deck catalog is invalid")
+    hand = hands[public_key]
+    if not isinstance(hand, list) or any(card_id not in hand for card_id in card_ids):
+        raise SharedDeckError("card is not in the player's hand")
+    owner_cards = _zone_cards(deck, zone, owner, create=True)
+    for card_id in card_ids:
+        hand.remove(card_id)
+        owner_cards.append(card_id)
+    validate_conservation(deck)
+    return [copy.deepcopy(catalog[card_id]) for card_id in card_ids]
+
+
+def move_draw_to_zone(
+    deck: dict[str, Any],
+    zone: str,
+    owner: str,
+    count: int,
+) -> list[dict[str, Any]]:
+    """Atomically move cards from the shared draw pile into a named zone."""
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1 or count > 64:
+        raise SharedDeckError("zone draw count must be between 1 and 64")
+    draw_pile = deck.get("draw_pile")
+    catalog = deck.get("catalog")
+    if not isinstance(draw_pile, list) or len(draw_pile) < count:
+        raise SharedDeckError("shared draw pile does not have enough cards")
+    if not isinstance(catalog, dict):
+        raise SharedDeckError("deck catalog is invalid")
+    owner_cards = _zone_cards(deck, zone, owner, create=True)
+    card_ids = [draw_pile.pop() for _ in range(count)]
+    owner_cards.extend(card_ids)
+    validate_conservation(deck)
+    return [copy.deepcopy(catalog[card_id]) for card_id in card_ids]
+
+
+def move_discard_to_zone(
+    deck: dict[str, Any],
+    zone: str,
+    owner: str,
+    card_id: str,
+) -> dict[str, Any]:
+    """Atomically claim one public discard into a named zone."""
+    discard = deck.get("discard_pile")
+    catalog = deck.get("catalog")
+    if not isinstance(discard, list) or card_id not in discard:
+        raise SharedDeckError("discard card does not exist")
+    if not isinstance(catalog, dict) or card_id not in catalog:
+        raise SharedDeckError("deck catalog is invalid")
+    owner_cards = _zone_cards(deck, zone, owner, create=True)
+    discard.remove(card_id)
+    owner_cards.append(card_id)
+    validate_conservation(deck)
+    return copy.deepcopy(catalog[card_id])
 
 
 def move_zone_to_discard(
     deck: dict[str, Any], zone: str, owner: str, card_id: str
 ) -> None:
-    zones = deck.get("zones")
-    try:
-        owner_cards = zones[zone][owner]
-    except (KeyError, TypeError):
-        raise SharedDeckError("zone card does not exist")
+    owner_cards = _zone_cards(deck, zone, owner, create=False)
     if card_id not in owner_cards:
         raise SharedDeckError("zone card does not exist")
     owner_cards.remove(card_id)
@@ -182,13 +236,19 @@ def move_zone_to_discard(
 
 
 def private_deck_view(
-    deck: dict[str, Any], viewer_public_key: str
+    deck: dict[str, Any],
+    viewer_public_key: str,
+    *,
+    hidden_zones: Iterable[str] = (),
 ) -> dict[str, Any]:
     validate_conservation(deck)
     catalog = deck["catalog"]
     hands = deck["hands"]
     if viewer_public_key not in hands:
         raise SharedDeckError("viewer does not own a hand")
+    hidden = set(hidden_zones)
+    if any(not isinstance(zone, str) or not zone for zone in hidden):
+        raise SharedDeckError("hidden_zones must contain non-empty strings")
     return {
         "draw_count": len(deck["draw_pile"]),
         "discard": [copy.deepcopy(catalog[card_id]) for card_id in deck["discard_pile"]],
@@ -200,6 +260,14 @@ def private_deck_view(
         "zones": {
             zone: {
                 owner: [copy.deepcopy(catalog[card_id]) for card_id in card_ids]
+                for owner, card_ids in owners.items()
+            }
+            for zone, owners in deck["zones"].items()
+            if zone not in hidden
+        },
+        "zone_counts": {
+            zone: {
+                owner: len(card_ids)
                 for owner, card_ids in owners.items()
             }
             for zone, owners in deck["zones"].items()
@@ -259,3 +327,43 @@ def _canonical_json(value: Any) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise SharedDeckError(f"card face is not canonical JSON: {exc}") from exc
+
+
+def _validate_card_ids(card_ids: list[str]) -> None:
+    if (
+        not isinstance(card_ids, list)
+        or not card_ids
+        or len(card_ids) > 64
+        or any(not isinstance(card_id, str) or not card_id for card_id in card_ids)
+        or len(set(card_ids)) != len(card_ids)
+    ):
+        raise SharedDeckError("card_ids must be a non-empty unique array")
+
+
+def _zone_cards(
+    deck: dict[str, Any],
+    zone: str,
+    owner: str,
+    *,
+    create: bool,
+) -> list[str]:
+    if not isinstance(zone, str) or not zone or len(zone) > 64:
+        raise SharedDeckError("zone is invalid")
+    if not isinstance(owner, str) or not owner or len(owner) > 256:
+        raise SharedDeckError("zone owner is invalid")
+    zones = deck.get("zones")
+    if not isinstance(zones, dict):
+        raise SharedDeckError("zones is invalid")
+    if create:
+        zone_map = zones.setdefault(zone, {})
+        if not isinstance(zone_map, dict):
+            raise SharedDeckError("zone map is invalid")
+        owner_cards = zone_map.setdefault(owner, [])
+    else:
+        try:
+            owner_cards = zones[zone][owner]
+        except (KeyError, TypeError):
+            raise SharedDeckError("zone card does not exist")
+    if not isinstance(owner_cards, list):
+        raise SharedDeckError("owner zone is invalid")
+    return owner_cards

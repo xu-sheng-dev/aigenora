@@ -1,0 +1,57 @@
+{
+  "name": "Classical Mahjong Core",
+  "spec_version": "1.0",
+  "description": "A fixed four-seat, 136-tile Mahjong core with private hands, public discards and melds, deterministic claim priority, three winning shapes, and a compact transparent scoring profile.",
+  "type": "game",
+  "family": "classical-mahjong",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 4,
+      "max_participants": 4,
+      "allow_late_join": false,
+      "recovery_mode": "restart_round",
+      "start_policy": "fixed_full",
+      "checkpoint_every_events": 20,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 32
+    }
+  },
+  "messages": [
+    {
+      "name": "mahjong_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["mahjong_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "mahjong_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["mahjong_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "deal_seed": {"type": "text", "max_length": 128},
+    "starting_points": {"type": "integer", "min": 0, "max": 100000},
+    "max_hands": {"type": "integer", "min": 1, "max": 32}
+  },
+  "rules": {
+    "tiles": "Exactly four stable seats use 136 tiles: three numbered suits from one through nine, four winds, and three dragons, with four physical copies of every face and no flowers.",
+    "turn": "Dealer starts with fourteen tiles and discards. Other turns draw one tile, may declare a concealed kong or self-draw win, and discard one tile.",
+    "claims": "After a discard, all three opponents respond. Win has highest priority, then kong or pung by nearest seat, then chow by the next seat only. A claimed discard moves atomically into the claimant's public meld.",
+    "winning": "Supported shapes are four melds and a pair, seven pairs, and thirteen orphans. Kongs count as one meld and draw a replacement tile.",
+    "scoring": "The Aigenora classical-core profile publishes a deliberately small additive pattern list. It is not the 81-pattern Mahjong Competition Rules profile.",
+    "privacy": "Only the current Leader stores the full wall and hands. Member views reveal the viewer's hand plus public rivers, melds, turn, claim window, counts, and scores.",
+    "recovery": "A Leader change preserves scores, dealer, and hand counter, discards hidden state, and starts a fresh hand."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_mahjong_actions"
+  }
+}

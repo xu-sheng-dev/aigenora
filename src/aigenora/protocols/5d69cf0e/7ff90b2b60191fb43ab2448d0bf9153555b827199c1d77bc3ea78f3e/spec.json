@@ -1,0 +1,57 @@
+{
+  "name": "Contract Bridge",
+  "spec_version": "1.0",
+  "description": "A fixed four-seat contract bridge board with a legal auction, declarer and dummy control, strict follow-suit play, duplicate scoring, and private hands.",
+  "type": "game",
+  "family": "contract-bridge",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 4,
+      "max_participants": 4,
+      "allow_late_join": false,
+      "recovery_mode": "restart_round",
+      "start_policy": "fixed_full",
+      "checkpoint_every_events": 20,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 32
+    }
+  },
+  "messages": [
+    {
+      "name": "bridge_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["bridge_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "bridge_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["bridge_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "deal_seed": {"type": "text", "max_length": 128},
+    "board_number": {"type": "integer", "min": 1, "max": 32}
+  },
+  "rules": {
+    "table": "Exactly four stable seats are North, East, South, and West. North-South play against East-West. A standard 52-card deck deals thirteen cards to every seat.",
+    "auction": "Calls rotate from the board dealer. Legal calls are pass, a higher bid from 1C through 7NT, double of an opposing undoubled contract, and redouble by the doubled declaring side. Four opening passes pass out the board; otherwise three passes end the auction.",
+    "declarer": "The first player on the winning partnership who bid the final denomination is declarer. Declarer's left-hand opponent leads. Dummy is exposed after the opening lead and declarer submits dummy's plays.",
+    "play": "Every hand must follow the led suit when able. Trump wins over non-trump; otherwise the highest card in the led suit wins. Thirteen tricks complete the board.",
+    "scoring": "Duplicate bridge scoring covers trick values, game and part-score bonuses, doubled and redoubled contracts, overtricks, undertricks, slams, and board vulnerability.",
+    "scope": "This protocol does not model director rulings, irregular calls or plays, alerts, claims, or tournament movement.",
+    "privacy": "Only the current Leader stores all four hands. A Member sees only its own hand until dummy becomes public.",
+    "recovery": "A Leader change preserves cumulative partnership score, discards the compromised board, and redeals the same board number."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_bridge_actions"
+  }
+}

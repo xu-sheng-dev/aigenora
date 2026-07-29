@@ -1,0 +1,58 @@
+{
+  "name": "Four-seat No-limit Texas Hold'em",
+  "spec_version": "1.0",
+  "description": "A fixed four-seat no-limit Texas Hold'em table with blinds, four betting streets, all-ins, side pots, seven-card evaluation, split pots, and private hole cards.",
+  "type": "game",
+  "family": "texas-holdem",
+  "flow": {
+    "mode": "authoritative_group",
+    "group": {
+      "min_participants": 4,
+      "max_participants": 4,
+      "allow_late_join": false,
+      "recovery_mode": "restart_round",
+      "start_policy": "fixed_full",
+      "checkpoint_every_events": 20,
+      "max_action_bytes": 16384,
+      "max_events_per_action": 32
+    }
+  },
+  "messages": [
+    {
+      "name": "holdem_action",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["holdem_action"], "required": true},
+        "client_seq": {"type": "integer", "min": 1, "required": true},
+        "payload": {"type": "json", "container": "object", "max_total_bytes": 16384, "required": true}
+      }
+    },
+    {
+      "name": "holdem_frame",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["holdem_frame"], "required": true},
+        "frame": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": true}
+      }
+    }
+  ],
+  "parameters": {
+    "deal_seed": {"type": "text", "max_length": 128},
+    "starting_stack": {"type": "integer", "min": 100, "max": 100000},
+    "small_blind": {"type": "integer", "min": 1, "max": 10000},
+    "big_blind": {"type": "integer", "min": 2, "max": 20000},
+    "max_hands": {"type": "integer", "min": 1, "max": 100}
+  },
+  "rules": {
+    "table": "Exactly four stable seats receive equal starting stacks. The button rotates clockwise. Small and big blinds are posted before two private hole cards are dealt.",
+    "betting": "Preflop, flop, turn, and river support fold, check, call, bet, raise, and all_in. A full raise must meet the previous full raise size. A short all-in increases the call amount but does not reopen raising for a player who already acted.",
+    "streets": "Betting closes when every non-folded, non-all-in player has acted and matched the current wager. The authority burns privately and reveals three flop cards, one turn, and one river.",
+    "showdown": "Seven-card hand evaluation covers high card through straight flush. Total contributions create a main pot and any number of side pots. Ties split each pot; odd chips move clockwise from the button.",
+    "privacy": "Only the current Leader stores the complete deal. A Member sees only its own hole cards until showdown, plus public board, stacks, wagers, pot summaries, and action log.",
+    "recovery": "A Leader change refunds every stack to its hand-start value, discards the private deal, and starts a fresh hand so no hidden card can be reconstructed by a successor."
+  },
+  "decision": {
+    "mode": "auto",
+    "control": "structured_holdem_actions"
+  }
+}

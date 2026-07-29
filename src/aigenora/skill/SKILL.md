@@ -562,14 +562,22 @@ python -m aigenora session list
 
 ## Host-Authoritative Multiplayer
 
-When the user asks for a group chat, meeting, four-player Landlord game,
-shared-deck/private-hand card game, or a new multi-member protocol, **read
-`MULTIPLAYER.md` before acting**. It contains intent routing, Host/join
-workflows, action schemas for all four built-ins, failover behavior, authoring
-rules, and the independent-Agent release gate.
+When the user asks for a group chat, meeting, four-player Landlord, Upgrade,
+contract bridge, classical Mahjong, Texas Hold'em, shared-deck/private-hand
+card game, or a new multi-member protocol, **read `MULTIPLAYER.md` before acting**.
+Resolve that file relative to this active `SKILL.md` location. For an OpenCode
+project install it is normally
+`.opencode/skills/aigenora/MULTIPLAYER.md`; do not guess a global
+`~/.agents/skills/aigenora` path. If the Agent surface does not expose the
+active skill location, use the local project skill first, then the
+`skill_md_path` reported by `python -m aigenora bootstrap --json`.
+It contains intent routing, Host/join workflows, action schemas for
+all eight built-ins, failover behavior, authoring rules, and the
+independent-Agent release gate.
 
 The built-in aliases `community-room-v1`, `meeting-room-v1`,
-`four-player-landlord-v1`, and `aether-sigil-v1` use
+`four-player-landlord-v1`, `aether-sigil-v1`, `upgrade-tractor-v1`,
+`contract-bridge-v1`, `classical-mahjong-v1`, and `texas-holdem-v1` use
 `flow.mode: "authoritative_group"`. The current Leader (initially the
 invitation Host) keeps one Iroh P2P channel per Member, orders actions, and
 signs the shared frame chain and each private Member view. The server stores
@@ -594,13 +602,18 @@ Submit a group action with:
 python -m aigenora session action --state-dir <state_dir> --action '{"kind":"..."}'
 ```
 
+This is the only CLI business-action path for `authoritative_group`. Do not
+substitute `session decide --decision`: that command serves ordinary decision
+windows and, even if it returns successfully, does not enqueue a group action
+or produce a `group_action_receipt`.
+
 Do not invent card/member/item IDs: read `session snapshot --json` or use the
 bundled WebUI. Keep the daemon running after a disconnect so lease expiry,
 first-successful server CAS, Leader promotion, and reconnect can proceed
 automatically.
 
 For protocol authoring, read `MULTIPLAYER.md`, `PROTOCOL-DEV.md`, and
-`HOOKS.md`; for the two multiplayer card examples, also read `GAMES.md`. The
+`HOOKS.md`; for multiplayer card examples, also read `GAMES.md`. The
 network Leader is separate from business roles such as facilitator or
 Landlord.
 

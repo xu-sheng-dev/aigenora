@@ -30,7 +30,7 @@
 | `simultaneous_round` | engine owns commit-reveal | `proto_round_value` + `proto_round_judge` (+optional pure) | RPS / Coin Flip |
 | `free` | bidirectional free messages | `proto_on_message` / `proto_on_send` / `proto_on_end` | human-chat |
 | `mental_poker` | engine owns fair dealing | `proto_mp_*` (5 hooks, see Card Games) | Crazy Eights / Briscola |
-| `authoritative_group` | one Leader orders actions from 2–32 Members | `proto_group_*` (8 hooks) | Community Room / Meeting / Landlord / Aether Sigil |
+| `authoritative_group` | one Leader orders actions from 2–32 Members | `proto_group_*` (8 hooks) | Community / Meeting / Landlord / Aether / Upgrade / Bridge / Mahjong / Hold'em |
 | `authoritative_realtime` | Host owns fixed tick; Guest queues future commands | `proto_realtime_*` (7 hooks) | Tank Battle |
 
 > There is no engine named `sequential_turn`. Turn-based games are built on `session_loop` (generic hooks driving a ping-pong loop) — e.g. Guess Number has the Host judge each guess via `proto_host_handle` and the Guest re-guess via `proto_guest_handle`.

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from aigenora.engine.config import data_protocols_root
@@ -93,6 +92,7 @@ def preflight(
     family: str | None = None,
     include_remote: bool = False,
     allow_new: bool = False,
+    allow_existing_hash: bool = False,
     reason: str = "",
     data_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -121,6 +121,15 @@ def preflight(
     # Check for same hash
     for c in candidates:
         if c["classification"] == "same_hash":
+            if allow_existing_hash:
+                return {
+                    "status": "allowed",
+                    "draft_protocol_id": draft_hash,
+                    "classification": "same_hash",
+                    "recommendation": "publish_existing_protocol",
+                    "reason": "the same contract exists locally and may be published to the selected server",
+                    "existing_protocol_id": c["protocol_id"],
+                }
             return {
                 "status": "blocked",
                 "draft_protocol_id": draft_hash,

@@ -25,6 +25,13 @@ message relay.
   Member actions, applies trusted local hooks, and signs one global frame chain.
 - Each Member has an independent bidirectional Iroh channel to the Leader.
   Members do not need a full mesh.
+- A newly attached or reattached channel must answer a fresh Leader challenge
+  with the Member's Ed25519 key. The proof binds the group, protocol, epoch,
+  public key, server-issued member ID and seat, join nonce, and challenge, so
+  an unsigned `ready` frame cannot replace another Member's live channel.
+- The Leader sends to Members concurrently with a bounded per-Member timeout,
+  while per-Member locks preserve frame order. A stalled channel is detached
+  without indefinitely delaying healthy Members.
 - The server stores no business messages, executable hooks, hands, deck order,
   meeting text, or chat text. It stores only room membership, the current
   Leader endpoint, a short lease, a fencing epoch, and the digest of a
@@ -144,6 +151,12 @@ This keeps the wire cost near the changed data for growing chat and meeting
 histories, while preserving a verifiable zero-rollback successor state after
 every acknowledged action.
 
+For CLI control, an `authoritative_group` business action must use
+`python -m aigenora session action --state-dir <dir> --action '<json>'`.
+Do not use `session decide --decision`: it targets ordinary decision windows
+and does not enqueue a group action or produce a `group_action_receipt`, even
+if that command itself returns successfully.
+
 ## Hooks
 
 An `authoritative_group` bundle implements these trusted local hooks:
@@ -162,9 +175,11 @@ class Hooks(ProtocolHooks):
 
 `proto_group_handle` returns an object containing `state` and optional
 `events`, `direct`, `completed`, and `outcome`. The engine bounds JSON size,
-deduplicates each actor's `client_seq`, allocates the global sequence, signs
-frames, persists checkpoints, and routes Member views. Hooks never own network
-channels.
+deduplicates each actor's accepted `client_seq`, binds every durable pending
+action and receipt to a stable `action_id`, allocates the global sequence,
+signs frames, persists checkpoints, and routes Member views. A delayed receipt
+must match both `client_seq` and `action_id`; it cannot consume a newer action
+that reused a rejected sequence. Hooks never own network channels.
 
 Never place another Member's private data in `events`, `direct` for a different
 Member, or `proto_group_recovery_snapshot`. `events` are part of the common
@@ -181,6 +196,9 @@ from aigenora.proto.shared_deck import (
     draw_cards,
     take_from_hand,
     discard_cards,
+    move_hand_to_zone,
+    move_draw_to_zone,
+    move_discard_to_zone,
     private_deck_view,
     validate_conservation,
 )
@@ -190,6 +208,18 @@ The authority owns `catalog`, `draw_pile`, `hands`, `discard`, and public
 zones. `private_deck_view(deck, member_public_key)` exposes that Member's hand,
 only counts for other hands, and public zones/discard. Conservation validation
 rejects a card that disappears or exists in two zones.
+
+The atomic move helpers transfer cards directly between a private hand, draw
+pile, discard, and named zone without exposing an invalid intermediate deck.
+Pass `hidden_zones={"kitty", "burn"}` to `private_deck_view` when a zone's
+count may be public but its cards must remain Leader-only.
+
+Related pure-function modules are:
+
+- `aigenora.proto.card_games`: standard faces and single-card trick rules;
+- `aigenora.proto.tractor`: effective suits, pairs, tractors, and following;
+- `aigenora.proto.poker`: five-to-seven-card ranking and side pots;
+- `aigenora.proto.mahjong`: 34 tile faces, chow choices, and winning shapes.
 
 The helper provides privacy by view separation, not by hiding state from the
 current Leader. A malicious Leader is still able to inspect or bias its own
@@ -204,6 +234,10 @@ auditable; they do not create trustless shuffling.
 | `meeting-room-v1` | 2–16 | `exact` | Agenda, FIFO floor, votes, action items, facilitator transfer |
 | `four-player-landlord-v1` | 4 | `restart_round` | Two-deck, one-versus-three shedding game with private hands |
 | `aether-sigil-v1` | 4 | `restart_round` | Original shared-deck tactical card battle with private hands and public boards |
+| `upgrade-tractor-v1` | 4 | `restart_round` | Two-deck partnership tricks, hidden kitty, tractors, and level progression |
+| `contract-bridge-v1` | 4 | `restart_round` | Auction, declarer-controlled dummy, follow suit, and duplicate scoring |
+| `classical-mahjong-v1` | 4 | `restart_round` | 136-tile wall, claim priority, public melds, and three winning shapes |
+| `texas-holdem-v1` | 4 | `restart_round` | No-limit betting, all-ins, side pots, and seven-card showdown |
 
 The network Leader is not a protocol business role. A meeting facilitator can
 be transferred independently, and the Landlord player need not be the Leader.
@@ -262,7 +296,9 @@ POST /api/v1/groups/{group_id}/status
 
 Group creation must exactly match the registered spec's participant and
 recovery policy. Admission requires both the current Leader signature and the
-joining Member signature over the same canonical statement.
+joining Member signature over the same canonical statement. Attaching the P2P
+channel additionally requires a fresh, Member-signed channel challenge bound
+to the server-issued member record.
 
 ## Verification
 
@@ -276,9 +312,10 @@ python -m compileall -q src/aigenora tests
 views, and restores a new Leader epoch. The repository suite additionally
 covers full/delta replay, bounded FIFO deltas, periodic checkpoints,
 recovery-floor acknowledgement, certificate and view tampering, concurrent
-channels, shared-deck conservation, all four example protocols, a real-Iroh
-four-identity/four-node failover scenario, WebUI bridge contracts, and the
-existing 1:1 runtime.
+channels, fresh signed channel admission, delayed-receipt isolation, stalled
+Member timeouts, shared-deck conservation, all eight example protocols, a
+real-Iroh four-identity/four-node failover scenario, WebUI bridge contracts,
+and the existing 1:1 runtime.
 
 That real-Iroh test is an automated process-level integration test, not four
 independent user Agents. Release acceptance should additionally run isolated

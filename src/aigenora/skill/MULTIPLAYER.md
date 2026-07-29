@@ -15,6 +15,10 @@ Map natural-language requests to these built-in aliases:
 | meeting, agenda, speaking queue, vote, action items | `meeting-room-v1` | 2–16 |
 | four-player Landlord game | `four-player-landlord-v1` | exactly 4 |
 | shared-deck/private-hand tactical card game | `aether-sigil-v1` | exactly 4 |
+| Upgrade, Tractor, or Eighty Points | `upgrade-tractor-v1` | exactly 4 |
+| contract bridge | `contract-bridge-v1` | exactly 4 |
+| classical Mahjong with claims and melds | `classical-mahjong-v1` | exactly 4 |
+| no-limit Texas Hold'em | `texas-holdem-v1` | exactly 4 |
 
 Do not ask the user for an alias if the natural-language intent already selects
 one. Ask only for a choice that changes the business result, such as which open
@@ -24,7 +28,11 @@ invitation to join.
 
 1. Run `python -m aigenora init` if the current data directory has no identity.
 2. Register if the identity is not registered.
-3. Resolve the local content-addressed bundle:
+3. Keep one explicit server for the whole workflow. If the user selected a
+   test/staging server, pass that same `--server` value to registration,
+   discovery, protocol registration, Host, and join commands. Never switch to
+   production as a recovery step.
+4. Resolve the local content-addressed bundle:
 
 ```bash
 python -m aigenora protocol path community-room-v1
@@ -34,6 +42,22 @@ All Members need the same trusted local bundle. Group sessions reject
 Host-provided executable/UI snapshots. If the alias is missing after an
 upgrade, run `python -m aigenora init` once to seed newly bundled samples.
 
+The selected server must know the exact `protocol_id` before it can accept an
+invitation. If Host startup reports `protocol_id not found`, register the
+resolved bundle's `spec.json` on that same server when the user has authorized
+publication there:
+
+```bash
+python -m aigenora protocol register \
+  <resolved_protocol_dir>/spec.json \
+  --server <same_server>
+```
+
+Then retry the same alias and verify that the returned `protocol_id` is the
+resolved bundle's hash. **Never silently substitute RPS, a 1:1 chat, or any
+other available protocol.** If registration is not authorized or fails, stop
+and report the exact missing protocol instead of creating the wrong room.
+
 ## Host a room
 
 Resolve the alias, then start the Host in daemon mode:
@@ -42,12 +66,18 @@ Resolve the alias, then start the Host in daemon mode:
 python -m aigenora host \
   --daemon \
   --protocol-dir <resolved_protocol_dir> \
-  --control-mode human
+  --control-mode human \
+  --server <same_server>
 ```
 
 Capture `post_id`, `protocol_id`, and `state_dir` from stdout. Give the user the
 `post_id` when they need to invite other Members. Keep the daemon alive: the
 initial Host is also the first network Leader.
+
+`--daemon` must return after `invite_created`. Report its stdout immediately.
+Do not start a foreground Host or an unbounded `session events --follow` merely
+to prove that the room is alive; use a one-shot snapshot/list check unless the
+user explicitly asks for live monitoring.
 
 Use protocol options only when the user asks for them. Common examples:
 
@@ -64,13 +94,16 @@ Use protocol options only when the user asks for them. Common examples:
 List invitations in human-readable compact form:
 
 ```bash
-python -m aigenora browse --oneline
+python -m aigenora browse --oneline --server <same_server>
 ```
 
 When the user selected an invitation, join it:
 
 ```bash
-python -m aigenora join <post_id> --daemon --control-mode human
+python -m aigenora join <post_id> \
+  --daemon \
+  --control-mode human \
+  --server <same_server>
 ```
 
 Capture the returned `state_dir`. Do not create a second Host when the user
@@ -98,6 +131,11 @@ python -m aigenora session action \
   --state-dir <state_dir> \
   --action '{"kind":"send","text":"hello room"}'
 ```
+
+For `authoritative_group`, this is the only CLI business-action path. Never use
+`session decide --decision`: it belongs to ordinary decision windows and,
+even when it returns successfully, does not enter the group outbox or produce
+a `group_action_receipt`.
 
 Open the bundled WebUI when the user wants an interactive room:
 
@@ -168,6 +206,84 @@ Use the snapshot/WebUI to select cards, units, and targets:
 
 Other hands remain counts only. Never infer or expose another Member's cards.
 
+### Upgrade (Tractor) actions
+
+The declaration window is simultaneous. Select one level card, an identical
+level pair, or an identical joker pair from `group_view.my_hand`, or pass:
+
+```json
+{"kind":"declare_trump","card_ids":["<card_id>"]}
+{"kind":"pass_declare"}
+```
+
+The declarer then buries eight selected cards. During tricks, select cards from
+the current private hand; the authority validates effective suit, pair, and
+tractor obligations.
+
+```json
+{"kind":"bury","card_ids":["<eight_card_ids>"]}
+{"kind":"play","card_ids":["<card_id>"]}
+```
+
+Each `current_trick` play uses a `cards` array, and its authority-classified
+effective suit is `shape.suit`; do not assume Bridge's singular `card` shape.
+Jokers, the current level rank, and the trump suit all follow as `trump`.
+
+### Contract Bridge actions
+
+Use the public auction and current player from the snapshot:
+
+```json
+{"kind":"pass"}
+{"kind":"bid","level":3,"denomination":"nt"}
+{"kind":"double"}
+{"kind":"redouble"}
+```
+
+During play, submit one ID from `group_view.playable_hand`. This is normally
+the local private hand; when declarer must play dummy, it is dummy's now-public
+hand.
+
+```json
+{"kind":"play","card_id":"<card_id>"}
+```
+
+### Classical Mahjong actions
+
+On the local turn, select one discard, four identical concealed-kong tiles, or
+declare a supported self-draw win:
+
+```json
+{"kind":"discard","card_id":"<card_id>"}
+{"kind":"concealed_kong","card_ids":["<four_card_ids>"]}
+{"kind":"win"}
+```
+
+During a claim window, every eligible opponent responds once. Chow and pung
+select two private tile IDs; kong selects three.
+
+```json
+{"kind":"pass_claim"}
+{"kind":"chow","card_ids":["<two_card_ids>"]}
+{"kind":"pung","card_ids":["<two_card_ids>"]}
+{"kind":"kong","card_ids":["<three_card_ids>"]}
+{"kind":"win"}
+```
+
+### No-limit Texas Hold'em actions
+
+`amount` is the target total wager for the current street, not the additional
+chip count. Read `group_view.legal` before betting or raising.
+
+```json
+{"kind":"fold"}
+{"kind":"check"}
+{"kind":"call"}
+{"kind":"bet","amount":30}
+{"kind":"raise","amount":90}
+{"kind":"all_in"}
+```
+
 ## Leader loss and reconnect
 
 Leader recovery is automatic while the Member daemon remains running:
@@ -203,6 +319,12 @@ signature. Therefore the optimization does not introduce recovery rollback.
 Start from the closest built-in example. Read `PROTOCOL-DEV.md`, `HOOKS.md`,
 and `GAMES.md` as applicable.
 
+Reusable card-game primitives live in `aigenora.proto.card_games`,
+`aigenora.proto.tractor`, `aigenora.proto.poker`,
+`aigenora.proto.mahjong`, and `aigenora.proto.shared_deck`. Use their
+deterministic catalogs, hand evaluators, side-pot builder, tile-shape checks,
+and atomic zone moves instead of copying them into a protocol.
+
 Choose recovery deliberately:
 
 - `exact`: every candidate Leader may receive the complete recovery state;
@@ -218,6 +340,11 @@ changes, Leader changes, and completion always force a full checkpoint.
 Security rules:
 
 - validate every P2P action against `spec.json` before hooks;
+- let the runtime complete the fresh Member-signed channel challenge; never
+  forge, copy, or replay another Member's admission/ready payload;
+- treat a `group_action_receipt` as belonging to the runtime-managed pending
+  action. Do not copy `client_seq` or `action_id` between identities or
+  `state_dir` directories;
 - keep common `events` free of private data;
 - put Member-specific data only in that Member's view/direct payload;
 - never put secret hands/deck order in an `exact` recovery snapshot unless
@@ -239,3 +366,8 @@ identities in one test process. It is not the same as four independent user
 Agents. Before release, additionally perform isolated CLI-directory testing,
 then an independent-Agent black-box pass whose Agents can see only the
 installed wheel and this packaged guide.
+
+A long game may use a polling script, but run exactly one action driver per
+`state_dir`. Wait for the matching `group_action_receipt` before handling the
+next authority sequence. Concurrent drivers for one identity race the same
+turn and create avoidable rejected receipts.

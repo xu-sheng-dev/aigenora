@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>No-limit Hold'em · Aigenora</title>
+  <style>
+    :root{--black:#08090a;--charcoal:#131619;--felt:#143c32;--felt2:#0b2d26;--ivory:#f4eddc;--amber:#e5aa3d;--red:#d64d40;--muted:#84938e;--line:#315b50}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--black);color:var(--ivory)}body{font-family:"Courier New",ui-monospace,monospace;background:radial-gradient(circle at 50% -10%,#3a2410 0,transparent 38%),var(--black)}
+    button,input{font:inherit}.room{width:min(1500px,100%);min-height:100vh;margin:auto;padding:18px clamp(10px,2.8vw,40px) 34px}
+    header{display:flex;justify-content:space-between;align-items:end;gap:20px;padding-bottom:14px;border-bottom:1px solid #684d23}.brand small{color:var(--amber);font-size:9px;letter-spacing:.25em}.brand h1{margin:5px 0 0;font:italic 700 clamp(30px,5vw,58px) Georgia,serif;letter-spacing:-.04em}.telemetry{text-align:right;font-size:10px;color:#9d8966;line-height:1.6}.telemetry b{display:block;color:var(--ivory);font-size:14px}
+    .notice{display:none;margin-top:12px;padding:9px 13px;border:1px solid var(--amber);color:var(--amber);font-size:10px}.notice.show{display:block}
+    .grid{display:grid;grid-template-columns:minmax(220px,280px) minmax(520px,1fr) minmax(220px,290px);gap:16px;margin-top:16px}
+    .rail{border:1px solid #302b23;background:var(--charcoal);min-width:0}.rail h2{margin:0;padding:10px 12px;border-bottom:1px solid #302b23;color:var(--amber);font-size:10px;letter-spacing:.17em}.players{padding:8px}.player{position:relative;padding:12px 10px;margin-bottom:7px;border-left:3px solid #39413f;background:#191d20}.player.current{border-color:var(--amber);background:#24231f}.player.you:after{content:"YOU";position:absolute;right:8px;top:8px;color:var(--amber);font-size:9px}.player .top{display:flex;justify-content:space-between;font-size:9px;color:var(--muted)}.player b{display:block;margin:5px 0 7px;overflow:hidden;text-overflow:ellipsis}.stack{font:700 21px Georgia,serif;color:var(--ivory)}.flags{float:right;color:var(--red);font-size:9px}
+    .oval-wrap{min-height:680px;padding:22px 0}.oval{position:relative;min-height:570px;padding:92px 36px 36px;border:14px solid #3c2818;border-radius:44%/28%;background:radial-gradient(ellipse,#1a5a49 0,var(--felt) 55%,var(--felt2) 100%);box-shadow:inset 0 0 0 2px #9b7135,inset 0 0 60px #061d18,0 12px 40px #000}
+    .pot{text-align:center}.pot small{display:block;color:#a7c5ba;font-size:9px;letter-spacing:.18em}.pot b{font:700 36px Georgia,serif;color:var(--amber)}.board{display:flex;justify-content:center;gap:8px;min-height:102px;margin:18px 0}
+    .card{width:68px;height:96px;padding:8px;border:1px solid #d6c8a8;border-radius:6px;background:#fffaf0;color:#111;text-align:left;box-shadow:3px 4px 0 rgba(0,0,0,.42)}.card.red{color:#b52d29}.card strong{font:700 20px Georgia,serif}.card span{display:block;font-size:23px}.card.back{display:grid;place-items:center;background:repeating-linear-gradient(45deg,#511918,#511918 6px,#782926 6px,#782926 12px);color:#f1d3a2;text-align:center}
+    .hole-label{text-align:center;color:#a7c5ba;font-size:9px;letter-spacing:.18em}.hole{display:flex;justify-content:center;gap:8px;margin:10px 0 18px}
+    .action-bar{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}.action-bar button,.action-bar input{min-height:40px;border:1px solid var(--amber);background:#0a241f;color:var(--ivory);padding:9px 13px}.action-bar button{cursor:pointer}.action-bar button.primary{background:var(--amber);color:#17130c;font-weight:800}.action-bar button.danger{border-color:var(--red);color:#ffb4ad}.action-bar button:disabled{opacity:.3;cursor:not-allowed}.action-bar input{width:116px}
+    .legal{text-align:center;margin-top:12px;color:#a7c5ba;font-size:9px}.status{min-height:25px;padding-top:12px;text-align:center;color:var(--muted);font-size:10px}.status.error{color:#ff8278}
+    .log{max-height:335px;overflow:auto}.event{padding:9px 11px;border-bottom:1px solid #282d2e;font-size:9px;line-height:1.5;color:#a7aaa9}.event b{display:block;color:var(--ivory);font-size:10px}.pots{padding:9px}.pot-row{display:flex;justify-content:space-between;padding:8px 4px;border-bottom:1px dotted #3a4242;color:var(--muted);font-size:9px}.pot-row strong{color:var(--amber)}
+    @media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.oval-wrap{grid-column:1/-1;grid-row:1}.oval{min-height:540px}.left,.right{grid-row:2}}
+    @media(max-width:650px){header{display:block}.telemetry{text-align:left;margin-top:9px}.grid{display:block}.rail{margin-bottom:12px}.oval-wrap{min-height:0;padding:0 0 13px}.oval{min-height:520px;border-width:8px;border-radius:35%/18%;padding:75px 12px 25px}.card{width:54px;height:79px}.action-bar input{width:100%}}
+  </style>
+</head>
+<body>
+<main class="room">
+  <header><div class="brand"><small>AIGENORA · NIGHT TABLE 04</small><h1>No-limit Hold'em</h1></div><div class="telemetry"><span id="link">DEALER LINK OFFLINE</span><b id="phase">WAITING</b><span id="frame">E— · F—</span></div></header>
+  <div class="notice" id="notice"></div>
+  <section class="grid">
+    <aside class="rail left"><h2>SEAT &amp; STACK LEDGER</h2><div class="players" id="players"></div></aside>
+    <section class="oval-wrap"><div class="oval">
+      <div class="pot"><small>TOTAL POT</small><b id="pot">0</b></div>
+      <div class="board" id="board"></div>
+      <div class="hole-label" id="hole-label">YOUR HOLE CARDS</div><div class="hole" id="hole"></div>
+      <div class="action-bar" id="actions"></div>
+      <div class="legal" id="legal">Waiting for a signed frame</div>
+      <div class="status" id="status" role="status"></div>
+    </div></section>
+    <aside class="rail right"><h2>HAND TAPE</h2><div class="log" id="log"></div><h2>POT SETTLEMENT</h2><div class="pots" id="pots"></div></aside>
+  </section>
+</main>
+<script>
+(function(){
+  "use strict";
+  var ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin,pending={},snapshot={},view={},ready=false;
+  function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),ORIGIN)}
+  function request(method,body){return new Promise(function(resolve,reject){var id="holdem_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),timer=setTimeout(function(){delete pending[id];reject(new Error("table bridge timeout"))},5000);pending[id]=function(value){clearTimeout(timer);resolve(value)};post({type:"request",id:id,method:method,body:body})})}
+  window.addEventListener("message",function(event){if(event.origin!==ORIGIN)return;var data=event.data||{};if(data.source!=="aigenora-broadcast")return;if(data.type==="hello-ack"){ready=true;document.getElementById("link").textContent="SIGNED DEALER LINK";request("snapshot").then(receive).catch(fail);return}if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return}if(data.type==="push"&&data.event==="snapshot")apply(data.data)});
+  function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)))}
+  function apply(next){if(!next||typeof next!=="object")return;snapshot=next;view=next.group_view||{};render()}
+  function key(value){return String(value||"").slice(0,8).toUpperCase()}
+  function rank(card){return({11:"J",12:"Q",13:"K",14:"A"})[card.rank]||String(card.rank)}
+  function glyph(suit){return({clubs:"♣",diamonds:"♦",hearts:"♥",spades:"♠"})[suit]||""}
+  function cardNode(card){var el=document.createElement("div");el.className="card "+(["hearts","diamonds"].includes(card.suit)?"red":"");var a=document.createElement("strong"),b=document.createElement("span");a.textContent=rank(card);b.textContent=glyph(card.suit);el.append(a,b);return el}
+  function render(){
+    var group=snapshot.group||{},players=view.players||{},you=view.you||{},mine=view.current_player===you.public_key&&!snapshot.completed;
+    document.getElementById("phase").textContent=String(view.street||view.phase||"waiting").toUpperCase()+" · HAND "+(view.hand_number||"—");document.getElementById("frame").textContent="E"+(group.leader_epoch??"—")+" · F"+(group.seq??"—");
+    var notice=document.getElementById("notice");notice.textContent=view.recovery_notice||"";notice.className="notice"+(view.recovery_notice?" show":"");
+    var box=document.getElementById("players");box.replaceChildren();Object.keys(players).sort(function(a,b){return players[a].seat-players[b].seat}).forEach(function(publicKey){var p=players[publicKey],row=document.createElement("article");row.className="player"+(publicKey===view.current_player?" current":"")+(publicKey===you.public_key?" you":"");var flags=[];if(publicKey===view.button)flags.push("BUTTON");if(publicKey===view.small_blind_player)flags.push("SB");if(publicKey===view.big_blind_player)flags.push("BB");if(p.folded)flags.push("FOLDED");if(p.all_in)flags.push("ALL-IN");row.innerHTML='<div class="top"><span>SEAT '+p.seat+'</span><span>'+((view.hand_counts||{})[publicKey]??0)+' CARDS</span></div><b>'+key(publicKey)+'</b><span class="stack">'+p.stack+'</span><span class="flags">'+flags.join(" · ")+'</span>';box.append(row)});
+    document.getElementById("pot").textContent=view.pot_total??0;var board=document.getElementById("board");board.replaceChildren();(view.board||[]).forEach(function(card){board.append(cardNode(card))});for(var i=(view.board||[]).length;i<5;i++){var back=document.createElement("div");back.className="card back";back.textContent="A";board.append(back)}
+    var hole=document.getElementById("hole");hole.replaceChildren();(view.my_hand||[]).forEach(function(card){hole.append(cardNode(card))});document.getElementById("hole-label").textContent=snapshot.completed&&Object.keys(view.showdown_hands||{}).length?"SHOWDOWN RECORDED":"YOUR PRIVATE HOLE CARDS";
+    var log=document.getElementById("log");log.replaceChildren();(view.action_log||[]).slice().reverse().forEach(function(item){var row=document.createElement("div");row.className="event";row.innerHTML="<b>"+String(item.kind||"").toUpperCase()+" · "+key(item.public_key)+"</b>"+String(item.street||"").toUpperCase()+" · TO "+item.amount+" · STACK "+item.stack;log.append(row)});
+    var pots=document.getElementById("pots");pots.replaceChildren();(view.pot_results||[]).forEach(function(item){var row=document.createElement("div");row.className="pot-row";row.innerHTML="<span>POT "+(item.pot_index+1)+" · "+item.winners.map(key).join("/")+"</span><strong>"+item.amount+"</strong>";pots.append(row)});
+    var legal=view.legal||{};document.getElementById("legal").textContent=mine?"TO CALL "+(legal.to_call??0)+" · MIN RAISE TO "+(legal.min_raise_to??0)+" · MAX "+(legal.max_to??0):(snapshot.completed?"MATCH COMPLETE":"ACTION · "+key(view.current_player));renderActions(mine)
+  }
+  function button(label,body,className){var el=document.createElement("button");el.textContent=label;if(className)el.className=className;el.onclick=function(){action(body)};return el}
+  function renderActions(mine){var box=document.getElementById("actions");box.replaceChildren();if(snapshot.completed){var done=document.createElement("strong");done.textContent="TABLE CLOSED · "+key(snapshot.outcome);box.append(done);return}var fold=button("FOLD",{kind:"fold"},"danger"),check=button("CHECK",{kind:"check"}),call=button("CALL",{kind:"call"}),allin=button("ALL-IN",{kind:"all_in"},"danger");[fold,check,call,allin].forEach(function(el){el.disabled=!mine||!ready;box.append(el)});var amount=document.createElement("input");amount.type="number";amount.min="0";amount.placeholder="TARGET TOTAL";amount.value=(view.legal||{}).min_raise_to||"";amount.disabled=!mine||!ready;box.append(amount);var kind=(view.current_bet||0)>0?"raise":"bet",raise=button(kind.toUpperCase(),{}, "primary");raise.onclick=function(){action({kind:kind,amount:Number(amount.value)})};raise.disabled=!mine||!ready||!(view.legal||{}).can_raise;box.append(raise)}
+  function errorText(response){return(response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status)}
+  function fail(error){var el=document.getElementById("status");el.textContent=error.message||String(error);el.className="status error"}
+  async function action(body){try{var response=await request("action",body);if(!response.ok)throw new Error(errorText(response));var el=document.getElementById("status");el.textContent="Action sent to the authoritative dealer.";el.className="status"}catch(error){fail(error)}}
+  post({type:"hello",capabilities:["snapshot","action"]});
+})();
+</script>
+</body>
+</html>

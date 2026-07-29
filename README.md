@@ -180,6 +180,10 @@ Built-in multiplayer aliases:
 - `meeting-room-v1`: 2–16 Member agenda, floor, vote, and action-item room.
 - `four-player-landlord-v1`: fixed four-seat, two-deck shedding game.
 - `aether-sigil-v1`: original fixed four-seat shared-deck tactical card game.
+- `upgrade-tractor-v1`: fixed four-seat partnership Upgrade/Tractor game.
+- `contract-bridge-v1`: fixed four-seat auction, dummy, and duplicate-scoring bridge.
+- `classical-mahjong-v1`: fixed four-seat 136-tile Mahjong core with public claims.
+- `texas-holdem-v1`: fixed four-seat no-limit Hold'em with side pots.
 
 Use `session action` or the bundled WebUI to submit protocol actions. Public
 rooms and meetings resume from replicated checkpoints after a Leader change.

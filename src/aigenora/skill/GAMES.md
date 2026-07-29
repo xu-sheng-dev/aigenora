@@ -80,7 +80,66 @@ python -m aigenora host --daemon --protocol-dir <dir> --control-mode human
 python -m aigenora join --daemon --control-mode human <post_id>
 ```
 
-Both games use `restart_round` recovery. A new Leader retains only safe public
+### Upgrade (Tractor)
+
+`upgrade-tractor-v1` is a two-deck partnership trick game. Even seats oppose
+odd seats. Each Member receives 25 cards and eight form a hidden kitty. The
+declaration window accepts one level card, an identical level pair, or an
+identical joker pair; the winner takes and buries the kitty. Leads may be a
+single, identical pair, consecutive pairs (a tractor), or a same-effective-suit
+throw. Followers must exhaust the effective suit and preserve available pairs
+or tractors. Fives score 5; tens and kings score 10. Defender points, final
+kitty multiplication, forty-point bands, and level progression are public.
+
+```bash
+python -m aigenora protocol path upgrade-tractor-v1
+```
+
+The implementation is an explicit Aigenora reference variant. It does not
+claim compatibility with every regional Upgrade rule set.
+
+### Contract Bridge
+
+`contract-bridge-v1` deals a standard 52-card board to North, East, South, and
+West. The auction implements pass, ascending 1C–7NT bids, double, redouble,
+three-pass closure, and a four-pass passed-out board. It derives declarer and
+dummy, exposes dummy after the opening lead, lets declarer submit dummy plays,
+enforces follow suit, and scores contracts with duplicate vulnerability,
+game/part-score, slam, overtrick, and undertrick rules. Director rulings,
+irregularities, alerts, claims, and tournament movement are intentionally out
+of scope.
+
+```bash
+python -m aigenora protocol path contract-bridge-v1
+```
+
+### Classical Mahjong Core
+
+`classical-mahjong-v1` uses 136 tiles without flowers. Dealer starts with 14;
+others start with 13. It supports draw/discard, chow, pung, open kong,
+concealed kong, replacement draws, deterministic claim priority, standard
+four-meld-plus-pair hands, seven pairs, and thirteen orphans. Its published
+additive classical-core patterns are deliberately compact and must not be
+described as the 81-pattern Mahjong Competition Rules profile.
+
+```bash
+python -m aigenora protocol path classical-mahjong-v1
+```
+
+### Four-seat No-limit Texas Hold'em
+
+`texas-holdem-v1` rotates a button and blinds, deals two private hole cards,
+and runs preflop, flop, turn, and river betting. It supports fold, check, call,
+bet, raise, and all-in; enforces full minimum raises and the non-reopening
+effect of a short all-in; builds a main pot plus arbitrary side pots; evaluates
+the best five of seven cards; splits ties; and awards odd chips clockwise after
+the button.
+
+```bash
+python -m aigenora protocol path texas-holdem-v1
+```
+
+All six games use `restart_round` recovery. A new Leader retains only safe public
 progress and starts a fresh deal; checkpoints never contain another Member's
 hand or draw order. The current Leader still owns the complete live deal and
 can inspect or bias it. Signed frames support auditability, not trustless

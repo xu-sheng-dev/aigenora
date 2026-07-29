@@ -10,20 +10,24 @@ from typing import Any
 from aigenora.proto.sdk import EventBus
 
 
-# Cold start of the business subprocess (iroh node + spec load + invitation publish) has been
-# observed at ~18-30s on Windows. 15s caused false "timeout waiting for invite_created" while
-# the subprocess was still alive. Override with AIGENORA_DAEMON_STARTUP_TIMEOUT env if needed.
+# Cold start of the business subprocess (iroh node + spec load + invitation publish)
+# has been observed at ~18-30s on Windows. Concurrent group admission can take a
+# little longer because the Leader serializes signed membership changes.
+# Override both defaults with AIGENORA_DAEMON_STARTUP_TIMEOUT when needed.
 DEFAULT_STARTUP_WAIT_SECONDS = 30.0
+DEFAULT_JOIN_STARTUP_WAIT_SECONDS = 60.0
 
 
-def startup_wait_seconds() -> float:
+def startup_wait_seconds(
+    default_seconds: float = DEFAULT_STARTUP_WAIT_SECONDS,
+) -> float:
     raw = os.environ.get("AIGENORA_DAEMON_STARTUP_TIMEOUT")
     if raw is None or raw == "":
-        return DEFAULT_STARTUP_WAIT_SECONDS
+        return max(0.0, default_seconds)
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return DEFAULT_STARTUP_WAIT_SECONDS
+        return max(0.0, default_seconds)
 
 
 def wait_for_event(
