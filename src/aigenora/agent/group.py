@@ -287,6 +287,54 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
         await node.node().shutdown()
 
 
+def _record_group_member_ready(
+    *,
+    state_dir: Path,
+    event_bus: EventBus,
+    group: dict[str, Any],
+    member: dict[str, Any],
+    protocol_dir: Path,
+    control_mode: str,
+    config: GroupConfig,
+    peer_overlay: GroupPeerOverlay | None,
+) -> None:
+    """Persist replay identity before publishing the daemon readiness event."""
+    protocol_id = str(group["protocol_id"])
+    update_session_meta(
+        state_dir,
+        session_id=group["group_id"],
+        group_id=group["group_id"],
+        protocol_id=protocol_id,
+        group_role="member",
+        member_id=member["member_id"],
+        seat=member["seat"],
+        leader_epoch=group["leader_epoch"],
+        protocol_dir=str(protocol_dir),
+        local_protocol_dir=str(protocol_dir),
+        active_hooks_source="trusted_local",
+        peer_channels_enabled=config.peer_channels_enabled,
+        peer_ticket_hash=(
+            peer_overlay.ticket_hash if peer_overlay is not None else None
+        ),
+    )
+    event_bus.emit(
+        "peer_joined",
+        {
+            "host_public_key": group["leader_public_key"],
+            "session_id": group["group_id"],
+            "group_id": group["group_id"],
+            "protocol_id": protocol_id,
+            "member_id": member["member_id"],
+            "seat": member["seat"],
+            "protocol_dir": str(protocol_dir),
+            "local_protocol_dir": str(protocol_dir),
+            "local_control_mode": control_mode,
+            "peer_control_mode": "hybrid",
+            "active_hooks_source": "trusted_local",
+        },
+    )
+
+
 async def run_group_join_command(
     args,
     *,
@@ -362,38 +410,15 @@ async def run_group_join_command(
                             spec.get("name") or "Group Protocol"
                         ),
                     )
-                    event_bus.emit(
-                        "peer_joined",
-                        {
-                            "host_public_key": group["leader_public_key"],
-                            "session_id": group["group_id"],
-                            "group_id": group["group_id"],
-                            "member_id": member["member_id"],
-                            "seat": member["seat"],
-                            "protocol_dir": str(protocol_dir),
-                            "local_protocol_dir": str(protocol_dir),
-                            "local_control_mode": control_mode,
-                            "peer_control_mode": "hybrid",
-                            "active_hooks_source": "trusted_local",
-                        },
-                    )
-                    update_session_meta(
-                        state_dir,
-                        session_id=group["group_id"],
-                        group_id=group["group_id"],
-                        group_role="member",
-                        member_id=member["member_id"],
-                        seat=member["seat"],
-                        leader_epoch=group["leader_epoch"],
-                        protocol_dir=str(protocol_dir),
-                        local_protocol_dir=str(protocol_dir),
-                        active_hooks_source="trusted_local",
-                        peer_channels_enabled=config.peer_channels_enabled,
-                        peer_ticket_hash=(
-                            peer_overlay.ticket_hash
-                            if peer_overlay is not None
-                            else None
-                        ),
+                    _record_group_member_ready(
+                        state_dir=state_dir,
+                        event_bus=event_bus,
+                        group=group,
+                        member=member,
+                        protocol_dir=protocol_dir,
+                        control_mode=control_mode,
+                        config=config,
+                        peer_overlay=peer_overlay,
                     )
                 elif int(group["leader_epoch"]) > replica.leader_epoch:
                     replica.advance_epoch(

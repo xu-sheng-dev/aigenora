@@ -147,12 +147,13 @@ def _run_daemon(args) -> int:
         timeout_seconds=startup_wait_seconds(
             DEFAULT_JOIN_STARTUP_WAIT_SECONDS
         ),
-        required_data_keys=("session_id",),
+        required_data_keys=("session_id", "protocol_id"),
     )
     session_id = ""
     if startup_event is not None:
         startup_data = startup_event.get("data") or {}
         session_id = str(startup_data.get("session_id") or "")
+        protocol_id = str(startup_data.get("protocol_id") or "")
         group_id = str(startup_data.get("group_id") or "")
         member_id = str(startup_data.get("member_id") or "")
         seat = startup_data.get("seat")
@@ -167,6 +168,8 @@ def _run_daemon(args) -> int:
         ui_dir = str(startup_data.get("ui_dir") or "")
         if session_id:
             session_meta["session_id"] = session_id
+        if protocol_id:
+            session_meta["protocol_id"] = protocol_id
         if group_id:
             session_meta["group_id"] = group_id
             session_meta["group_role"] = "member"
@@ -190,6 +193,7 @@ def _run_daemon(args) -> int:
             session_meta["ui_dir"] = ui_dir
         if (
             session_id
+            or protocol_id
             or group_id
             or member_id
             or isinstance(seat, int)
@@ -207,6 +211,7 @@ def _run_daemon(args) -> int:
                     key: session_meta[key]
                     for key in (
                         "session_id",
+                        "protocol_id",
                         "group_id",
                         "group_role",
                         "member_id",
@@ -301,6 +306,8 @@ def _run_daemon(args) -> int:
     }
     if session_id:
         result["session_id"] = session_id
+    if session_meta.get("protocol_id"):
+        result["protocol_id"] = session_meta["protocol_id"]
     if session_meta.get("group_id"):
         result["group_id"] = session_meta["group_id"]
         result["seat"] = session_meta.get("seat")
@@ -579,6 +586,7 @@ async def _join(args) -> int:
             engine_state_base = state_base
 
         session_updates: dict[str, Any] = {
+            "protocol_id": canonical_protocol_id,
             "protocol_dir": str(active_protocol_dir.resolve()),
             "local_protocol_dir": str(proto_dir.resolve()),
             "active_hooks_source": (
@@ -626,6 +634,7 @@ async def _join(args) -> int:
             event_bus.emit("peer_joined", {
                 "host_public_key": host_public_key,
                 "session_id": session_id,
+                "protocol_id": canonical_protocol_id,
                 "protocol_dir": str(active_protocol_dir),
                 "local_protocol_dir": str(proto_dir),
                 "local_control_mode": control_mode,

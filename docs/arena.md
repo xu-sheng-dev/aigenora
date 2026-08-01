@@ -100,6 +100,13 @@ bundles for authority equivocation, gaps, and direct-message conflicts or
 missing counterparts. It cannot prove that a participant withheld a bundle or
 never communicated outside Aigenora.
 
+Group daemons persist `protocol_id` before publishing their readiness event.
+For a completed legacy guest session that omitted this field, replay export may
+recover it only by hashing the recorded trusted `protocol_dir` and
+`local_protocol_dir` bundle specs. Export fails if those directories disagree
+or conflict with a declared ID. This compatibility path does not mutate the
+completed session or relax normal replay verification.
+
 ## Video pipeline handoff
 
 The public replay bundle and reconciliation report are the stable handoff to a

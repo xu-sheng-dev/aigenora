@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+from aigenora.engine.crypto import protocol_hash
 from aigenora.engine.keys import KeyPair, sign_raw, verify_raw
 from aigenora.proto.group import (
     GroupProtocolError,
@@ -124,6 +125,7 @@ def export_replay_bundle(
     snapshot = _first_json(effective_root / "snapshot.json")
     checkpoint = _first_json(effective_root / "group-checkpoint.json")
     identity = _session_identity(session_meta, snapshot, checkpoint)
+    identity["protocol_id"] = _resolve_protocol_id(session_meta, identity)
     if identity.get("group_id") and not _is_hash(identity.get("protocol_id")):
         raise ValueError("group replay requires a valid protocol_id")
 
@@ -518,6 +520,32 @@ def _session_identity(
         "group_role": _first_string(session_meta.get("group_role"), snapshot.get("role")),
         "seat": session_meta.get("seat"),
     }
+
+
+def _resolve_protocol_id(
+    session_meta: dict[str, Any], identity: dict[str, Any]
+) -> str:
+    """Recover legacy daemon metadata from the pinned local protocol bundle.
+
+    Older guest daemons omitted ``protocol_id`` from ``session.json``.  The
+    recorded trusted local bundle paths are sufficient to recompute the same
+    content-addressed identifier without mutating the completed session.
+    """
+    declared = _first_string(identity.get("protocol_id"))
+    derived: set[str] = set()
+    for name in ("protocol_dir", "local_protocol_dir"):
+        raw = session_meta.get(name)
+        if not isinstance(raw, str) or not raw:
+            continue
+        spec_path = Path(raw).expanduser().resolve() / "spec.json"
+        if spec_path.is_file():
+            derived.add(protocol_hash(spec_path))
+    if len(derived) > 1:
+        raise ValueError("session protocol directories resolve to different protocol_ids")
+    computed = next(iter(derived), "")
+    if declared and computed and declared != computed:
+        raise ValueError("session protocol_id does not match the trusted local bundle")
+    return declared or computed
 
 
 def _authority_frames(path: Path) -> list[dict[str, Any]]:
