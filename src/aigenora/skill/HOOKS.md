@@ -224,7 +224,7 @@ Card games with hidden hands + a shared deck use `flow.mode: "mental_poker"`. Th
 | `proto_mp_deck_universe()` | Return the full deck `[(rank_index, suit_index), ...]` (Host only) |
 | `proto_mp_initial_deal(state)` | Return the initial deal plan, e.g. `{"host": 5, "guest": 5}` |
 | `proto_mp_choose_action(state)` | Choose this turn's action: `play` / `draw` / `pass` |
-| `proto_mp_check_winner(state)` | Return the winner `"host"`/`"guest"`, or `None` if not over |
+| `proto_mp_check_winner(state)` | Return terminal outcome `"host"`/`"guest"`/`"draw"`, or `None` if not over |
 | `proto_mp_validate_play(state, who, play_msg)` | Validate a peer's play against game rules (default accepts all; real games override) |
 
 > Crazy Eights / Briscola are built-in samples; to write a new card game, model your hooks on theirs.

@@ -28,11 +28,10 @@ import random
 from pathlib import Path
 from typing import Any
 
-from .hooks import HookResult
 from .loader import load_hooks
 from .sdk import EventBus
 from . import mental_poker
-from ..engine import aead_deck, keys, ot
+from ..engine import aead_deck, ot
 from ..engine.p2p import AsyncJsonLineChannel, ChannelClosed, JsonLineChannel
 
 # Lazy imports from .engine to avoid a top-level circular import (engine.py registers
@@ -1056,8 +1055,8 @@ def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
                        spec: dict[str, Any], validate: bool, *, host_first: bool) -> str | None:
     """Strictly alternating turns. The actor plays / draws / passes; the peer verifies.
 
-    Returns the winner ('host'/'guest') once ``proto_mp_check_winner`` reports one, or
-    when both sides stall (two consecutive ``mp_pass`` → ``state["_mp_stalled"]``).
+    Returns the terminal outcome once ``proto_mp_check_winner`` reports one, or when
+    both sides stall (two consecutive ``mp_pass`` → ``state["_mp_stalled"]``).
     """
     turn = 0
     local_action_seq = 0
@@ -1126,7 +1125,7 @@ def _mp_play_loop_sync(s: _MpSession, hooks: Any, channel: JsonLineChannel,
         if consecutive_passes >= 2:
             s.state["_mp_stalled"] = True
         winner = hooks.proto_mp_check_winner(s.state)
-        if winner in ("host", "guest"):
+        if winner is not None:
             return winner
         if consecutive_passes >= 2:
             return winner
@@ -1230,7 +1229,6 @@ async def _run_mp_async_host(
     heartbeat_interval: float = 0, heartbeat_timeout: float = 0,
     session_id: str | None = None, keypair: Any = None, peer_public_key: str | None = None,
 ) -> dict[str, Any]:
-    import asyncio
     import time
 
     hooks = load_hooks(proto_dir)
@@ -1467,7 +1465,7 @@ async def _mp_play_loop_async(s: _MpSession, hooks: Any, channel: AsyncJsonLineC
         if consecutive_passes >= 2:
             s.state["_mp_stalled"] = True
         winner = hooks.proto_mp_check_winner(s.state)
-        if winner in ("host", "guest"):
+        if winner is not None:
             return winner
         if consecutive_passes >= 2:
             return winner

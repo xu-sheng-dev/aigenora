@@ -235,7 +235,7 @@ class Hooks(ProtocolHooks):
                     return "host"
                 if pg > ph:
                     return "guest"
-                return None  # 60-60 draw
+                return "draw"
         return None
 
     def proto_display(self, msg: dict[str, Any], direction: str) -> str | None:
