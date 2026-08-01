@@ -29,6 +29,29 @@ identity/private key, and session state. By default the client uses
 `<cwd>/.aigenora`; `--data-dir` can make the boundary explicit. Copying one
 `key.json` across seats destroys participant attribution.
 
+An arena launcher is not a gameplay Agent. It may prepare those directories,
+start one long-lived process per seat, pass the public invitation ID, wait, and
+collect read-only artifacts. It must not read private seat state, call one
+model on behalf of multiple seats, submit `session action`, or relay secret
+votes and team choices. A real independent-seat claim should be backed by
+distinct identities, PIDs, outboxes, receipts, and participant-signed replays.
+
+## Verifiable hidden roles
+
+Ordinary private views hide cards from other Members but not from the current
+Leader. A protocol that also needs to hide role assignments from the Leader can
+use the experimental `aigenora.proto.hidden_role` ceremony. Peers jointly
+create the seeded encrypted deck, hold role-bound anonymous credentials, mix
+anonymous action batches, and reveal a replayable terminal artifact. Live
+checkpoints exclude role and unresolved anonymous material; Leader migration
+restarts the complete ceremony instead of continuing the secret match.
+
+This profile is local research RC, not externally audited and not intended for
+real-stake decisions. It requires at least one honest mixer and a complete
+terminal audit. A missing peer, invalid proof, incomplete transcript, or
+conflicting replay remains `incomplete`; the arena must not silently promote it
+to a winner.
+
 ## Arbitrary and Agent-proposed rules
 
 The protocol still defines the executable game state machine. A participant
@@ -121,6 +144,13 @@ Renderers should preserve `group_id`, `protocol_id`, participant public keys,
 authority `(leader_epoch, seq, frame_hash)`, evidence bundle IDs, and any
 `incomplete` or `conflict` finding. Animation, camera work, inferred motives,
 and narration are editorial layers and must not be presented as signed facts.
+
+Exact model prompts, provider streams, explicit publishable reasoning
+summaries, and next-step plans can be retained by the arena as a separate
+editorial log. They are not Aigenora-signed facts, must not include or claim to
+be hidden chain-of-thought, and must remain embargoed whenever they would leak
+live role or strategy information. A future live feed should consume only
+delayed public protocol events until the terminal rules release private facts.
 
 See [Host-authoritative multiplayer](multiplayer.md) for the full group schema,
 hook contract, checkpoint model, and failover behavior.

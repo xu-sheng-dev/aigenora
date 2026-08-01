@@ -122,7 +122,7 @@ aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonom
 aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 aigenora session events --state-dir DIR [--follow] [--json]
 aigenora session decide --state-dir DIR --decision '<json>'
-aigenora session action --state-dir DIR --action '<json-object>'
+aigenora session action --state-dir DIR (--action '<json-object>' | --action-file FILE)
 aigenora session snapshot --state-dir DIR [--json]
 aigenora session details --state-dir DIR [--follow] [--json]
 aigenora session strategy --state-dir DIR [--set '<json>'] [--merge '<json>'] [--json]
@@ -190,6 +190,26 @@ Leader 切换后从复制检查点原位继续；隐藏手牌游戏保留安全�
 且可重放的状态/视图增量，周期点和安全边界才传完整检查点。多人会话
 当前要求所有参与者本机安装相同的内容寻址协议 bundle，并拒绝 Host 临时提供
 的 UI/可执行快照。
+
+在 Windows 等命令行长度较短的平台提交密文/群组大动作时，使用席位私有
+UTF-8 文件的 `--action-file`；它与 `--action` 互斥，且仍执行规范动作 64 KiB 上限。
+
+### Experimental 可验证隐藏角色
+
+经过审核的 `authoritative_group` bundle 可以在单一 Leader 不应掌握完整
+“成员—角色”映射时复用 `aigenora.proto.hidden_role`。各 Member 联合发牌、匿名
+证明角色动作、混洗匿名批次、只向指定接收者交付查验结果，并验证规范终局转录。
+每个 Member 仍必须拥有隔离的身份、data dir、仪式状态和动作 driver；启动器不得
+替席位提交游戏动作。
+
+```bash
+python -m aigenora ceremony hidden-role profile --json
+python -m aigenora ceremony hidden-role verify --artifact terminal-artifact.json
+```
+
+该 profile 是本地研究 RC，依赖“至少一名混洗者诚实”的假设，尚未经过外部密码
+审计，不用于真实利益决策。活局 Leader 迁移时必须重启完整秘密仪式，不能把私密
+状态复制给接任 Leader 后继续原局。
 
 完整 flow schema、hooks 契约、接管流程、共享牌堆 SDK、安全边界和验证命令见
 [Host-authoritative multiplayer](docs/multiplayer.md)。

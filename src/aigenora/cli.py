@@ -466,7 +466,12 @@ def build_parser() -> argparse.ArgumentParser:
         "action", help="Submit a structured action to an authoritative group session"
     )
     sga.add_argument("--state-dir", required=True)
-    sga.add_argument("--action", required=True, help="Group action JSON object")
+    sga_source = sga.add_mutually_exclusive_group(required=True)
+    sga_source.add_argument("--action", help="Group action JSON object")
+    sga_source.add_argument(
+        "--action-file",
+        help="Read the group action JSON object from a UTF-8 file",
+    )
     speer = sess_sub.add_parser(
         "peer", help="Use a protocol-authorized Member-to-Member side channel"
     )
@@ -724,6 +729,23 @@ def build_parser() -> argparse.ArgumentParser:
     dv.add_argument("--tally-verifier-command")
     dv.add_argument("--timeout", type=float, default=30.0)
 
+    ceremony = sub.add_parser(
+        "ceremony",
+        help="Experimental multi-party ceremony tools (local research RC only)",
+    )
+    ceremony_sub = ceremony.add_subparsers(dest="ceremony_cmd", required=True)
+    hidden_role = ceremony_sub.add_parser(
+        "hidden-role",
+        help="Verify a terminal hidden-role ceremony artifact",
+    )
+    hidden_role_sub = hidden_role.add_subparsers(
+        dest="ceremony_subcmd", required=True
+    )
+    hidden_role_verify = hidden_role_sub.add_parser("verify")
+    hidden_role_verify.add_argument("--artifact", required=True)
+    hidden_role_profile = hidden_role_sub.add_parser("profile")
+    hidden_role_profile.add_argument("--json", action="store_true", dest="json_output")
+
     # skill management
     from aigenora.agent.skill import build_subparser as _build_skill
     _build_skill(sub)
@@ -868,6 +890,8 @@ def main(argv: list[str] | None = None) -> int:
         from aigenora.agent.console import run
     elif args.cmd == "decision":
         from aigenora.agent.decision import run
+    elif args.cmd == "ceremony":
+        from aigenora.agent.ceremony import run
     elif args.cmd == "skill":
         from aigenora.agent.skill import run as run
     else:

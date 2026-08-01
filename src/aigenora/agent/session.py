@@ -334,9 +334,23 @@ def cmd_decide(args) -> int:
 
 
 def cmd_group_action(args) -> int:
-    action = json.loads(args.action)
+    action_file = getattr(args, "action_file", None)
+    if action_file:
+        source = Path(str(action_file))
+        if not source.is_file():
+            raise ValueError("--action-file must name an existing regular file")
+        if source.stat().st_size > 1024 * 1024:
+            raise ValueError("--action-file exceeds 1MB input limit")
+        raw_action = source.read_text(encoding="utf-8")
+        source_label = "--action-file"
+    else:
+        raw_action = getattr(args, "action", None)
+        source_label = "--action"
+    if not isinstance(raw_action, str) or not raw_action.strip():
+        raise ValueError(f"{source_label} must contain a JSON object")
+    action = json.loads(raw_action)
     if not isinstance(action, dict):
-        raise ValueError("--action must be a JSON object")
+        raise ValueError(f"{source_label} must contain a JSON object")
     encoded = json.dumps(
         action,
         ensure_ascii=False,
@@ -345,7 +359,7 @@ def cmd_group_action(args) -> int:
         allow_nan=False,
     ).encode("utf-8")
     if len(encoded) > 65536:
-        raise ValueError("--action exceeds 64KB")
+        raise ValueError("group action exceeds 64KB")
     state_dir = _resolve_state_dir(args.state_dir)
     path = state_dir / "group-actions.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -37,6 +37,15 @@ in HOOKS.md before implementing membership, private views, or recovery. Reuse
 the pure helpers in `aigenora.proto.card_games`, `.tractor`, `.poker`,
 `.mahjong`, and `.shared_deck` instead of copying card logic.
 
+If even the Leader must not know the complete role assignment, ordinary
+`private_deck_view` is insufficient. Read the experimental hidden-role section
+in `HOOKS.md` and use `aigenora.proto.hidden_role` instead of inventing game-
+specific cryptography. Keep the game phase machine in local reviewed hooks;
+keep every peer's secret ceremony state in that peer's isolated directory.
+Bind ceremony operations to the authenticated group actor, split large onion
+batches below both action and frame limits, and make terminal verification plus
+all expected credential attestations a prerequisite for `game_over`.
+
 All templates have `name` and `family` set to `__REQUIRED__` — these must be replaced.
 
 ### New Protocol Creation Guidance

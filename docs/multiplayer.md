@@ -153,6 +153,10 @@ every acknowledged action.
 
 For CLI control, an `authoritative_group` business action must use
 `python -m aigenora session action --state-dir <dir> --action '<json>'`.
+For ciphertext batches or other actions that may approach the platform command-line
+limit, write the same UTF-8 JSON object to a private file and use
+`--action-file <file>` instead. The two input flags are mutually exclusive and the
+canonical decoded action remains capped at 64 KiB.
 Do not use `session decide --decision`: it targets ordinary decision windows
 and does not enqueue a group action or produce a `group_action_receipt`, even
 if that command itself returns successfully.
@@ -226,6 +230,51 @@ current Leader. A malicious Leader is still able to inspect or bias its own
 authority state. Signed logs make accepted actions and published state
 auditable; they do not create trustless shuffling.
 
+## Verifiable hidden-role ceremony (experimental)
+
+`aigenora.proto.hidden_role` is the reusable local-research-RC path for a
+different privacy requirement: the Leader orders actions but must not own the
+complete Member-to-role mapping. Seven independent peers jointly create and
+shuffle an encrypted role deck, recover only their own role credentials, mix
+anonymous actions, and publish a terminal transcript that every peer can
+verify. The first consumer is a seven-seat social-deduction protocol, but the
+module is not tied to one game's rules.
+
+This does not turn one controller into seven Members. Each seat needs its own
+process, working directory, Aigenora data directory, identity, session state,
+private ceremony state, and group-action outbox. Every seat reads only its own
+snapshot and submits its own `session action`. A launcher may distribute the
+public invitation ID and wait for processes; it must not submit business
+actions, relay secrets, or call models on behalf of seats.
+
+Protocol hooks must bind public ceremony steps to the authenticated `actor`,
+chunk padded onion envelopes below `max_action_bytes`, and keep live role
+material out of public events, Member views, and recovery checkpoints. Treat
+the whole ceremony and hidden-role match as one `restart_round`: a Leader
+migration starts a new ceremony rather than copying or continuing old secret
+state. Old authority frames remain evidence and must never be mixed with the
+new ceremony.
+
+The security model is at least one honest mixer plus terminal audit. It is
+cheat-detectable and abortable, not externally audited or suitable for
+real-stake decisions. The final mixer can observe the plaintext batch set; the
+RC does not claim real-time zero-knowledge privacy against a malicious final
+mixer or a local administrator.
+
+Inspect the profile and verify a terminal artifact with the public CLI:
+
+```bash
+python -m aigenora ceremony hidden-role profile --json
+python -m aigenora ceremony hidden-role verify \
+  --artifact terminal-artifact.json
+```
+
+Do not declare `game_over` from one Leader stdout. The bundle must publish the
+complete bounded transcript, the verifier must return `verified`, all expected
+anonymous role credentials must attest the same artifact and assignments
+hashes, and each Member must still export its own signed replay for
+verification and reconciliation.
+
 ## Built-in examples
 
 | Alias | Seats | Recovery | Purpose |
@@ -263,6 +312,9 @@ Submit a structured action from the CLI or use the protocol WebUI:
 python -m aigenora session action \
   --state-dir <dir> \
   --action '{"kind":"send","text":"hello room"}'
+python -m aigenora session action \
+  --state-dir <dir> \
+  --action-file <private-action.json>
 python -m aigenora session web --state-dir <dir>
 ```
 

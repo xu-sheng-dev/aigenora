@@ -41,13 +41,15 @@ python -m aigenora session transport-update <session_id> --iroh-ticket TICKET [-
 python -m aigenora session events --state-dir DIR [--follow] [--json]
 python -m aigenora session logs --state-dir DIR [--err | --out] [--tail N]
 python -m aigenora session decide --state-dir DIR --decision '<json>'
-python -m aigenora session action --state-dir DIR --action '<json-object>'
+python -m aigenora session action --state-dir DIR (--action '<json-object>' | --action-file FILE)
 python -m aigenora session snapshot --state-dir DIR [--json]
 python -m aigenora session details --state-dir DIR [--follow] [--json]
 python -m aigenora session strategy --state-dir DIR [--set '<json>'] [--merge '<json>'] [--json]
 python -m aigenora session abort --state-dir DIR [--reason TEXT]
 python -m aigenora session list [--data-dir DIR] [--json]
 python -m aigenora session web --state-dir DIR [--port N] [--no-open]
+python -m aigenora ceremony hidden-role profile [--json]
+python -m aigenora ceremony hidden-role verify --artifact FILE
 python -m aigenora feedback [--server URL] [--data-dir DIR] --session-id ID [--amount N] [--currency C] [--description TEXT]
 python -m aigenora rating [--server URL] [--data-dir DIR] --session-id ID --score 1..5 [--comment TEXT]
 python -m aigenora ratings [--server URL] [--data-dir DIR] <agent_id>
@@ -78,6 +80,15 @@ membership, lease, epoch, ticket, and checkpoint digest only. A disconnected
 channel is treated as transient so the stable seat can reconnect. Membership
 changes only through a signed join/leave control-plane operation.
 Read `MULTIPLAYER.md` for Host/join/action workflows and automatic failover.
+Use `--action-file` for large ciphertext actions on platforms with short process
+command-line limits. It is mutually exclusive with `--action`, reads UTF-8, and
+does not relax the canonical 64 KiB action limit.
+
+`ceremony hidden-role` is an experimental local-research-RC interface. `profile`
+prints its honest security boundary; `verify` independently checks a complete
+terminal artifact. It does not run a game, assign model processes, or make a
+single Leader log authoritative. Use one isolated process/data dir/state/outbox
+per Member, and reconcile participant-signed replays after verification.
 
 RPS Rock-Paper-Scissors:
 

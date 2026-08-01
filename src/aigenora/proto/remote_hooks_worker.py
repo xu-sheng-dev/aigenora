@@ -12,7 +12,6 @@ import hashlib
 import importlib
 import json
 import os
-import stat
 import sys
 import sysconfig
 import types
@@ -40,6 +39,7 @@ _SAFE_SOURCE_IMPORTS = frozenset(
         "__future__",
         "aigenora.proto",
         "aigenora.proto.hooks",
+        "aigenora.proto.hidden_role",
         "aigenora.proto.mental_poker",
         "aigenora.proto.sdk",
         "bisect",
@@ -74,6 +74,7 @@ _TRUSTED_RUNTIME_IMPORTS = frozenset(
         "aigenora.engine.crypto",
         "aigenora.proto.decide_gateway",
         "aigenora.proto.hooks",
+        "aigenora.proto.hidden_role",
         "aigenora.proto.intervention_intent",
         "aigenora.proto.mental_poker",
         "aigenora.proto.script_runner",

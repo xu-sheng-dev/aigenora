@@ -11,6 +11,7 @@ _ALLOWED_HOOK_IMPORTS = frozenset(
     {
         "__future__",
         "aigenora.proto.hooks",
+        "aigenora.proto.hidden_role",
         "aigenora.proto.mental_poker",
         "aigenora.proto.sdk",
         "aigenora.proto.whisper_bridge",

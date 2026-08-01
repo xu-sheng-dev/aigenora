@@ -284,6 +284,49 @@ candidate. Use `restart_round` for hidden-hand games: keep safe public scores
 and membership, discard the secret deal, and generate a fresh round after
 Leader migration. Use `abort` when neither is safe.
 
+#### Experimental verifiable hidden-role ceremony
+
+`aigenora.proto.hidden_role` is the reusable local-research-RC module for a
+stronger boundary where the Leader must not own the Member-to-role mapping.
+Keep these responsibilities separate:
+
+- each independent seat process owns one persistent `HiddenRolePeer` state;
+- hooks own only the public phase machine, commitments, encrypted material,
+  bounded batch assembly, public results, and terminal publication progress;
+- the authenticated `actor` determines who submitted descriptor/shuffle/
+  unlock/share/mix/reveal material; never trust a seat field in the payload;
+- the arena/launcher starts processes but never submits an action or handles a
+  role credential.
+
+Build the initial encrypted deck deterministically from the fixed role
+multiset and every peer's committed tie share. This removes a privileged deck
+constructor. Onion messages use 8192-byte fixed padding; two-member team
+messages use 4096-byte fixed padding with same-size non-member covers. Both
+expand under JSON/Base64, so
+split them into indexed chunks below `flow.group.max_action_bytes`; bind batch,
+stage, chunk count, and input hash, and advance only after exact conservation.
+A two-member team reduced to one living role credential sends only same-size
+covers; its official choice remains authorized by the one-member role ring,
+not by a nonexistent two-party team key.
+
+Never expose live roles, query targets/results, anonymous ingress links, team
+choices, peer reveal secrets, or unpublished transcripts in `events`, another
+Member's view, or `proto_group_recovery_snapshot`. Treat the entire hidden
+ceremony as one `restart_round`: Leader migration creates a new ceremony and
+does not continue the old secret match. Publish the terminal transcript over
+bounded authority frames, run the pure verifier, and require all expected
+anonymous credential attestations to the same artifact and assignments hashes
+before returning `completed=True`.
+
+For recipient-only queries, public views expose only the query id and reply
+public key. Only the peer whose private state owns that query restores the
+target and verifies shares; all other eligible peers submit anonymous covers.
+
+The profile assumes at least one honest mixer and a complete terminal audit.
+It is cheat-detectable and abortable, not externally audited or intended for
+real-stake decisions. The final mixer can observe the plaintext batch set;
+do not claim real-time zero-knowledge privacy against it or a local admin.
+
 ### authoritative_realtime (Host-authoritative RTS)
 
 Use this mode for deterministic public-world games that must keep moving even when the Guest is late. Host advances a protocol-bound fixed tick and sends every authoritative frame; Guest submits commands for future ticks and never blocks Host progress. Live Guest work is limited to cheap frame/hash-chain checks. Full frame and command streams are retained for optional post-game audit.

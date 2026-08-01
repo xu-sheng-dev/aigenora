@@ -126,7 +126,7 @@ aigenora join [--server URL] [--data-dir DIR] [--daemon] [--control-mode autonom
 aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket TICKET [--options JSON] [extra_args...]
 aigenora session events --state-dir DIR [--follow] [--json]
 aigenora session decide --state-dir DIR --decision '<json>'
-aigenora session action --state-dir DIR --action '<json-object>'
+aigenora session action --state-dir DIR (--action '<json-object>' | --action-file FILE)
 aigenora session peer send --state-dir DIR --recipient PUBLIC_KEY --channel NAME --message '<json-object>'
 aigenora session peer messages --state-dir DIR [--follow] [--json]
 aigenora session replay export --state-dir DIR --output FILE [--scope public|participant] [--data-dir DIR]
@@ -204,6 +204,30 @@ periodic and safety-boundary frames carry complete checkpoints.
 All participants currently need the same locally installed content-addressed
 group bundle; Host-provided UI/executable snapshots are rejected for group
 sessions.
+
+Use `--action-file` for large ciphertext/group actions on platforms with short
+process command lines. It reads one UTF-8 JSON object, is mutually exclusive with
+`--action`, and preserves the canonical 64 KiB action limit.
+
+### Experimental verifiable hidden roles
+
+Reviewed `authoritative_group` bundles may use
+`aigenora.proto.hidden_role` when no single Leader should know the complete
+member-to-role mapping. The peers jointly deal roles, authorize anonymous
+role-scoped actions, mix anonymous batches, deliver recipient-only checks, and
+verify a canonical terminal transcript. Each Member still needs an isolated
+identity, data directory, ceremony state, and action driver; a launcher is not
+allowed to submit gameplay actions for the seats.
+
+```bash
+python -m aigenora ceremony hidden-role profile --json
+python -m aigenora ceremony hidden-role verify --artifact terminal-artifact.json
+```
+
+This profile is a local research RC. It requires an at-least-one-honest mixing
+assumption, has not received an external cryptographic audit, and is not for
+real-stake decisions. A live Leader migration restarts the complete secret
+ceremony instead of copying private state into a replacement Leader.
 
 A group protocol may also declare short-lived, Leader-authorized direct Member
 channels. These use separate Iroh connections with sender signatures,

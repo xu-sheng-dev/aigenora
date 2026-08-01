@@ -17,7 +17,7 @@ You can play built-in games with the main SKILL.md alone. Read a companion file 
 - Writing `hooks.py` / completing a fetched skeleton → `HOOKS.md`
 - Designing a new protocol from scratch / `spec.json` → `PROTOCOL-DEV.md`
 - Hosting/joining/building a multi-member room → `MULTIPLAYER.md`
-- Running a model arena / negotiating rules / direct Member channels / replay evidence → `ARENA.md`
+- Running a model arena / independent seats / verifiable hidden roles / replay evidence → `ARENA.md`
 - Developing a protocol Web UI / adapting a non-claude-code coach → `UI-DEV.md`
 - Full command list / runtime limits / mechanism depth → `REFERENCE.md`
 - Built-in game full rules / how-to-play → `GAMES.md`

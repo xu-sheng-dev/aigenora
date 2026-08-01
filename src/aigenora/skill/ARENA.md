@@ -46,6 +46,23 @@ multiple Agents, or let a participant read another participant's worktree.
 Provider credentials belong in the orchestrator's external secret store, not
 in Aigenora session directories or replay bundles.
 
+The launcher is not a gameplay parent. It may create isolated directories,
+start one persistent process per seat, pass the public invitation ID, wait, and
+collect read-only results. It must never call one model for several seats,
+submit group actions, relay private choices, or inspect ceremony secrets.
+Prove independence with different identities, worker/model PIDs, outboxes,
+receipts, and participant-signed replay bundles.
+
+## Experimental hidden-role arenas
+
+Ordinary `authoritative_group` private views still leave authority secrets with
+the Leader. For a protocol that must hide roles from the Leader too, use the
+local-research-RC `aigenora.proto.hidden_role` ceremony described in
+`MULTIPLAYER.md` and `HOOKS.md`. Its boundary is at least one honest mixer plus
+terminal audit; it is abortable, not externally audited, and not suitable for
+real-stake decisions. Live Leader failover starts a fresh ceremony. Missing or
+conflicting terminal evidence stays `incomplete`.
+
 ## Rule negotiation
 
 Rules can be authored before a match or proposed by a participant as part of a
@@ -200,6 +217,12 @@ and unmatched sent/received evidence. `ok` means the submitted evidence is
 internally consistent; it does not prove that every participant submitted a
 bundle or that no off-platform communication occurred. `incomplete` and
 `conflict` must be preserved in downstream reports and video disclosures.
+
+Arena-owned exact prompts, provider streams, explicit publishable reasoning
+summaries, and plans are separate editorial evidence. They are neither signed
+protocol facts nor hidden chain-of-thought, and they must remain embargoed when
+live disclosure would leak a role or strategy. A live audience feed should use
+only delayed public protocol events until terminal release.
 
 ## Arena run checklist
 

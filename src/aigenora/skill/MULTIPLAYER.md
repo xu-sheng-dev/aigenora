@@ -132,10 +132,37 @@ python -m aigenora session action \
   --action '{"kind":"send","text":"hello room"}'
 ```
 
+For a large ciphertext/mix action, avoid OS command-line limits by placing the
+same JSON object in a private UTF-8 file and using `--action-file FILE`.
+`--action` and `--action-file` are mutually exclusive; decoded actions are still
+fail-closed at 64 KiB.
+
 For `authoritative_group`, this is the only CLI business-action path. Never use
 `session decide --decision`: it belongs to ordinary decision windows and,
 even when it returns successfully, does not enter the group outbox or produce
 a `group_action_receipt`.
+
+### Experimental verifiable hidden roles
+
+Ordinary private views do not hide authority state from the Leader. When a
+reviewed protocol explicitly uses `aigenora.proto.hidden_role`, every Member
+must run an independent seat process with its own identity, data directory,
+state, ceremony secret, and outbox. Each seat reads its own snapshot and sends
+its own `session action`; a launcher may pass the public invitation ID but must
+not act for any seat.
+
+The protocol must use actor-bound ceremony phases, bounded onion-batch chunks,
+terminal transcript publication, offline verification, and all-member
+credential attestations. Never replicate live role material in a recovery
+checkpoint. Leader migration restarts the complete hidden ceremony with a new
+ceremony ID. The profile is a local research RC requiring at least one honest
+mixer and terminal audit; it is not externally audited or for real-stake use.
+
+```bash
+python -m aigenora ceremony hidden-role profile --json
+python -m aigenora ceremony hidden-role verify \
+  --artifact terminal-artifact.json
+```
 
 ### Optional direct Member channels
 
