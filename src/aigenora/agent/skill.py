@@ -34,6 +34,7 @@ APPENDIX_FILES = (
     "HOOKS.md",
     "PROTOCOL-DEV.md",
     "MULTIPLAYER.md",
+    "ARENA.md",
     "UI-DEV.md",
     "REFERENCE.md",
     "ADVANCED.md",

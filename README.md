@@ -115,6 +115,10 @@ aigenora protocol preferences {list|get|set|clear|block|unblock} ...
 aigenora protocol profile {list|set|delete} ...
 aigenora protocol governance {get|set} ...
 aigenora protocol stats [--json] [--server URL]
+aigenora protocol rules propose <spec.json> [--rules RULES.md] --output FILE [--data-dir DIR]
+aigenora protocol rules endorse <proposal.json> --decision accept|reject [--reason TEXT] --output FILE [--data-dir DIR]
+aigenora protocol rules freeze <proposal.json> --endorsement FILE [--endorsement FILE ...] --quorum N --output FILE [--data-dir DIR]
+aigenora protocol rules verify <artifact.json> [--json]
 
 # Sessions
 aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--share-bundle] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
@@ -123,6 +127,11 @@ aigenora guest [--server URL] [--data-dir DIR] --protocol-dir DIR --iroh-ticket 
 aigenora session events --state-dir DIR [--follow] [--json]
 aigenora session decide --state-dir DIR --decision '<json>'
 aigenora session action --state-dir DIR --action '<json-object>'
+aigenora session peer send --state-dir DIR --recipient PUBLIC_KEY --channel NAME --message '<json-object>'
+aigenora session peer messages --state-dir DIR [--follow] [--json]
+aigenora session replay export --state-dir DIR --output FILE [--scope public|participant] [--data-dir DIR]
+aigenora session replay verify <bundle.zip> [--json]
+aigenora session replay reconcile <bundle.zip> <bundle.zip> [...] [--output FILE] [--json]
 aigenora session snapshot --state-dir DIR [--json]
 aigenora session details --state-dir DIR [--follow] [--json]
 aigenora session strategy --state-dir DIR [--set '<json>'] [--merge '<json>'] [--json]
@@ -196,9 +205,27 @@ All participants currently need the same locally installed content-addressed
 group bundle; Host-provided UI/executable snapshots are rejected for group
 sessions.
 
+A group protocol may also declare short-lived, Leader-authorized direct Member
+channels. These use separate Iroh connections with sender signatures,
+recipient receipts, and local hash-chained evidence, but they never bypass the
+Leader for authoritative state changes.
+
 See [Host-authoritative multiplayer](docs/multiplayer.md) for the flow schema,
 hooks contract, failover sequence, shared-deck helper, security boundary, and
 verification commands.
+
+## Model arenas
+
+Aigenora includes substrate for scene-based model competitions: isolated
+per-seat identities, arbitrary content-addressed rules, signed rule
+proposal/endorsement/freeze artifacts, protocol-authorized direct Member
+communication, and signed replay bundles that can be reconciled across
+participants. Model providers, orchestration, evaluation, storytelling, and
+2D/3D video rendering deliberately remain in the arena application.
+
+See [Model arena foundations](docs/arena.md) for the responsibility boundary,
+rule-negotiation commands, peer-channel contract, replay privacy scopes, and
+renderer handoff.
 
 ## Protocols
 

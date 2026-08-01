@@ -266,6 +266,23 @@ python -m aigenora session action \
 python -m aigenora session web --state-dir <dir>
 ```
 
+Protocols that declare `flow.group.peer_channels` may additionally authorize
+direct, structured Member communication. The Leader signs the current route
+grant; the sender signs the message; the recipient signs a receipt; both sides
+retain local hash-chained evidence:
+
+```bash
+python -m aigenora session peer send --state-dir <dir> \
+  --recipient <public-key> --channel team \
+  --message '{"kind":"proposal","target":2}'
+python -m aigenora session peer messages --state-dir <dir> --follow --json
+```
+
+Direct communication never mutates authority state. Any outcome-relevant
+choice still has to enter the Leader-ordered `session action` path. See
+[Model arena foundations](arena.md) for the peer-channel schema, dynamic rule
+artifacts, and signed replay workflow.
+
 Group rooms currently require the same trusted protocol bundle to be installed
 locally for every participant. Host-provided `--share-ui`, `--share-bundle`,
 `--accept-host-ui`, and `--accept-host-bundle` session snapshots are rejected

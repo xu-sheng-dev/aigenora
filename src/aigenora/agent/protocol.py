@@ -349,6 +349,10 @@ def run(args) -> int:
         return _cmd_preferences(args)
     if args.protocol_cmd == "profile":
         return _cmd_profile(args)
+    if args.protocol_cmd == "rules":
+        from aigenora.agent.rules import run as run_rules
+
+        return run_rules(args)
     raise RuntimeError(f"unknown protocol command: {args.protocol_cmd}")
 
 

@@ -514,6 +514,7 @@ def _validate_authoritative_group(flow: dict[str, Any]) -> None:
         "checkpoint_every_events",
         "max_action_bytes",
         "max_events_per_action",
+        "peer_channels",
     }
     unknown = sorted(set(group) - allowed)
     if unknown:
@@ -565,6 +566,65 @@ def _validate_authoritative_group(flow: dict[str, Any]) -> None:
             raise ValidationError(
                 f"flow.group.{key} must be between {lower} and {upper}"
             )
+    _validate_group_peer_channels(group.get("peer_channels"))
+
+
+def _validate_group_peer_channels(value: Any) -> None:
+    """Validate the optional Member-to-Member side-channel contract."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise ValidationError("flow.group.peer_channels must be an object")
+    allowed = {"enabled", "routing", "channels", "max_message_bytes"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ValidationError(
+            f"flow.group.peer_channels has unknown fields: {unknown!r}"
+        )
+    enabled = value.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValidationError("flow.group.peer_channels.enabled must be boolean")
+    if not enabled:
+        if set(value) != {"enabled"}:
+            raise ValidationError(
+                "disabled flow.group.peer_channels must contain only enabled"
+            )
+        return
+    if value.get("routing") not in ("all_members", "hook"):
+        raise ValidationError(
+            "flow.group.peer_channels.routing must be all_members or hook"
+        )
+    channels = value.get("channels")
+    if not isinstance(channels, list) or not 1 <= len(channels) <= 16:
+        raise ValidationError(
+            "flow.group.peer_channels.channels must contain 1 to 16 names"
+        )
+    normalized: set[str] = set()
+    slug_characters = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
+    for channel in channels:
+        if (
+            not isinstance(channel, str)
+            or not 1 <= len(channel) <= 32
+            or channel[0] not in "abcdefghijklmnopqrstuvwxyz"
+            or any(character not in slug_characters for character in channel)
+        ):
+            raise ValidationError(
+                "flow.group.peer_channels channel names must be lowercase slugs"
+            )
+        if channel in normalized:
+            raise ValidationError(
+                "flow.group.peer_channels channel names must be unique"
+            )
+        normalized.add(channel)
+    maximum = value.get("max_message_bytes", 16384)
+    if not isinstance(maximum, int) or isinstance(maximum, bool):
+        raise ValidationError(
+            "flow.group.peer_channels.max_message_bytes must be an integer"
+        )
+    if not 256 <= maximum <= 65536:
+        raise ValidationError(
+            "flow.group.peer_channels.max_message_bytes must be between 256 and 65536"
+        )
 
 
 def validate_timing(spec: dict[str, Any]) -> None:

@@ -247,6 +247,15 @@ class ProtocolHooks(ABC):
         """Return the authority state projection visible to one member."""
         return state
 
+    def proto_group_peer_routes(
+        self,
+        state: dict[str, Any],
+        viewer: dict[str, Any],
+    ) -> dict[str, list[str]]:
+        """Return directed peer routes when flow.group.peer_channels.routing=hook."""
+        del state, viewer
+        return {}
+
     def proto_group_recovery_snapshot(
         self,
         state: dict[str, Any],

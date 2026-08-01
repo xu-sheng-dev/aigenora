@@ -11,6 +11,11 @@ from typing import Any
 
 from aigenora.engine.p2p import AsyncJsonLineChannel, ChannelClosed
 from aigenora.proto.group import GroupAuthority, GroupProtocolError, GroupReplica
+from aigenora.proto.group_peer import (
+    GroupPeerOverlay,
+    build_peer_directory,
+    verify_peer_advertisement,
+)
 from aigenora.proto.sdk import EventBus
 
 
@@ -179,11 +184,16 @@ class GroupLeaderHub:
         self,
         authority: GroupAuthority,
         *,
+        protocol_id: str | None = None,
+        peer_overlay: GroupPeerOverlay | None = None,
         ack_timeout: float = 15.0,
         ack_check_interval: float = 0.5,
         send_timeout: float = 5.0,
     ):
         self.authority = authority
+        self.protocol_id = protocol_id
+        self.peer_overlay = peer_overlay
+        self.peer_advertisements: dict[str, dict[str, Any]] = {}
         self.channels: dict[str, AsyncJsonLineChannel] = {}
         self.receivers: dict[str, asyncio.Task[None]] = {}
         self.queue: asyncio.Queue[tuple[str, str, Any]] = asyncio.Queue()
@@ -204,6 +214,12 @@ class GroupLeaderHub:
         self.send_timeout = max(0.05, float(send_timeout))
         self._broadcast_lock = asyncio.Lock()
         self._send_locks: dict[str, asyncio.Lock] = {}
+        if self.peer_overlay is not None:
+            if not self.protocol_id:
+                raise GroupProtocolError("peer overlay requires protocol_id")
+            self.peer_advertisements[
+                authority.leader_public_key
+            ] = self.peer_overlay.advertisement()
 
     async def attach(
         self,
@@ -230,6 +246,7 @@ class GroupLeaderHub:
                 member, membership_version=membership_version
             )
             await self._broadcast_unlocked(envelopes)
+            await self._publish_peer_directories_unlocked()
         self.events.emit(
             "group_member_connected",
             {
@@ -277,6 +294,8 @@ class GroupLeaderHub:
                 )
             if not sent:
                 return
+        async with self._broadcast_lock:
+            await self._publish_peer_directories_unlocked()
         self.events.emit(
             "group_member_reconnected",
             {
@@ -291,6 +310,7 @@ class GroupLeaderHub:
     ) -> None:
         async with self._broadcast_lock:
             await self._broadcast_unlocked(envelopes)
+            await self._publish_peer_directories_unlocked()
 
     async def _broadcast_unlocked(
         self, envelopes: dict[str, dict[str, Any]]
@@ -422,6 +442,37 @@ class GroupLeaderHub:
                                     time.monotonic(),
                                 )
                     continue
+                if source == "peer_advertise":
+                    if self.peer_overlay is None or not self.protocol_id:
+                        continue
+                    try:
+                        advertisement = verify_peer_advertisement(
+                            payload,
+                            group_id=self.authority.group_id,
+                            protocol_id=self.protocol_id,
+                            leader_epoch=self.authority.leader_epoch,
+                            member_public_key=public_key,
+                        )
+                    except GroupProtocolError as exc:
+                        self.events.emit(
+                            "group_peer_advertisement_rejected",
+                            {
+                                "public_key": public_key,
+                                "reason": str(exc)[:256],
+                            },
+                        )
+                        continue
+                    self.peer_advertisements[public_key] = advertisement
+                    async with self._broadcast_lock:
+                        await self._publish_peer_directories_unlocked()
+                    self.events.emit(
+                        "group_peer_advertisement_accepted",
+                        {
+                            "public_key": public_key,
+                            "ticket_hash": advertisement["ticket_hash"],
+                        },
+                    )
+                    continue
                 if source != "action" or not isinstance(payload, dict):
                     continue
                 receipt: dict[str, Any]
@@ -439,6 +490,7 @@ class GroupLeaderHub:
                         )
                         if receipt.get("status") != "duplicate":
                             await self._broadcast_unlocked(envelopes)
+                            await self._publish_peer_directories_unlocked()
                 except (KeyError, TypeError, ValueError, GroupProtocolError) as exc:
                     receipt = {
                         "_group": "receipt",
@@ -520,6 +572,8 @@ class GroupLeaderHub:
                     await self.queue.put(("action", public_key, message))
                 elif kind == "ack":
                     await self.queue.put(("ack", public_key, message))
+                elif kind == "peer_advertise":
+                    await self.queue.put(("peer_advertise", public_key, message))
                 elif kind == "ping":
                     await self._send_to_member(
                         public_key,
@@ -626,6 +680,59 @@ class GroupLeaderHub:
                 if public_key in self.channels:
                     await self.detach(public_key, reason="frame_ack_timeout")
 
+    async def _publish_peer_directories_unlocked(self) -> None:
+        if self.peer_overlay is None or not self.protocol_id:
+            return
+        self.peer_overlay.update_context(
+            leader_public_key=self.authority.leader_public_key,
+            leader_epoch=self.authority.leader_epoch,
+            authority_seq=self.authority.seq,
+            membership_version=self.authority.membership_version,
+        )
+        deliveries = []
+        for member in self.authority.members:
+            if member.get("status") != "active":
+                continue
+            viewer_public_key = str(member["public_key"])
+            try:
+                routes = self.authority.peer_routes(viewer_public_key)
+            except GroupProtocolError as exc:
+                self.events.emit(
+                    "group_peer_routes_rejected",
+                    {
+                        "viewer_public_key": viewer_public_key,
+                        "reason": str(exc)[:256],
+                    },
+                )
+                routes = {}
+            directory = build_peer_directory(
+                group_id=self.authority.group_id,
+                protocol_id=self.protocol_id,
+                leader_epoch=self.authority.leader_epoch,
+                authority_seq=self.authority.seq,
+                membership_version=self.authority.membership_version,
+                viewer_public_key=viewer_public_key,
+                routes=routes,
+                advertisements=self.peer_advertisements,
+                leader_keypair=self.authority.keypair,
+            )
+            if viewer_public_key == self.authority.leader_public_key:
+                self.peer_overlay.install_directory(directory)
+                continue
+            channel = self.channels.get(viewer_public_key)
+            if channel is None:
+                continue
+            deliveries.append(
+                self._send_to_member(
+                    viewer_public_key,
+                    channel,
+                    directory,
+                    failure_reason="peer_directory_send_failed",
+                )
+            )
+        if deliveries:
+            await asyncio.gather(*deliveries)
+
 
 async def run_group_guest_channel(
     *,
@@ -633,12 +740,21 @@ async def run_group_guest_channel(
     replica: GroupReplica,
     state_dir: str | Path,
     first_envelope: dict[str, Any],
+    peer_overlay: GroupPeerOverlay | None = None,
 ) -> dict[str, Any]:
     """Run one Guest connection until completion or Leader disconnect."""
     root = Path(state_dir)
     events = EventBus(root)
 
     replica.apply(first_envelope, bootstrap=True)
+    if peer_overlay is not None:
+        peer_overlay.update_context(
+            leader_public_key=replica.leader_public_key,
+            leader_epoch=replica.leader_epoch,
+            authority_seq=int(replica.seq or 0),
+            membership_version=replica.membership_version,
+        )
+        await channel.send(peer_overlay.advertisement())
     accepted_client_seq = _checkpoint_client_seq(
         replica.checkpoint, replica.viewer_public_key
     )
@@ -726,6 +842,13 @@ async def run_group_guest_channel(
             if kind in {"frame", "membership", "epoch_start", "snapshot"}:
                 applied = replica.apply(message)
                 if applied:
+                    if peer_overlay is not None:
+                        peer_overlay.update_context(
+                            leader_public_key=replica.leader_public_key,
+                            leader_epoch=replica.leader_epoch,
+                            authority_seq=int(replica.seq or 0),
+                            membership_version=replica.membership_version,
+                        )
                     await channel.send(
                         {
                             "_group": "ack",
@@ -773,6 +896,8 @@ async def run_group_guest_channel(
                     and message.get("status") in {"accepted", "duplicate"}
                 ):
                     return terminal_result
+            elif kind == "peer_directory" and peer_overlay is not None:
+                peer_overlay.install_directory(message)
             elif kind == "pong":
                 events.emit(
                     "group_pong",

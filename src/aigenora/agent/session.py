@@ -364,6 +364,111 @@ def cmd_group_action(args) -> int:
     return 0
 
 
+def cmd_peer_send(args) -> int:
+    from aigenora.proto.group_peer import queue_peer_action
+
+    payload = json.loads(args.message)
+    if not isinstance(payload, dict):
+        raise ValueError("--message must be a JSON object")
+    state_dir = _resolve_state_dir(args.state_dir)
+    entry = queue_peer_action(
+        state_dir,
+        recipient_public_key=args.recipient,
+        channel=args.channel,
+        payload=payload,
+    )
+    print(json.dumps({"status": "queued", **entry}, ensure_ascii=False))
+    return 0
+
+
+def cmd_peer_messages(args) -> int:
+    from aigenora.proto.group_peer import read_peer_messages
+
+    state_dir = _resolve_state_dir(args.state_dir)
+    last_record_seq = 0
+    while True:
+        records = read_peer_messages(state_dir)
+        for record in records:
+            record_seq = int(record.get("record_seq") or 0)
+            if record_seq <= last_record_seq:
+                continue
+            if getattr(args, "json_output", False):
+                print(json.dumps(record, ensure_ascii=False), flush=True)
+            else:
+                message = record.get("message")
+                payload = message.get("payload") if isinstance(message, dict) else None
+                print(
+                    f"[{str(record.get('recorded_at', ''))[11:19]}] "
+                    f"{record.get('direction', '?')} "
+                    f"{record.get('channel', '?')} "
+                    f"peer={str(record.get('peer_public_key', ''))[:16]}... "
+                    f"message_id={record.get('message_id', '?')} "
+                    f"payload={json.dumps(payload, ensure_ascii=False)}",
+                    flush=True,
+                )
+            last_record_seq = max(last_record_seq, record_seq)
+        if not args.follow:
+            return 0
+        time.sleep(0.5)
+
+
+def cmd_replay_export(args) -> int:
+    from aigenora.proto.replay import export_replay_bundle
+
+    manifest = export_replay_bundle(
+        args.state_dir,
+        args.output,
+        keypair=load_keys(args.data_dir),
+        scope=args.scope,
+        force=args.force,
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    else:
+        print(f"[OK] replay bundle: {manifest['output']}")
+        print(f"bundle_id: {manifest['bundle_id']}")
+        print(f"scope: {manifest['scope']}")
+        print(f"participant: {manifest['participant_public_key']}")
+    return 0
+
+
+def cmd_replay_verify(args) -> int:
+    from aigenora.proto.replay import verify_replay_bundle
+
+    result = verify_replay_bundle(args.bundle)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        manifest = result["manifest"]
+        print("[OK] replay bundle verified")
+        print(f"bundle_id: {manifest['bundle_id']}")
+        print(f"participant: {manifest['participant_public_key']}")
+        print(f"scope: {manifest['scope']}")
+        print(f"authority_frames: {len(result['authority_frames'])}")
+        print(f"peer_records: {len(result['peer_index'])}")
+    return 0
+
+
+def cmd_replay_reconcile(args) -> int:
+    from aigenora.proto.replay import reconcile_replay_bundles
+
+    result = reconcile_replay_bundles(args.bundles)
+    encoded = json.dumps(result, ensure_ascii=False, indent=2)
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(encoded + "\n", encoding="utf-8")
+    if getattr(args, "json_output", False) or not args.output:
+        print(encoded)
+    else:
+        print(f"[OK] replay reconciliation: {Path(args.output).resolve()}")
+        print(f"status: {result['status']}")
+        print(f"participants: {len(result['participants'])}")
+        print(f"authority_conflicts: {len(result['authority_conflicts'])}")
+        print(f"peer_unmatched: {len(result['peer_unmatched'])}")
+    return 0 if result["status"] == "ok" else 1
+
+
 def cmd_snapshot(args) -> int:
     snap = SessionStateService.snapshot(_resolve_state_dir(args.state_dir))
     if getattr(args, "json_output", False):

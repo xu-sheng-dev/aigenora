@@ -43,6 +43,7 @@ from aigenora.proto.group_control import (
     renew_leader,
     update_group_status,
 )
+from aigenora.proto.group_peer import GroupPeerOverlay
 from aigenora.proto.group_runtime import GroupLeaderHub, run_group_guest_channel
 from aigenora.proto.loader import load_hooks
 from aigenora.proto.sdk import EventBus
@@ -96,6 +97,7 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
     runtime, node, accepted = await create_host_node()
     invitation_task: asyncio.Task[None] | None = None
     leader_task: asyncio.Task[None] | None = None
+    peer_overlay: GroupPeerOverlay | None = None
     lease_lost = asyncio.Event()
     authority_holder: list[GroupAuthority | None] = [None]
     try:
@@ -143,6 +145,15 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
             recovery_mode=config.recovery_mode,
         )
         group_id = str(group["group_id"])
+        if config.peer_channels_enabled:
+            peer_overlay = await GroupPeerOverlay.create(
+                state_dir=state_dir,
+                group_id=group_id,
+                protocol_id=protocol_id,
+                keypair=keypair,
+                allowed_channels=config.peer_channel_names,
+                max_message_bytes=config.max_peer_message_bytes,
+            )
         print("invite_created: true")
         print(f"post_id: {post_id}")
         print(f"group_id: {group_id}")
@@ -163,6 +174,10 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
             group_id=group_id,
             group_role="leader",
             leader_epoch=0,
+            peer_channels_enabled=config.peer_channels_enabled,
+            peer_ticket_hash=(
+                peer_overlay.ticket_hash if peer_overlay is not None else None
+            ),
         )
 
         invitation_task = asyncio.create_task(
@@ -248,6 +263,7 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
             lease_lost=lease_lost,
             existing_connections=pending,
             checkpoint=None,
+            peer_overlay=peer_overlay,
         )
         completed = bool(result.get("completed", False))
         update_session_meta(
@@ -266,6 +282,8 @@ async def run_group_host_command(args, spec: dict[str, Any]) -> int:
             *[task for task in (invitation_task, leader_task) if task is not None],
             return_exceptions=True,
         )
+        if peer_overlay is not None:
+            await peer_overlay.close()
         await node.node().shutdown()
 
 
@@ -302,6 +320,17 @@ async def run_group_join_command(
     if protocol_id != post.get("protocol_id"):
         raise RuntimeError("group protocol_id does not match the invitation")
 
+    config = GroupConfig.from_spec(spec)
+    peer_overlay: GroupPeerOverlay | None = None
+    if config.peer_channels_enabled:
+        peer_overlay = await GroupPeerOverlay.create(
+            state_dir=state_dir,
+            group_id=str(group["group_id"]),
+            protocol_id=protocol_id,
+            keypair=keypair,
+            allowed_channels=config.peer_channel_names,
+            max_message_bytes=config.max_peer_message_bytes,
+        )
     member_task = asyncio.create_task(
         _member_heartbeat_loop(rest, str(group["group_id"]), event_bus)
     )
@@ -359,6 +388,12 @@ async def run_group_join_command(
                         protocol_dir=str(protocol_dir),
                         local_protocol_dir=str(protocol_dir),
                         active_hooks_source="trusted_local",
+                        peer_channels_enabled=config.peer_channels_enabled,
+                        peer_ticket_hash=(
+                            peer_overlay.ticket_hash
+                            if peer_overlay is not None
+                            else None
+                        ),
                     )
                 elif int(group["leader_epoch"]) > replica.leader_epoch:
                     replica.advance_epoch(
@@ -384,6 +419,7 @@ async def run_group_join_command(
                     replica=replica,
                     state_dir=state_dir,
                     first_envelope=first_envelope,
+                    peer_overlay=peer_overlay,
                 )
             except asyncio.CancelledError:
                 raise
@@ -441,6 +477,7 @@ async def run_group_join_command(
                 state_dir=state_dir,
                 event_bus=event_bus,
                 replica=replica,
+                peer_overlay=peer_overlay,
             )
             if recovery["role"] == "leader":
                 member_task.cancel()
@@ -464,6 +501,8 @@ async def run_group_join_command(
         await asyncio.gather(member_task, return_exceptions=True)
         if current_node is not None:
             await current_node.node().shutdown()
+        if peer_overlay is not None:
+            await peer_overlay.close()
 
 
 async def _run_leader_runtime(
@@ -486,6 +525,7 @@ async def _run_leader_runtime(
         str, tuple[dict[str, Any], AsyncJsonLineChannel]
     ],
     checkpoint: dict[str, Any] | None,
+    peer_overlay: GroupPeerOverlay | None = None,
 ) -> dict[str, Any]:
     members = _active_members(group)
     authority = GroupAuthority(
@@ -502,7 +542,18 @@ async def _run_leader_runtime(
         checkpoint=checkpoint,
     )
     authority_holder[0] = authority
-    hub = GroupLeaderHub(authority)
+    if peer_overlay is not None:
+        peer_overlay.update_context(
+            leader_public_key=authority.leader_public_key,
+            leader_epoch=authority.leader_epoch,
+            authority_seq=authority.seq,
+            membership_version=authority.membership_version,
+        )
+    hub = GroupLeaderHub(
+        authority,
+        protocol_id=str(group["protocol_id"]),
+        peer_overlay=peer_overlay,
+    )
     for public_key, (member, channel) in existing_connections.items():
         if public_key == keypair.public_key:
             continue
@@ -922,6 +973,7 @@ async def _recover_or_follow(
     state_dir: Path,
     event_bus: EventBus,
     replica: GroupReplica,
+    peer_overlay: GroupPeerOverlay | None = None,
 ) -> dict[str, Any]:
     group_id = replica.group_id
     while True:
@@ -1005,6 +1057,7 @@ async def _recover_or_follow(
                 lease_lost=lease_lost,
                 existing_connections={},
                 checkpoint=checkpoint,
+                peer_overlay=peer_overlay,
             )
             completed = bool(result.get("completed", False))
             update_session_meta(

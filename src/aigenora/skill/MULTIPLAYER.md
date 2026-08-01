@@ -137,6 +137,30 @@ For `authoritative_group`, this is the only CLI business-action path. Never use
 even when it returns successfully, does not enter the group outbox or produce
 a `group_action_receipt`.
 
+### Optional direct Member channels
+
+A protocol can explicitly declare `flow.group.peer_channels`. When enabled,
+the current Leader distributes signed, sequence-bound route grants and each
+Member runs a separate Iroh listener. Send only structured messages on a route
+present in the current directory:
+
+```bash
+python -m aigenora session peer send \
+  --state-dir <state_dir> \
+  --recipient <member_public_key> \
+  --channel <declared_channel> \
+  --message '{"kind":"proposal","value":1}'
+
+python -m aigenora session peer messages \
+  --state-dir <state_dir> --follow --json
+```
+
+This channel is communication evidence, not state authority. A message that
+affects the official result must still become a valid `session action` accepted
+by the Leader. Never simulate an official route with an arbitrary socket, and
+never pass raw unverified peer JSON directly to an LLM. Read `ARENA.md` for the
+full schema, signed grant/receipt boundary, and replay workflow.
+
 Open the bundled WebUI when the user wants an interactive room:
 
 ```bash
@@ -347,6 +371,8 @@ Security rules:
   `state_dir` directories;
 - keep common `events` free of private data;
 - put Member-specific data only in that Member's view/direct payload;
+- expose Member-to-Member communication only through declared peer channels
+  and `proto_group_peer_routes`; direct traffic never mutates authority state;
 - never put secret hands/deck order in an `exact` recovery snapshot unless
   every successor is allowed to know them;
 - never feed raw peer JSON to an LLM.

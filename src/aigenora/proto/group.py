@@ -74,6 +74,10 @@ class GroupConfig:
     checkpoint_every_events: int = 20
     max_action_bytes: int = 8192
     max_events_per_action: int = 64
+    peer_channels_enabled: bool = False
+    peer_routing: str = "disabled"
+    peer_channel_names: tuple[str, ...] = ()
+    max_peer_message_bytes: int = 16384
 
     @classmethod
     def from_spec(cls, spec: dict[str, Any]) -> "GroupConfig":
@@ -91,6 +95,10 @@ class GroupConfig:
             raise GroupProtocolError(
                 "checkpoint_every_events must be between 1 and 256"
             )
+        peer_channels = group.get("peer_channels")
+        peer_channels_enabled = bool(
+            isinstance(peer_channels, dict) and peer_channels.get("enabled") is True
+        )
         return cls(
             min_participants=int(group["min_participants"]),
             max_participants=int(group["max_participants"]),
@@ -100,6 +108,22 @@ class GroupConfig:
             checkpoint_every_events=checkpoint_every_events,
             max_action_bytes=int(group.get("max_action_bytes", 8192)),
             max_events_per_action=int(group.get("max_events_per_action", 64)),
+            peer_channels_enabled=peer_channels_enabled,
+            peer_routing=(
+                str(peer_channels.get("routing"))
+                if peer_channels_enabled and isinstance(peer_channels, dict)
+                else "disabled"
+            ),
+            peer_channel_names=(
+                tuple(str(item) for item in peer_channels.get("channels", []))
+                if peer_channels_enabled and isinstance(peer_channels, dict)
+                else ()
+            ),
+            max_peer_message_bytes=(
+                int(peer_channels.get("max_message_bytes", 16384))
+                if peer_channels_enabled and isinstance(peer_channels, dict)
+                else 16384
+            ),
         )
 
 
@@ -499,6 +523,54 @@ class GroupAuthority:
                 return member
         return None
 
+    def peer_routes(self, viewer_public_key: str) -> dict[str, tuple[str, ...]]:
+        """Return the current directed side-channel routes for one Member."""
+        if not self.config.peer_channels_enabled:
+            return {}
+        viewer = self.member(viewer_public_key)
+        if viewer is None or viewer.get("status") != "active":
+            raise GroupProtocolError("peer route viewer is not an active member")
+        allowed_channels = set(self.config.peer_channel_names)
+        if self.config.peer_routing == "all_members":
+            return {
+                member["public_key"]: self.config.peer_channel_names
+                for member in self.members
+                if member.get("status") == "active"
+                and member["public_key"] != viewer["public_key"]
+            }
+        raw = self.hooks.proto_group_peer_routes(
+            copy.deepcopy(self.state), copy.deepcopy(viewer)
+        )
+        if not isinstance(raw, dict):
+            raise GroupProtocolError(
+                "proto_group_peer_routes must return an object"
+            )
+        routes: dict[str, tuple[str, ...]] = {}
+        for recipient_public_key, raw_channels in raw.items():
+            recipient = self.member(str(recipient_public_key))
+            if (
+                recipient is None
+                or recipient.get("status") != "active"
+                or recipient["public_key"] == viewer["public_key"]
+            ):
+                raise GroupProtocolError(
+                    "proto_group_peer_routes returned an invalid recipient"
+                )
+            if not isinstance(raw_channels, list) or not raw_channels:
+                raise GroupProtocolError(
+                    "proto_group_peer_routes channels must be a non-empty array"
+                )
+            normalized = tuple(str(item) for item in raw_channels)
+            if (
+                len(set(normalized)) != len(normalized)
+                or not set(normalized) <= allowed_channels
+            ):
+                raise GroupProtocolError(
+                    "proto_group_peer_routes returned an undeclared channel"
+                )
+            routes[recipient["public_key"]] = normalized
+        return routes
+
     def _reconcile_restored_members(
         self, checkpoint: dict[str, Any]
     ) -> list[dict[str, Any]]:
@@ -830,10 +902,17 @@ class GroupAuthority:
         self.details.append(
             type="group_frame",
             group_id=self.group_id,
+            leader_public_key=self.leader_public_key,
             leader_epoch=self.leader_epoch,
             seq=self.seq,
             frame_kind=frame_kind,
+            wire_version=core["wire_version"],
+            previous_hash=core["previous_hash"],
             frame_hash=frame_hash,
+            membership_version=self.membership_version,
+            authority_state_hash=core["authority_state_hash"],
+            recovery_state_hash=core["recovery_state_hash"],
+            events_hash=core["events_hash"],
             events=events,
             checkpoint_mode=checkpoint_mode,
             checkpoint_delta_ops=len(checkpoint_delta),
@@ -884,6 +963,12 @@ class GroupAuthority:
                 "members": copy.deepcopy(self.members),
                 "checkpoint_hash": checkpoint_hash,
                 "recovery_mode": self.config.recovery_mode,
+                "peer_channels": {
+                    "enabled": self.config.peer_channels_enabled,
+                    "routing": self.config.peer_routing,
+                    "channels": list(self.config.peer_channel_names),
+                    "max_message_bytes": self.config.max_peer_message_bytes,
+                },
             },
             group_view=view,
             group_events=copy.deepcopy(events or []),
@@ -1018,15 +1103,24 @@ class GroupReplica:
         self.details.append(
             type="group_frame",
             group_id=self.group_id,
+            leader_public_key=self.leader_public_key,
             leader_epoch=self.leader_epoch,
             seq=seq,
             frame_hash=frame_hash,
             frame_kind=envelope.get("_group"),
+            wire_version=envelope.get("wire_version"),
+            previous_hash=envelope.get("previous_hash"),
+            membership_version=self.membership_version,
+            authority_state_hash=envelope.get("authority_state_hash"),
+            recovery_state_hash=envelope.get("recovery_state_hash"),
+            events_hash=envelope.get("events_hash"),
+            events=envelope.get("events") or [],
             checkpoint_mode=envelope.get("checkpoint_mode"),
             checkpoint_delta_ops=len(envelope.get("checkpoint_delta") or []),
             view_mode=envelope.get("view_mode"),
             view_delta_ops=len(envelope.get("view_delta") or []),
             completed=bool(envelope.get("completed", False)),
+            outcome=envelope.get("outcome"),
         )
         self.details.append(
             type="group_recovery_record",

@@ -17,6 +17,7 @@ You can play built-in games with the main SKILL.md alone. Read a companion file 
 - Writing `hooks.py` / completing a fetched skeleton → `HOOKS.md`
 - Designing a new protocol from scratch / `spec.json` → `PROTOCOL-DEV.md`
 - Hosting/joining/building a multi-member room → `MULTIPLAYER.md`
+- Running a model arena / negotiating rules / direct Member channels / replay evidence → `ARENA.md`
 - Developing a protocol Web UI / adapting a non-claude-code coach → `UI-DEV.md`
 - Full command list / runtime limits / mechanism depth → `REFERENCE.md`
 - Built-in game full rules / how-to-play → `GAMES.md`
@@ -243,7 +244,7 @@ $PY -m aigenora skill install --target codex          # Codex       → .agents/
 $PY -m aigenora skill install --target opencode       # Opencode    → .opencode/skills/aigenora/SKILL.md
 ```
 
-`install` also drops a `PERSONAL.md` template and all companion docs (`HOOKS.md`, `PROTOCOL-DEV.md`, `MULTIPLAYER.md`, `UI-DEV.md`, `REFERENCE.md`, `GAMES.md`, `ADVANCED.md`) next to SKILL.md. `PERSONAL.md` is never overwritten. Existing SKILL.md files are backed up as `SKILL.md.bak-<old-version>-<timestamp>` (last 3 kept) when overwritten.
+`install` also drops a `PERSONAL.md` template and all companion docs (`HOOKS.md`, `PROTOCOL-DEV.md`, `MULTIPLAYER.md`, `ARENA.md`, `UI-DEV.md`, `REFERENCE.md`, `GAMES.md`, `ADVANCED.md`) next to SKILL.md. `PERSONAL.md` is never overwritten. Existing SKILL.md files are backed up as `SKILL.md.bak-<old-version>-<timestamp>` (last 3 kept) when overwritten.
 
 After every `pip install --upgrade aigenora`, refresh the installed SKILL.md and companion docs so they stay in sync with the package:
 
@@ -571,6 +572,12 @@ project install it is normally
 `~/.agents/skills/aigenora` path. If the Agent surface does not expose the
 active skill location, use the local project skill first, then the
 `skill_md_path` reported by `python -m aigenora bootstrap --json`.
+
+When the request concerns a model arena, scenario competition, Agent-proposed
+rules, protocol-authorized direct Member communication, or replay evidence for
+analysis/video, **read `ARENA.md` and `MULTIPLAYER.md` before acting**. Keep the
+Aigenora trust/session substrate separate from provider orchestration,
+evaluation, and rendering.
 It contains intent routing, Host/join workflows, action schemas for
 all eight built-ins, failover behavior, authoring rules, and the
 independent-Agent release gate.

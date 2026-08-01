@@ -288,6 +288,44 @@ def build_parser() -> argparse.ArgumentParser:
     pr_del.add_argument("--name", required=True)
     _common(pr_del)
 
+    rules = proto_sub.add_parser(
+        "rules", help="Create and verify signed rule negotiation artifacts"
+    )
+    rules_sub = rules.add_subparsers(dest="rules_cmd", required=True)
+    rules_propose = rules_sub.add_parser(
+        "propose", help="Sign a protocol spec and natural-language rules"
+    )
+    rules_propose.add_argument("spec")
+    rules_propose.add_argument("--rules", help="UTF-8 rules document")
+    rules_propose.add_argument("--output", required=True)
+    rules_propose.add_argument("--json", action="store_true", dest="json_output")
+    _common(rules_propose)
+    rules_endorse = rules_sub.add_parser(
+        "endorse", help="Accept or reject one signed rule proposal"
+    )
+    rules_endorse.add_argument("proposal")
+    rules_endorse.add_argument("--decision", required=True, choices=["accept", "reject"])
+    rules_endorse.add_argument("--reason", default="")
+    rules_endorse.add_argument("--output", required=True)
+    rules_endorse.add_argument("--json", action="store_true", dest="json_output")
+    _common(rules_endorse)
+    rules_freeze = rules_sub.add_parser(
+        "freeze", help="Freeze a proposal after a signed acceptance quorum"
+    )
+    rules_freeze.add_argument("proposal")
+    rules_freeze.add_argument(
+        "--endorsement", action="append", required=True, help="Signed endorsement JSON"
+    )
+    rules_freeze.add_argument("--quorum", type=int, required=True)
+    rules_freeze.add_argument("--output", required=True)
+    rules_freeze.add_argument("--json", action="store_true", dest="json_output")
+    _common(rules_freeze)
+    rules_verify = rules_sub.add_parser(
+        "verify", help="Verify a proposal, endorsement, or frozen ruleset"
+    )
+    rules_verify.add_argument("artifact")
+    rules_verify.add_argument("--json", action="store_true", dest="json_output")
+
     p = sub.add_parser("feedback")
     _common(p)
     p.add_argument("--session-id", required=True)
@@ -429,6 +467,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sga.add_argument("--state-dir", required=True)
     sga.add_argument("--action", required=True, help="Group action JSON object")
+    speer = sess_sub.add_parser(
+        "peer", help="Use a protocol-authorized Member-to-Member side channel"
+    )
+    speer_sub = speer.add_subparsers(dest="peer_cmd", required=True)
+    speer_send = speer_sub.add_parser("send", help="Queue one structured peer message")
+    speer_send.add_argument("--state-dir", required=True)
+    speer_send.add_argument("--recipient", required=True, help="Recipient public key")
+    speer_send.add_argument("--channel", required=True, help="Declared peer channel")
+    speer_send.add_argument("--message", required=True, help="Peer message JSON object")
+    speer_messages = speer_sub.add_parser(
+        "messages", help="Read verified local peer-message evidence"
+    )
+    speer_messages.add_argument("--state-dir", required=True)
+    speer_messages.add_argument("--follow", action="store_true")
+    speer_messages.add_argument("--json", action="store_true", dest="json_output")
+    sreplay = sess_sub.add_parser(
+        "replay", help="Export, verify, or reconcile signed session evidence"
+    )
+    sreplay_sub = sreplay.add_subparsers(dest="replay_cmd", required=True)
+    sreplay_export = sreplay_sub.add_parser(
+        "export", help="Export this participant's signed replay bundle"
+    )
+    sreplay_export.add_argument("--state-dir", required=True)
+    sreplay_export.add_argument("--output", required=True)
+    sreplay_export.add_argument(
+        "--scope", choices=["public", "participant"], default="public"
+    )
+    sreplay_export.add_argument("--force", action="store_true")
+    sreplay_export.add_argument("--json", action="store_true", dest="json_output")
+    _common(sreplay_export)
+    sreplay_verify = sreplay_sub.add_parser(
+        "verify", help="Verify one signed replay bundle"
+    )
+    sreplay_verify.add_argument("bundle")
+    sreplay_verify.add_argument("--json", action="store_true", dest="json_output")
+    sreplay_reconcile = sreplay_sub.add_parser(
+        "reconcile", help="Cross-check replay bundles from one group session"
+    )
+    sreplay_reconcile.add_argument("bundles", nargs="+")
+    sreplay_reconcile.add_argument("--output")
+    sreplay_reconcile.add_argument("--json", action="store_true", dest="json_output")
     sl_cmd = sess_sub.add_parser("list")
     sl_cmd.add_argument("--data-dir")
     sl_cmd.add_argument("--json", action="store_true", dest="json_output")
@@ -746,6 +825,22 @@ def main(argv: list[str] | None = None) -> int:
             run = sess_mod.cmd_decide
         elif args.session_cmd == "action":
             run = sess_mod.cmd_group_action
+        elif args.session_cmd == "peer":
+            if args.peer_cmd == "send":
+                run = sess_mod.cmd_peer_send
+            elif args.peer_cmd == "messages":
+                run = sess_mod.cmd_peer_messages
+            else:
+                raise RuntimeError(args.peer_cmd)
+        elif args.session_cmd == "replay":
+            if args.replay_cmd == "export":
+                run = sess_mod.cmd_replay_export
+            elif args.replay_cmd == "verify":
+                run = sess_mod.cmd_replay_verify
+            elif args.replay_cmd == "reconcile":
+                run = sess_mod.cmd_replay_reconcile
+            else:
+                raise RuntimeError(args.replay_cmd)
         elif args.session_cmd == "list":
             run = sess_mod.cmd_list
         elif args.session_cmd == "logs":
