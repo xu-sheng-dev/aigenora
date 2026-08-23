@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Aigenora Game Kit</title>
+  <style>
+    :root {
+      --void:#09080b; --deep:#121014; --panel:#19151a; --panel-2:#211a1c;
+      --ink:#f2e7d2; --muted:#a2958b; --line:#493b37; --accent:#f2a65a;
+      --accent-2:#e65f45; --cool:#65c6ba; --danger:#ff705d; --shadow:#000a;
+      --display:"Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+      --body:"Trebuchet MS","Microsoft YaHei",sans-serif;
+      --mono:"Cascadia Mono",Consolas,monospace;
+    }
+    body[data-theme="jade"] {
+      --void:#07100e; --deep:#0c1915; --panel:#13231e; --panel-2:#193029;
+      --ink:#edf0d5; --muted:#9eb3a5; --line:#355c4e; --accent:#c9b76b;
+      --accent-2:#6bc4a4; --cool:#84d6c0; --danger:#ed7e65;
+    }
+    body[data-theme="neon"] {
+      --void:#05070d; --deep:#0a1020; --panel:#0e1830; --panel-2:#142044;
+      --ink:#edf4ff; --muted:#94a8cb; --line:#2f4f83; --accent:#65f4d3;
+      --accent-2:#fa4fc6; --cool:#55b7ff; --danger:#ff5e7d;
+    }
+    * { box-sizing:border-box; }
+    html,body { min-height:100%; margin:0; }
+    body {
+      color:var(--ink); background:var(--void); font-family:var(--body);
+      overflow-x:hidden; transition:background .35s ease;
+    }
+    button { color:inherit; font:inherit; }
+    .atmosphere,.atmosphere::before,.atmosphere::after {
+      position:fixed; inset:0; pointer-events:none; content:"";
+    }
+    .atmosphere {
+      z-index:-3;
+      background:
+        radial-gradient(circle at 50% 28%, color-mix(in srgb,var(--accent) 15%,transparent), transparent 31%),
+        radial-gradient(circle at 12% 80%, color-mix(in srgb,var(--accent-2) 12%,transparent), transparent 35%),
+        linear-gradient(145deg,var(--void),var(--deep) 48%,var(--void));
+    }
+    .atmosphere::before {
+      opacity:.24;
+      background-image:
+        linear-gradient(30deg,transparent 48%,var(--line) 49%,transparent 50%),
+        linear-gradient(-30deg,transparent 48%,var(--line) 49%,transparent 50%);
+      background-size:38px 66px;
+      mask-image:linear-gradient(to bottom,black,transparent 82%);
+    }
+    .atmosphere::after {
+      opacity:.13;
+      background-image:radial-gradient(circle,var(--ink) .65px,transparent .8px);
+      background-size:7px 7px;
+      mix-blend-mode:soft-light;
+    }
+    .shell { width:min(1380px,100%); margin:auto; padding:24px clamp(14px,3vw,42px) 44px; }
+    header {
+      display:grid; grid-template-columns:1fr auto; gap:28px; align-items:end;
+      padding:12px 0 22px; border-bottom:1px solid var(--line);
+      animation:arrive .6s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .kicker { color:var(--accent); font:700 10px/1 var(--mono); letter-spacing:.23em; text-transform:uppercase; }
+    h1 { max-width:900px; margin:9px 0 7px; font:500 clamp(36px,6vw,78px)/.9 var(--display); letter-spacing:-.055em; }
+    .tagline { max-width:760px; color:var(--muted); font-size:13px; line-height:1.55; }
+    .telemetry { min-width:190px; text-align:right; color:var(--muted); font:700 9px/1.8 var(--mono); letter-spacing:.09em; }
+    .telemetry b { display:block; color:var(--cool); font-size:13px; }
+    .connection { display:inline-flex; align-items:center; gap:7px; }
+    .connection::before { width:7px; height:7px; border-radius:50%; background:var(--danger); box-shadow:0 0 12px var(--danger); content:""; }
+    .connection.ready::before { background:var(--cool); box-shadow:0 0 12px var(--cool); }
+    .arena {
+      display:grid; grid-template-columns:minmax(270px,.78fr) minmax(0,1.7fr); gap:15px;
+      margin-top:15px;
+    }
+    .panel { border:1px solid var(--line); background:color-mix(in srgb,var(--panel) 91%,transparent); box-shadow:0 20px 60px var(--shadow); }
+    .panel-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid var(--line); }
+    .panel-head strong { font:600 13px var(--display); letter-spacing:.02em; }
+    .panel-head span { color:var(--muted); font:700 8px var(--mono); letter-spacing:.1em; }
+    .roster { min-width:0; }
+    .players { display:grid; }
+    .player {
+      position:relative; display:grid; grid-template-columns:52px 1fr; gap:12px;
+      width:100%; padding:14px; border:0; border-bottom:1px solid var(--line);
+      background:transparent; text-align:left; cursor:pointer; overflow:hidden;
+      transition:background .18s,transform .18s,opacity .18s;
+    }
+    .player:last-child { border-bottom:0; }
+    .player::after { position:absolute; inset:0 auto 0 0; width:3px; background:var(--seat); transform:scaleY(0); transition:transform .2s; content:""; }
+    .player:hover:not(:disabled),.player:focus-visible { background:var(--panel-2); outline:none; }
+    .player.current::after,.player.target::after { transform:scaleY(1); }
+    .player.target { background:color-mix(in srgb,var(--accent-2) 13%,var(--panel)); }
+    .player.defeated { opacity:.34; filter:grayscale(.65); }
+    .sigil {
+      position:relative; display:grid; place-items:center; width:48px; height:48px;
+      color:var(--seat); border:1px solid var(--seat); border-radius:50%;
+      font:600 20px var(--display); box-shadow:inset 0 0 18px color-mix(in srgb,var(--seat) 20%,transparent);
+    }
+    .sigil::before { position:absolute; inset:5px; border:1px dashed color-mix(in srgb,var(--seat) 60%,transparent); border-radius:50%; content:""; animation:spin 12s linear infinite; }
+    .player.current .sigil { box-shadow:0 0 24px color-mix(in srgb,var(--seat) 42%,transparent),inset 0 0 18px color-mix(in srgb,var(--seat) 22%,transparent); }
+    .player-meta { min-width:0; }
+    .seat { color:var(--seat); font:700 8px var(--mono); letter-spacing:.14em; }
+    .identity { margin:3px 0 10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:600 16px var(--display); }
+    .vitals { display:grid; grid-template-columns:1fr auto; gap:5px 8px; align-items:center; }
+    .vitals label { color:var(--muted); font:700 7px var(--mono); letter-spacing:.08em; }
+    .vitals output { color:var(--ink); font:700 8px var(--mono); }
+    .track { grid-column:1/-1; height:4px; overflow:hidden; background:color-mix(in srgb,var(--line) 55%,transparent); }
+    .track i { display:block; width:0; height:100%; background:var(--seat); transition:width .32s ease; }
+    .mini { display:flex; gap:9px; margin-top:9px; color:var(--muted); font:700 8px var(--mono); }
+    .mini b { color:var(--ink); }
+    .stage { position:relative; min-height:448px; overflow:hidden; }
+    .stage-grid { position:absolute; inset:0; opacity:.28; background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px); background-size:46px 46px; mask-image:radial-gradient(circle at center,black,transparent 75%); }
+    .orbits { position:absolute; inset:50% auto auto 50%; width:min(430px,70vw); aspect-ratio:1; transform:translate(-50%,-50%); pointer-events:none; }
+    .orbit { position:absolute; inset:var(--inset); border:1px solid color-mix(in srgb,var(--accent) 42%,transparent); border-radius:50%; animation:spin var(--speed) linear infinite; }
+    .orbit::before,.orbit::after { position:absolute; top:50%; width:7px; height:7px; border:1px solid var(--accent); background:var(--deep); transform:translateY(-50%) rotate(45deg); content:""; }
+    .orbit::before { left:-4px; }.orbit::after { right:-4px; }
+    .orbit.one { --inset:0; --speed:28s; }
+    .orbit.two { --inset:16%; --speed:19s; animation-direction:reverse; border-style:dashed; }
+    .orbit.three { --inset:31%; --speed:11s; }
+    .core {
+      position:absolute; left:50%; top:50%; display:grid; place-items:center;
+      width:146px; height:146px; transform:translate(-50%,-50%); border:1px solid var(--accent);
+      border-radius:50%; background:radial-gradient(circle,color-mix(in srgb,var(--accent) 28%,var(--panel)),var(--deep) 65%);
+      box-shadow:0 0 70px color-mix(in srgb,var(--accent) 25%,transparent),inset 0 0 34px color-mix(in srgb,var(--accent) 18%,transparent);
+      text-align:center;
+    }
+    .core::before { position:absolute; inset:13px; border:1px dotted var(--accent); border-radius:50%; content:""; animation:spin 18s linear infinite; }
+    .core small { color:var(--muted); font:700 8px var(--mono); letter-spacing:.13em; }
+    .core b { display:block; margin-top:5px; font:500 25px var(--display); }
+    .core.pulse { animation:core-pulse .42s ease; }
+    .stage-caption { position:absolute; left:20px; right:20px; bottom:18px; display:flex; justify-content:space-between; gap:18px; align-items:end; }
+    .event-callout { max-width:600px; }
+    .event-callout small { color:var(--accent); font:700 8px var(--mono); letter-spacing:.15em; }
+    .event-callout p { margin:7px 0 0; color:var(--ink); font:500 clamp(18px,2.4vw,29px)/1.15 var(--display); }
+    .target-note { color:var(--muted); font:700 8px/1.5 var(--mono); text-align:right; }
+    .actions { grid-column:1/-1; }
+    .action-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--line); }
+    .action-card {
+      position:relative; min-height:158px; padding:16px; border:0; background:var(--panel);
+      text-align:left; cursor:pointer; overflow:hidden; transition:background .18s,transform .18s;
+    }
+    .action-card::before { position:absolute; inset:0 0 auto; height:3px; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transform:scaleX(0); transform-origin:left; transition:transform .2s; content:""; }
+    .action-card:hover:not(:disabled),.action-card:focus-visible { z-index:1; background:var(--panel-2); outline:1px solid var(--accent); transform:translateY(-4px); }
+    .action-card:hover::before,.action-card:focus-visible::before { transform:scaleX(1); }
+    .action-card:disabled { opacity:.38; cursor:not-allowed; }
+    .glyph { display:grid; place-items:center; width:38px; height:38px; border:1px solid var(--line); color:var(--accent); font:500 22px var(--display); }
+    .action-card h3 { margin:14px 0 6px; font:600 17px var(--display); }
+    .action-card p { min-height:34px; margin:0; color:var(--muted); font-size:10px; line-height:1.55; }
+    .action-meta { display:flex; justify-content:space-between; gap:8px; margin-top:13px; color:var(--cool); font:700 8px var(--mono); letter-spacing:.08em; }
+    .lower { grid-column:1/-1; display:grid; grid-template-columns:1.3fr .7fr; gap:15px; }
+    .timeline { min-height:162px; }
+    .timeline-list { display:grid; gap:0; max-height:214px; overflow:auto; }
+    .log { display:grid; grid-template-columns:58px 1fr; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line); }
+    .log:last-child { border-bottom:0; }
+    .log time { color:var(--accent); font:700 8px var(--mono); }
+    .log span { color:var(--muted); font-size:10px; line-height:1.45; }
+    .command { display:flex; flex-direction:column; min-height:162px; }
+    .command-body { display:grid; align-content:space-between; flex:1; gap:14px; padding:14px; }
+    .status { min-height:38px; color:var(--muted); font-size:10px; line-height:1.55; }
+    .status.error { color:var(--danger); }
+    .concede { justify-self:start; padding:8px 12px; border:1px solid var(--danger); color:var(--danger); background:transparent; font:700 8px var(--mono); letter-spacing:.1em; cursor:pointer; }
+    .concede:hover:not(:disabled),.concede:focus-visible { color:var(--deep); background:var(--danger); outline:none; }
+    .concede:disabled { opacity:.3; cursor:not-allowed; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @keyframes core-pulse { 50% { transform:translate(-50%,-50%) scale(1.08); filter:brightness(1.4); } }
+    @keyframes arrive { from { opacity:0; transform:translateY(-12px); } }
+    @media (max-width:980px) {
+      .arena { grid-template-columns:1fr; }
+      .players { grid-template-columns:1fr 1fr; }
+      .player:nth-child(odd) { border-right:1px solid var(--line); }
+      .action-grid { grid-template-columns:1fr 1fr; }
+      .lower { grid-template-columns:1fr; }
+    }
+    @media (max-width:620px) {
+      .shell { padding:10px 8px 28px; }
+      header { grid-template-columns:1fr; gap:14px; }
+      .telemetry { text-align:left; }
+      .players { grid-template-columns:1fr; }
+      .player:nth-child(odd) { border-right:0; }
+      .stage { min-height:380px; }
+      .orbits { width:310px; }
+      .action-grid { grid-template-columns:1fr; }
+      .action-card { min-height:132px; }
+      .stage-caption { align-items:start; flex-direction:column; }
+      .target-note { text-align:left; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      *,*::before,*::after { animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; }
+    }
+  </style>
+</head>
+<body data-theme="ember">
+  <div class="atmosphere"></div>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="kicker">Aigenora · Generated Authority Arena</div>
+        <h1 id="title">Game Kit</h1>
+        <div class="tagline" id="tagline">Synchronizing the generated rule lattice.</div>
+      </div>
+      <div class="telemetry">
+        <span class="connection" id="connection">BRIDGE ALIGNING</span>
+        <b id="turn-label">TURN —</b>
+        <span id="frame-label">E— · F— · EXACT RECOVERY</span>
+      </div>
+    </header>
+
+    <section class="arena">
+      <aside class="panel roster">
+        <div class="panel-head"><strong>Signal roster</strong><span>SELECT A RIVAL</span></div>
+        <div class="players" id="players"></div>
+      </aside>
+
+      <section class="panel stage">
+        <div class="stage-grid"></div>
+        <div class="orbits" aria-hidden="true">
+          <div class="orbit one"></div><div class="orbit two"></div><div class="orbit three"></div>
+        </div>
+        <div class="core" id="core"><div><small>AUTHORITY PULSE</small><b id="core-turn">—</b></div></div>
+        <div class="stage-caption">
+          <div class="event-callout"><small>LATEST RESOLUTION</small><p id="event">Waiting for the first verified action.</p></div>
+          <div class="target-note" id="target-note">Choose an active rival before a focused strike.</div>
+        </div>
+      </section>
+
+      <section class="panel actions">
+        <div class="panel-head"><strong>Action lattice</strong><span id="action-hint">WAITING FOR YOUR TURN</span></div>
+        <div class="action-grid" id="actions"></div>
+      </section>
+
+      <section class="lower">
+        <section class="panel timeline">
+          <div class="panel-head"><strong>Verified chronicle</strong><span>BOUNDED PUBLIC EVENTS</span></div>
+          <div class="timeline-list" id="timeline"></div>
+        </section>
+        <section class="panel command">
+          <div class="panel-head"><strong>Local command</strong><span id="role">SEAT —</span></div>
+          <div class="command-body">
+            <div class="status" id="status" role="status" aria-live="polite">The browser bridge will never send raw prose into the protocol.</div>
+            <button class="concede" id="concede">RELEASE SIGNAL</button>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script>
+  (function(){
+    "use strict";
+    var PARENT_ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin;
+    var pending={},snapshot={},view={},ready=false,target="",sending=false,lastEventKey="";
+    var seatColors=["#f2a65a","#65c6ba","#df6f8f","#8e86e8"];
+    function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),PARENT_ORIGIN);}
+    function request(method,body){return new Promise(function(resolve,reject){
+      var id="gamekit_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+      var timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"));},5000);
+      pending[id]=function(response){clearTimeout(timer);resolve(response);};
+      post({type:"request",id:id,method:method,body:body});
+    });}
+    window.addEventListener("message",function(event){
+      if(event.origin!==PARENT_ORIGIN)return;
+      var data=event.data||{};if(data.source!=="aigenora-broadcast")return;
+      if(data.type==="hello-ack"){
+        ready=true;document.getElementById("connection").textContent="BRIDGE LOCKED";
+        document.getElementById("connection").classList.add("ready");
+        request("snapshot").then(receive).catch(fail);return;
+      }
+      if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return;}
+      if(data.type==="push"&&data.event==="snapshot")apply(data.data);
+    });
+    function receive(response){if(response.ok)apply(response.data);else fail(new Error(errorText(response)));}
+    function apply(next){
+      if(!next||typeof next!=="object")return;snapshot=next;view=next.group_view||{};
+      var players=view.players||{};if(target&&!players[target])target="";
+      var event=view.last_action||{},key=String(event.turn||"")+":"+String(event.kind||"")+":"+String(event.actor||"");
+      if(key&&key!==lastEventKey){lastEventKey=key;var core=document.getElementById("core");core.classList.remove("pulse");void core.offsetWidth;core.classList.add("pulse");}
+      render();
+    }
+    function game(){return view.game||{};}
+    function me(){return (view.you||{}).public_key||"";}
+    function mine(){return ready&&!snapshot.completed&&view.phase==="playing"&&view.current_player===me();}
+    function alias(key){var player=(view.players||{})[key]||{};return "SEAT "+String(Number(player.seat||0)+1).padStart(2,"0")+(key===me()?" · YOU":"");}
+    function pct(value,max){return max?Math.max(0,Math.min(100,Number(value)/Number(max)*100)):0;}
+    function render(){
+      var config=game(),group=snapshot.group||{},players=view.players||{},you=view.you||{};
+      document.body.dataset.theme=config.theme||"ember";
+      document.getElementById("title").textContent=config.name||"Aigenora Game Kit";
+      document.title=(config.name||"Aigenora Game Kit")+" · Aigenora";
+      document.getElementById("tagline").textContent=config.tagline||"Generated authority arena";
+      document.getElementById("turn-label").textContent=snapshot.completed?"ARENA COMPLETE":"TURN "+(view.turn_number||"—");
+      document.getElementById("core-turn").textContent=snapshot.completed?"CLOSED":String(view.turn_number||"—").padStart(2,"0");
+      document.getElementById("frame-label").textContent="E"+(group.leader_epoch??"—")+" · F"+(group.seq??"—")+" · EXACT RECOVERY";
+      document.getElementById("role").textContent=you.seat==null?"SEAT —":"SEAT "+String(Number(you.seat)+1).padStart(2,"0");
+      var latest=view.last_action||{};document.getElementById("event").textContent=latest.summary||"Waiting for the first verified action.";
+      var roster=document.getElementById("players");roster.replaceChildren();
+      Object.keys(players).sort(function(a,b){return Number(players[a].seat)-Number(players[b].seat);}).forEach(function(key){roster.append(playerNode(key,players[key]));});
+      var activeTargets=Object.keys(players).filter(function(key){return key!==me()&&players[key].alive;});
+      if(activeTargets.length===1&&!target)target=activeTargets[0];
+      document.getElementById("target-note").textContent=target?"FOCUSED TARGET · "+alias(target):"Choose an active rival before a focused strike.";
+      renderActions();renderTimeline();
+      document.getElementById("concede").disabled=!mine()||sending;
+    }
+    function playerNode(key,player){
+      var button=document.createElement("button"),color=seatColors[Number(player.seat)%seatColors.length];
+      button.className="player"+(key===view.current_player?" current":"")+(key===target?" target":"")+(!player.alive?" defeated":"");
+      button.style.setProperty("--seat",color);button.disabled=key===me()||!player.alive;
+      button.onclick=function(){target=target===key?"":key;render();};
+      var sigil=document.createElement("div");sigil.className="sigil";sigil.textContent=String(Number(player.seat)+1);
+      var meta=document.createElement("div");meta.className="player-meta";
+      var seat=document.createElement("div");seat.className="seat";seat.textContent=alias(key)+(key===view.current_player?" · ACTIVE":"");
+      var identity=document.createElement("div");identity.className="identity";identity.textContent=player.alive?String(key).slice(0,12).toUpperCase():"SIGNAL RELEASED";
+      var vitals=document.createElement("div");vitals.className="vitals";
+      var label=document.createElement("label");label.textContent="VITALITY";
+      var output=document.createElement("output");output.textContent=player.health+" / "+player.max_health;
+      var track=document.createElement("div");track.className="track";var fill=document.createElement("i");fill.style.width=pct(player.health,player.max_health)+"%";track.append(fill);
+      vitals.append(label,output,track);
+      var mini=document.createElement("div");mini.className="mini";
+      var energy=document.createElement("span");energy.textContent="ENERGY ";var eb=document.createElement("b");eb.textContent=player.energy+"/"+player.max_energy;energy.append(eb);
+      var shield=document.createElement("span");shield.textContent="SHIELD ";var sb=document.createElement("b");sb.textContent=player.shield;shield.append(sb);mini.append(energy,shield);
+      meta.append(seat,identity,vitals,mini);button.append(sigil,meta);return button;
+    }
+    function renderActions(){
+      var box=document.getElementById("actions"),config=game(),players=view.players||{},self=players[me()]||{},myTurn=mine();box.replaceChildren();
+      (config.actions||[]).forEach(function(action){
+        var button=document.createElement("button");button.className="action-card";
+        var needsTarget=action.effect==="damage"&&Object.keys(players).filter(function(key){return key!==me()&&players[key].alive;}).length>1;
+        button.disabled=!myTurn||sending||Number(self.energy||0)<Number(action.cost||0)||(needsTarget&&!target);
+        button.onclick=function(){submit(action);};
+        var glyph=document.createElement("span");glyph.className="glyph";glyph.textContent=action.glyph||"•";
+        var title=document.createElement("h3");title.textContent=action.label;
+        var description=document.createElement("p");description.textContent=action.description;
+        var meta=document.createElement("div");meta.className="action-meta";
+        var effect=document.createElement("span");effect.textContent=String(action.effect).replace("_"," ").toUpperCase()+" "+action.power;
+        var cost=document.createElement("span");cost.textContent="COST "+action.cost+(action.gain?" · +"+action.gain:" ");
+        meta.append(effect,cost);button.append(glyph,title,description,meta);box.append(button);
+      });
+      document.getElementById("action-hint").textContent=snapshot.completed?"TERMINAL CHECKPOINT SEALED":myTurn?"YOUR VERIFIED ACTION WINDOW":"WAITING FOR "+alias(view.current_player);
+    }
+    function renderTimeline(){
+      var box=document.getElementById("timeline");box.replaceChildren();var history=(view.history||[]).slice().reverse();
+      if(!history.length){var empty=document.createElement("div");empty.className="log";empty.textContent="No verified events yet.";box.append(empty);return;}
+      history.forEach(function(item){var row=document.createElement("div");row.className="log";var time=document.createElement("time");time.textContent="T"+String(item.turn??0).padStart(2,"0");var text=document.createElement("span");text.textContent=item.summary||item.kind||"event";row.append(time,text);box.append(row);});
+    }
+    async function submit(action){
+      if(sending)return;sending=true;render();status("Submitting to the current Leader for ordered validation.",false);
+      var body={kind:"play",move:action.id};if(action.effect==="damage"&&target)body.target_public_key=target;
+      try{var response=await request("action",body);if(!response.ok)throw new Error(errorText(response));status("Action queued. Awaiting the signed authority frame.",false);}
+      catch(error){fail(error);}finally{sending=false;render();}
+    }
+    function status(message,error){var el=document.getElementById("status");el.textContent=message;el.className="status"+(error?" error":"");}
+    function errorText(response){return (response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status);}
+    function fail(error){status(error.message||String(error),true);}
+    document.getElementById("concede").onclick=function(){if(confirm("Release your signal and concede this match?")){request("action",{kind:"concede"}).then(function(response){if(!response.ok)throw new Error(errorText(response));status("Concession queued for authority validation.",false);}).catch(fail);}};
+    post({type:"hello",capabilities:["snapshot","action"]});
+  })();
+  </script>
+</body>
+</html>

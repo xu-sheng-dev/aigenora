@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+import json
+import random
+from pathlib import Path
+from typing import Any
+
+from aigenora.proto.hooks import HookResult, ProtocolHooks
+
+
+def _load_game() -> dict[str, Any]:
+    spec = json.loads(Path(__file__).with_name("spec.json").read_text(encoding="utf-8"))
+    rules = spec.get("rules")
+    game = rules.get("game_kit") if isinstance(rules, dict) else None
+    if not isinstance(game, dict) or game.get("schema") != "aigenora-game-kit/1":
+        raise ValueError("spec.rules.game_kit is missing or invalid")
+    if game.get("preset") != "choice-matrix":
+        raise ValueError("this runtime requires the choice-matrix preset")
+    return game
+
+
+GAME = _load_game()
+CHOICES = [item["id"] for item in GAME["choices"]]
+CHOICE_BY_ID = {item["id"]: item for item in GAME["choices"]}
+BEATS = {item["id"]: frozenset(item["beats"]) for item in GAME["choices"]}
+CHOICE_KEYWORDS = {
+    item["id"]: [item["id"], str(item["label"]).lower()]
+    for item in GAME["choices"]
+}
+
+
+class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+    CHOICE_KEYWORDS = CHOICE_KEYWORDS
+    DECISION_SCHEMA = {
+        "match_key": "round",
+        "value_field": "choice",
+        "choices": CHOICE_KEYWORDS,
+        "strategy_field": "fixed",
+        "policy_family": "choice-matrix",
+        "beats": {key: sorted(value) for key, value in BEATS.items()},
+    }
+
+    def proto_init(
+        self,
+        options: dict[str, Any],
+        role: str,
+        args: list[str],
+        state_dir: Path,
+        decision_config: dict[str, Any] | None = None,
+    ) -> None:
+        super().proto_init(options, role, args, state_dir, decision_config)
+        del options
+        self.max_rounds = int(GAME["match"]["max_rounds"])
+        self.rounds_to_win = int(GAME["match"]["rounds_to_win"])
+        self.host_score = 0
+        self.guest_score = 0
+        self.fallback_strategy = args[0] if args else "random"
+        self.snapshot.update(
+            phase="playing",
+            game=GAME,
+            score={"host": 0, "guest": 0},
+            round=1,
+            max_rounds=self.max_rounds,
+            rounds_to_win=self.rounds_to_win,
+        )
+
+    def proto_host_metadata(self):
+        return (
+            GAME["name"],
+            "game,game-kit,choice-matrix,commit-reveal",
+            "supply",
+            {
+                "best_of": self.max_rounds,
+                "rounds_to_win": self.rounds_to_win,
+            },
+        )
+
+    def _pick_auto(self, round_index: int) -> str:
+        strategy = self.strategy.read() or {}
+        mode = strategy.get("mode", "random")
+        if mode == "fixed" and strategy.get("fixed") in CHOICES:
+            return str(strategy["fixed"])
+        if mode == "seq":
+            sequence = [item for item in strategy.get("sequence", []) if item in CHOICES]
+            if sequence:
+                return str(sequence[round_index % len(sequence)])
+        if self.fallback_strategy in CHOICES:
+            return self.fallback_strategy
+        return random.choice(CHOICES)
+
+    def _pick(self, round_index: int) -> str:
+        if self.control_mode == "human":
+            decision = self._await_human_decision("round", round_index)
+            choice = decision.get("choice")
+            if choice not in CHOICES:
+                self._reject_human_decision(
+                    "round", round_index, decision, "choice is not declared by the matrix"
+                )
+            return str(choice)
+        automatic = self._pick_auto(round_index)
+        if self.bus is not None and self.decision_mode != "manual":
+            decision = self._consume_hybrid("round", round_index)
+            if decision and decision.get("choice") in CHOICES:
+                return str(decision["choice"])
+        return automatic
+
+    def proto_round_value(self, round_index: int, state: dict[str, Any]) -> str:
+        del state
+        return self._pick(round_index)
+
+    def proto_round_judge(
+        self,
+        round_index: int,
+        host_value: str,
+        guest_value: str,
+        state: dict[str, Any],
+    ) -> HookResult:
+        del state
+        if host_value not in BEATS or guest_value not in BEATS:
+            raise ValueError("revealed choice is not declared by the matrix")
+        if host_value == guest_value:
+            round_winner = "draw"
+        elif guest_value in BEATS[host_value]:
+            round_winner = "host"
+            self.host_score += 1
+        else:
+            round_winner = "guest"
+            self.guest_score += 1
+        played = round_index + 1
+        complete = (
+            self.host_score >= self.rounds_to_win
+            or self.guest_score >= self.rounds_to_win
+            or played >= self.max_rounds
+        )
+        if not complete:
+            game_winner = "none"
+        elif self.host_score > self.guest_score:
+            game_winner = "host"
+        elif self.guest_score > self.host_score:
+            game_winner = "guest"
+        else:
+            game_winner = "draw"
+        response = {
+            "action": "round_result",
+            "round": round_index,
+            "host_choice": host_value,
+            "guest_choice": guest_value,
+            "round_winner": round_winner,
+            "host_score": self.host_score,
+            "guest_score": self.guest_score,
+            "game_over": complete,
+            "game_winner": game_winner,
+        }
+        self._record(response)
+        return HookResult(response, completed=complete)
+
+    def _record(self, message: dict[str, Any]) -> None:
+        round_number = int(message["round"]) + 1
+        host = CHOICE_BY_ID[message["host_choice"]]
+        guest = CHOICE_BY_ID[message["guest_choice"]]
+        summary = (
+            f"R{round_number}: {host['label']} vs {guest['label']} -> "
+            f"{message['round_winner']} ({message['host_score']}-{message['guest_score']})"
+        )
+        self.details.append(
+            type="round_result",
+            round=round_number,
+            host_choice=message["host_choice"],
+            guest_choice=message["guest_choice"],
+            winner=message["round_winner"],
+            host_score=message["host_score"],
+            guest_score=message["guest_score"],
+            game_over=message["game_over"],
+            game_winner=message["game_winner"],
+            summary=summary,
+        )
+        self.snapshot.update(
+            phase="game_over" if message["game_over"] else "playing",
+            game=GAME,
+            score={"host": self.host_score, "guest": self.guest_score},
+            round=round_number if message["game_over"] else round_number + 1,
+            last_event={"summary": summary, "structured": dict(message)},
+        )
+
+    def proto_host_handle_join(self, message: dict[str, Any]) -> HookResult:
+        del message
+        return HookResult(
+            {
+                "action": "ready",
+                "best_of": self.max_rounds,
+                "rounds_to_win": self.rounds_to_win,
+            }
+        )
+
+    def proto_guest_join_message(self) -> dict[str, Any]:
+        return {"action": "join", "best_of": self.max_rounds}
+
+    def proto_guest_handle_ready(self, message: dict[str, Any]) -> None:
+        if int(message["best_of"]) != self.max_rounds:
+            raise ValueError("Host changed the content-addressed max_rounds")
+        if int(message["rounds_to_win"]) != self.rounds_to_win:
+            raise ValueError("Host changed the content-addressed rounds_to_win")
+
+    def proto_guest_handle(self, message: dict[str, Any]) -> HookResult:
+        if message.get("action") == "round_result":
+            self.host_score = int(message["host_score"])
+            self.guest_score = int(message["guest_score"])
+            self._record(message)
+        return HookResult()
+
+    def proto_display(self, message: dict[str, Any], direction: str) -> str | None:
+        del direction
+        if message.get("action") != "round_result":
+            return None
+        return (
+            f"Round {int(message['round']) + 1}: {message['host_choice']} vs "
+            f"{message['guest_choice']} -> {message['round_winner']} "
+            f"({message['host_score']}-{message['guest_score']})"
+        )

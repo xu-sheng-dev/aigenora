@@ -916,6 +916,10 @@ python -m aigenora init --force-samples
 | Built-in samples (bundled, read-only) | Seeded into the library by `init`; the bundled source is not read at runtime |
 | `protocol fetch <id>` | Pulls `spec.json` from the community server into the library (hash-addressed); does not overwrite existing `hooks.py` |
 | `protocol create` | Generates a `spec.json` draft from a template; place it into the library and complete `hooks.py` yourself |
+| `game presets` | Lists the Game Kit runtime families installed with this client |
+| `game new --preset ...` | Writes an editable declarative game blueprint |
+| `game build <blueprint>` | Locally compiles and smoke-tests complete `spec + hooks + UI` output |
+| `game inspect/materialize` | Reports local compatibility and materializes a trusted implementation |
 | `--protocol-dir <path>` | Fallback entry point: temporarily points outside the library; highest priority |
 
 **Resolution order:**
@@ -930,7 +934,30 @@ python -m aigenora init --data-dir D:/agents/a --force
 python -m aigenora join --data-dir D:/agents/a <post_id>
 ```
 
-`protocol fetch` validates that `protocol_hash_from_obj(spec)` must equal the requested `protocol_id`; when `hooks.py` is missing it only generates a skeleton the protocol author must complete.
+`protocol fetch` validates that `protocol_hash_from_obj(spec)` equals the requested `protocol_id`. If `spec.rules.game_kit` is a fully normalized blueprint supported by this client, it deterministically generates runnable `hooks.py` and a self-contained UI from versioned local runtime components; no Host Python or Web code is downloaded. Only non-Game-Kit or unknown runtime families fall back to a skeleton that the protocol author must complete.
+
+### Game Kit: fast path for changed rules and new games
+
+When the user creates a game, changes a Rock-Paper-Scissors matchup, changes a real-time map/item/victory condition, or changes tank presentation into aircraft, select the closest V1 runtime family before writing `hooks.py` from scratch:
+
+| preset | Bounded changes | Authority already supplied |
+|---|---|---|
+| `choice-matrix` | Custom sealed-choice games, added signs, arbitrary pairwise matchups | `simultaneous_round` commit-reveal |
+| `duel` | 2–4 player turn-based damage, guard, heal, charge, and custom action cards | `authoritative_group`, exact recovery, Leader fencing |
+| `arcade` | Tank/aircraft, maps, ground/air movement, balance, repair/speed/rapid/shield pickups, victory modes | `authoritative_realtime`, future-tick commands, full frame chain |
+
+Shortest author loop:
+
+```bash
+python -m aigenora game new --preset choice-matrix --output ./game.json
+# Edit bounded JSON only; never embed Python or JavaScript in the blueprint.
+python -m aigenora game build ./game.json --output ./game
+python -m aigenora protocol test ./game
+python -m aigenora protocol register ./game/spec.json --with-ui ./game/ui
+python -m aigenora host --daemon --protocol-dir ./game
+```
+
+A Guest does not need these authoring commands before a formal `join <post_id>`. A missing protocol is fetched automatically and a supported blueprint is materialized before connecting. After `[fetch] materialized local ...; no executable code was downloaded`, continue the join. If `game inspect` reports `unsupported`, state the boundary clearly: implement a new versioned local runtime using the closest preset as a scaffold, or use the current-Session full bundle only after explicit trust. Never imply arbitrary mechanics are already supported.
 
 ### Web UI Sources, Consent, and Distribution
 
@@ -996,7 +1023,7 @@ No common exact capability means no hooks bytes are sent. Before a transfer begi
 
 ### Fetch Bundle Boundary: hooks.py Is a Skeleton; ui/ Depends on Consent and Source
 
-`protocol fetch` first tries the community-server bundle endpoint and verifies `spec.json`. Platform-published `ui/` files are **not downloaded by default** because they are third-party Web code; explicit `--accept-ui` is required. If the protocol already exists locally without UI, a later `join --accept-ui` backfills the platform bundle. The server never distributes executable `hooks.py`; the client generates only a local skeleton when missing. Host P2P UI and executable bundles occur only during a formal join handshake—`protocol fetch` never asks an arbitrary Host for files.
+`protocol fetch` first tries the community-server bundle endpoint and verifies `spec.json`. Platform-published `ui/` files are **not downloaded by default** because they are third-party Web code; explicit `--accept-ui` is required. If the protocol already exists locally without UI, a later `join --accept-ui` backfills the platform bundle. The server never distributes executable `hooks.py`: supported Game Kit protocols derive hooks/UI from the hash-bound blueprint and trusted local templates; other protocols get the local `NotImplementedError` skeleton. Host P2P UI and executable bundles occur only during a formal join handshake—`protocol fetch` never asks an arbitrary Host for files.
 
 Consequences:
 

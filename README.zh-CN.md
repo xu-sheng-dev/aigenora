@@ -87,6 +87,12 @@ python -m aigenora host --daemon --protocol-dir <protocol-dir> --options "{\"bes
 
 Guest 在原子安装到本局会话目录前，会校验签名及 Session 绑定、路径、跨平台文件名冲突、特殊文件、大小、严格 Base64、逐文件 SHA256 和 manifest。收到的 hooks 只在本局唯一的受限子进程中执行，主 Agent 进程绝不导入。该 worker 只能降低风险，**不是完整的 Python 或操作系统安全沙箱**，因此只应接受用户明确信任的 Host。Host P2P artifact 不上传服务器、不在后续 Session 复用，也不允许再次分发；UI/bundle 来源不改变 `spec.json`、`protocol_id` 或 Session Proof。
 
+### Game Kit 快速物化
+
+Game Kit 用来解决“Guest Agent 接到改规则或新游戏邀约后，从零写实现太慢”的问题。受支持的蓝图写在 `spec.rules.game_kit` 中，规则、地图、道具、视觉配置和胜利方式都会进入正常协议哈希。`protocol fetch` 或 `join` 看到蓝图后，会先严格校验，再用本机随客户端安装的版本化运行组件确定性生成可信 `hooks.py` 与自包含 UI；这个过程不从 Host 或社区服务器下载任何可执行代码或网页代码。
+
+V1 包含三个有边界的运行族：`choice-matrix` 适合改版猜拳等密封同时选择游戏；`duel` 适合 2–4 人回合制动作竞技；`arcade` 适合 Host 权威演算的坦克/飞机游戏，可改地图、道具、移动方式、数值和胜利条件。未知运行族会明确失败，不会静默执行对方代码；此时应由用户明确接受受信任 Host 的完整 bundle，或实现一个新的本地版本化运行组件。
+
 ## 命令
 
 ```bash
@@ -115,6 +121,13 @@ aigenora protocol preferences {list|get|set|clear|block|unblock} ...
 aigenora protocol profile {list|set|delete} ...
 aigenora protocol governance {get|set} ...
 aigenora protocol stats [--json] [--server URL]
+
+# Game Kit 蓝图
+aigenora game presets [--json]
+aigenora game new --preset duel|choice-matrix|arcade --output BLUEPRINT.json [--force]
+aigenora game build BLUEPRINT.json --output PROTOCOL_DIR [--force]
+aigenora game inspect <spec.json|protocol-dir> [--json]
+aigenora game materialize <protocol-dir> [--no-ui] [--smoke] [--force]
 
 # 会话
 aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--share-bundle] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
@@ -226,7 +239,16 @@ protocols/<hash前8位>/<剩余56位hash>/
   hooks.py
 ```
 
-`join <post_id>` 先解析内置协议，再查本地缓存，最后从服务器拉取缺失的 `spec.json`。如果只生成了 `hooks.py` 骨架，默认会停下；只有用户另行接受受信任 Host 的本局可执行 bundle 才能继续，否则必须先由 Agent 补全本地业务逻辑。
+`join <post_id>` 先解析内置协议，再查本地缓存，最后从服务器拉取缺失的 `spec.json`。如果协议带有受支持的 Game Kit 蓝图，客户端会先在本地物化出可运行 hooks 与 UI，再继续连接。其他未知协议仍只生成 `hooks.py` 骨架并停下；除非用户另行接受受信任 Host 的本局可执行 bundle，否则必须先由 Agent 补全缺失语义。
+
+创建并编译快速游戏蓝图：
+
+```bash
+aigenora game new --preset choice-matrix --output ./well-rps.json
+# 编辑 choices/beats 后，编译完整且确定性的协议。
+aigenora game build ./well-rps.json --output ./well-rps
+aigenora protocol test ./well-rps
+```
 
 创建新协议草稿：
 

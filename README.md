@@ -87,6 +87,12 @@ UI-only resolution is local/built-in first, then an explicitly accepted protocol
 
 The Guest verifies signed Session binding, paths, portable filename collisions, special-file rules, size limits, strict Base64, per-file SHA256, and the manifest before atomically installing under the current Session. Received hooks run only in a unique restricted subprocess; they are never imported by the main Agent process. The worker reduces risk but is **not a complete Python or OS security sandbox**, so accept executable bundles only from a Host the user explicitly trusts. Host P2P artifacts are never uploaded to the server, reused by later Sessions, or redistributed. UI and bundle source do not change `spec.json`, `protocol_id`, or Session Proof.
 
+### Game Kit fast materialization
+
+Game Kit makes changed or newly invented games joinable without asking the Guest Agent to write a protocol implementation from scratch. A supported blueprint lives inside `spec.rules.game_kit`, so the rules, map, items, visual profile, and victory condition are covered by the normal protocol hash. On `protocol fetch` or `join`, the Guest validates that blueprint and deterministically materializes trusted local `hooks.py` plus a self-contained local UI. No executable or web code is downloaded from the Host or community server.
+
+Version 1 includes three bounded runtime families: `choice-matrix` for sealed simultaneous games such as custom Rock-Paper-Scissors, `duel` for 2–4 player turn-based action arenas, and `arcade` for Host-authoritative tank/aircraft games with custom maps, power-ups, movement, balance, and victory modes. Unknown runtime families fail explicitly; use a trusted full Host bundle or implement a new versioned local runtime instead of silently executing peer code.
+
 ## Commands
 
 ```bash
@@ -119,6 +125,13 @@ aigenora protocol rules propose <spec.json> [--rules RULES.md] --output FILE [--
 aigenora protocol rules endorse <proposal.json> --decision accept|reject [--reason TEXT] --output FILE [--data-dir DIR]
 aigenora protocol rules freeze <proposal.json> --endorsement FILE [--endorsement FILE ...] --quorum N --output FILE [--data-dir DIR]
 aigenora protocol rules verify <artifact.json> [--json]
+
+# Game Kit blueprints
+aigenora game presets [--json]
+aigenora game new --preset duel|choice-matrix|arcade --output BLUEPRINT.json [--force]
+aigenora game build BLUEPRINT.json --output PROTOCOL_DIR [--force]
+aigenora game inspect <spec.json|protocol-dir> [--json]
+aigenora game materialize <protocol-dir> [--no-ui] [--smoke] [--force]
 
 # Sessions
 aigenora host [--server URL] [--data-dir DIR] --protocol-dir DIR [--options JSON] [--daemon] [--control-mode autonomous|hybrid|human] [--coach] [--share-ui] [--share-bundle] [--pace SECONDS] [--heartbeat-interval SECONDS] [--heartbeat-timeout SECONDS] [--invitation-ttl-minutes N] [--no-invitation-renew] [--allow-skeleton-hooks] [--web-on | --web auto|headless|off | --no-web | --no-browser] [extra_args...]
@@ -263,7 +276,16 @@ protocols/<first-8-hash>/<remaining-56-hash>/
   hooks.py
 ```
 
-`join <post_id>` resolves built-in protocols first, then the local cache, then fetches missing `spec.json` from the server. If it creates only a generated `hooks.py` skeleton, it stops unless the user separately accepts a trusted Host's current-Session executable bundle; otherwise the Agent must fill in local business logic before retrying.
+`join <post_id>` resolves built-in protocols first, then the local cache, then fetches missing `spec.json` from the server. A supported Game Kit blueprint is materialized locally into runnable hooks and UI before the connection continues. Other unknown protocols still receive a generated `hooks.py` skeleton and stop unless the user separately accepts a trusted Host's current-Session executable bundle or the Agent implements the missing semantics.
+
+Create and compile a fast game blueprint:
+
+```bash
+aigenora game new --preset choice-matrix --output ./well-rps.json
+# Edit choices/beats, then build a complete deterministic protocol.
+aigenora game build ./well-rps.json --output ./well-rps
+aigenora protocol test ./well-rps
+```
 
 Create a new protocol draft:
 

@@ -396,7 +396,13 @@ async def _join(args) -> int:
         ensure_control_mode_supported(load_hooks(proto_dir), control_mode)
     except Exception as exc:
         local_hooks_error = exc
-        if created_hooks and isinstance(exc, RuntimeError):
+        from aigenora.gamekit import has_game_blueprint
+
+        if (
+            created_hooks
+            and isinstance(exc, RuntimeError)
+            and not has_game_blueprint(spec)
+        ):
             local_hooks_error = RuntimeError(
                 f"protocol fetched to {proto_dir}; hooks.py is a freshly generated skeleton.\n"
                 f"{exc}"

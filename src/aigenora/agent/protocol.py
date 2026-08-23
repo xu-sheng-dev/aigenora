@@ -18,6 +18,7 @@ from aigenora.engine.p2p import memory_duplex, run_in_threads
 from aigenora.engine.rest import RestClient
 from aigenora.proto.engine import run_guest, run_host
 from aigenora.proto.spec_version import check_spec_version
+from aigenora.proto.validate import load_spec
 
 
 def _hash_dir(base: Path, proto_id: str) -> Path:
@@ -175,6 +176,33 @@ def fetch_protocol(client: RestClient, protocol_id: str, data_dir: str | None = 
             file=sys.stderr,
         )
 
+    from aigenora.gamekit import GameKitError, has_game_blueprint, materialize_protocol
+
+    if has_game_blueprint(spec):
+        from aigenora.agent.protocol_ui import has_usable_ui
+
+        try:
+            report = materialize_protocol(
+                out,
+                protocol_id=protocol_id,
+                include_ui=not has_usable_ui(out),
+                run_smoke=False,
+            )
+        except GameKitError as exc:
+            raise RuntimeError(
+                f"Game Kit blueprint materialization failed: {exc}"
+            ) from exc
+        created_hooks = report["hooks"] in {
+            "created",
+            "replaced_pristine",
+            "updated",
+        }
+        print(
+            f"[fetch] materialized local {report['preset']} runtime and UI in "
+            f"{report['elapsed_ms']} ms; no executable code was downloaded"
+        )
+        return out, created_hooks
+
     hooks = out / "hooks.py"
     created_hooks = False
     if not hooks.exists():
@@ -192,13 +220,40 @@ def prepare_protocol(client: RestClient, protocol_id: str, data_dir: str | None 
         proto_dir = path_for(protocol_id, data_dir)
     except FileNotFoundError:
         return fetch_protocol(client, protocol_id, data_dir, accept_ui=accept_ui)
-    if not (proto_dir / "hooks.py").exists():
-        raise RuntimeError(f"hooks.py not found in protocol dir: {proto_dir}")
     if accept_ui:
         from aigenora.agent.protocol_ui import fetch_platform_ui, has_usable_ui, read_ui_sidecar
         ui_sidecar = read_ui_sidecar(proto_dir) or {}
         if not has_usable_ui(proto_dir) or ui_sidecar.get("source_kind") == "host_p2p":
             fetch_platform_ui(client, protocol_id, proto_dir)
+    spec_path = proto_dir / "spec.json"
+    if not spec_path.exists():
+        if (proto_dir / "hooks.py").exists():
+            return proto_dir, False
+        raise RuntimeError(f"spec.json not found in protocol dir: {proto_dir}")
+    spec = load_spec(spec_path)
+    from aigenora.gamekit import GameKitError, has_game_blueprint, materialize_protocol
+
+    if has_game_blueprint(spec):
+        from aigenora.agent.protocol_ui import has_usable_ui
+
+        try:
+            report = materialize_protocol(
+                proto_dir,
+                protocol_id=protocol_id,
+                include_ui=not has_usable_ui(proto_dir),
+                run_smoke=False,
+            )
+        except GameKitError as exc:
+            raise RuntimeError(
+                f"Game Kit blueprint materialization failed: {exc}"
+            ) from exc
+        return proto_dir, report["hooks"] in {
+            "created",
+            "replaced_pristine",
+            "updated",
+        }
+    if not (proto_dir / "hooks.py").exists():
+        raise RuntimeError(f"hooks.py not found in protocol dir: {proto_dir}")
     return proto_dir, False
 
 
@@ -286,7 +341,13 @@ def run(args) -> int:
         out, created_hooks = fetch_protocol(RestClient(get_server(args.server), kp), args.protocol_id, args.data_dir, accept_ui=getattr(args, "accept_ui", False))
         print(args.protocol_id)
         if created_hooks:
-            print(f"[fetch] generated local hooks skeleton: {out / 'hooks.py'}")
+            from aigenora.gamekit import has_game_blueprint
+
+            spec = load_spec(out / "spec.json")
+            if has_game_blueprint(spec):
+                print(f"[fetch] generated trusted local Game Kit runtime: {out / 'hooks.py'}")
+            else:
+                print(f"[fetch] generated local hooks skeleton: {out / 'hooks.py'}")
         return 0
     if args.protocol_cmd == "test":
         protocol_dir = Path(args.protocol_dir)

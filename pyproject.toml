@@ -41,7 +41,7 @@ where = ["src"]
 include = ["aigenora*"]
 
 [tool.setuptools.package-data]
-"aigenora" = ["protocols/**/*", "runtime/catalog/*.json", "skill/*.md", "skill/protocols/**/*", "policy_scripts/*.py"]
+"aigenora" = ["protocols/**/*", "runtime/catalog/*.json", "skill/*.md", "skill/protocols/**/*", "policy_scripts/*.py", "gamekit/templates/**/*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["**/__pycache__/*", "**/*.pyc", "**/*.pyo"]

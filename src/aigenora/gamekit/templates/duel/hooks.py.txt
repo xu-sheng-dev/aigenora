@@ -1,0 +1,320 @@
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+
+from aigenora.proto.hooks import ProtocolHooks
+
+
+def _load_game():
+    spec_path = Path(__file__).with_name("spec.json")
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    rules = spec.get("rules")
+    game = rules.get("game_kit") if isinstance(rules, dict) else None
+    if not isinstance(game, dict) or game.get("schema") != "aigenora-game-kit/1":
+        raise ValueError("spec.rules.game_kit is missing or invalid")
+    if game.get("preset") != "duel":
+        raise ValueError("this generated hooks bundle supports only the duel preset")
+    combat = game.get("combat")
+    actions = game.get("actions")
+    if not isinstance(combat, dict) or not isinstance(actions, list) or not actions:
+        raise ValueError("game kit combat and actions must be declared")
+    return game
+
+
+GAME = _load_game()
+ACTIONS = {item["id"]: item for item in GAME["actions"]}
+
+
+class Hooks(ProtocolHooks):
+    SUPPORTED_CONTROL_MODES = ("autonomous", "hybrid", "human")
+
+    def proto_host_metadata(self):
+        return (
+            GAME["name"],
+            "game,game-kit,authoritative-group,duel",
+            "supply",
+            {"preset": "duel", "players": GAME["players"], "theme": GAME["theme"]},
+        )
+
+    def proto_group_initial_state(self, members):
+        active = sorted(
+            [member for member in members if member.get("status") == "active"],
+            key=lambda member: member["seat"],
+        )
+        if len(active) != int(GAME["players"]):
+            raise ValueError("the generated game requires its configured player count")
+        combat = GAME["combat"]
+        order = [member["public_key"] for member in active]
+        state = {
+            "phase": "playing",
+            "game": copy.deepcopy(GAME),
+            "turn_number": 1,
+            "turn_order": order,
+            "current_player": order[0],
+            "players": {
+                member["public_key"]: {
+                    "seat": member["seat"],
+                    "health": int(combat["starting_health"]),
+                    "max_health": int(combat["starting_health"]),
+                    "energy": int(combat["starting_energy"]),
+                    "max_energy": int(combat["max_energy"]),
+                    "shield": 0,
+                    "alive": True,
+                }
+                for member in active
+            },
+            "history": [],
+            "last_action": None,
+            "winner": "",
+            "leader_changes": 0,
+        }
+        self._remember(
+            state,
+            {
+                "kind": "arena_opened",
+                "turn": 0,
+                "actor": "",
+                "summary": f"{len(active)} signals entered the arena.",
+            },
+        )
+        return state
+
+    def proto_group_member_joined(self, state, member):
+        return {
+            "state": state,
+            "events": [
+                {
+                    "kind": "member_rejoined",
+                    "public_key": member["public_key"],
+                    "seat": member["seat"],
+                }
+            ],
+        }
+
+    def proto_group_member_left(self, state, member, reason):
+        return {
+            "state": state,
+            "events": [
+                {
+                    "kind": "member_disconnected",
+                    "public_key": member["public_key"],
+                    "reason": str(reason)[:64],
+                }
+            ],
+        }
+
+    def proto_group_handle(self, state, actor, action):
+        if state.get("phase") != "playing":
+            raise ValueError("the generated game is already complete")
+        public_key = actor.get("public_key")
+        if public_key != state.get("current_player"):
+            raise ValueError("it is not this Member's turn")
+        if not isinstance(action, dict):
+            raise ValueError("game action must be an object")
+        kind = action.get("kind")
+        if kind == "concede":
+            if set(action) != {"kind"}:
+                raise ValueError("concede accepts no extra fields")
+            return self._concede(state, public_key)
+        if kind != "play":
+            raise ValueError("game action kind must be play or concede")
+        unknown = set(action) - {"kind", "move", "target_public_key"}
+        if unknown:
+            raise ValueError("game action contains unknown fields")
+        move = action.get("move")
+        card = ACTIONS.get(move)
+        if card is None:
+            raise ValueError("move is not declared by this generated game")
+        player = state["players"][public_key]
+        cost = int(card["cost"])
+        if int(player["energy"]) < cost:
+            raise ValueError("not enough energy for this move")
+        player["energy"] -= cost
+        effect = card["effect"]
+        target = ""
+        resolved = 0
+        details = []
+        if effect == "damage":
+            target = self._target(state, public_key, action.get("target_public_key"))
+            resolved, absorbed = self._damage(state, target, int(card["power"]))
+            details.append({"target": target, "damage": resolved, "absorbed": absorbed})
+        elif effect == "damage_all":
+            for candidate in state["turn_order"]:
+                if candidate == public_key or not state["players"][candidate]["alive"]:
+                    continue
+                damage, absorbed = self._damage(state, candidate, int(card["power"]))
+                resolved += damage
+                details.append(
+                    {"target": candidate, "damage": damage, "absorbed": absorbed}
+                )
+        elif effect == "guard":
+            player["shield"] += int(card["power"])
+            resolved = int(card["power"])
+        elif effect == "heal":
+            before = int(player["health"])
+            player["health"] = min(
+                int(player["max_health"]), before + int(card["power"])
+            )
+            resolved = int(player["health"]) - before
+        elif effect == "charge":
+            before = int(player["energy"])
+            player["energy"] = min(
+                int(player["max_energy"]), before + int(card["power"])
+            )
+            resolved = int(player["energy"]) - before
+        else:
+            raise ValueError("unsupported generated game effect")
+        player["energy"] = min(
+            int(player["max_energy"]), int(player["energy"]) + int(card["gain"])
+        )
+        event = {
+            "kind": "move_resolved",
+            "turn": int(state["turn_number"]),
+            "actor": public_key,
+            "move": move,
+            "label": card["label"],
+            "effect": effect,
+            "target": target,
+            "resolved": resolved,
+            "details": details,
+            "summary": f"Seat {player['seat'] + 1} used {card['label']}.",
+        }
+        self._remember(state, event)
+        return self._finish_turn(state, public_key, [event])
+
+    def proto_group_view(self, state, viewer):
+        view = copy.deepcopy(state)
+        view["you"] = {
+            "public_key": viewer["public_key"],
+            "seat": viewer["seat"],
+        }
+        return view
+
+    def proto_group_recovery_snapshot(self, state):
+        return copy.deepcopy(state)
+
+    def proto_group_restore(self, checkpoint, members, new_epoch):
+        del members, new_epoch
+        if not isinstance(checkpoint, dict) or checkpoint.get("game") != GAME:
+            raise ValueError("game kit checkpoint does not match this protocol")
+        return copy.deepcopy(checkpoint)
+
+    def proto_group_on_leader_changed(self, state, old_leader, new_leader):
+        state["leader_changes"] = int(state.get("leader_changes", 0)) + 1
+        event = {
+            "kind": "leader_changed",
+            "turn": int(state.get("turn_number", 0)),
+            "actor": "",
+            "old_leader": old_leader,
+            "new_leader": new_leader,
+            "summary": "Authority moved to a verified successor without resetting the arena.",
+        }
+        self._remember(state, event)
+        return {"state": state, "events": [event]}
+
+    def _remember(self, state, event):
+        history = list(state.get("history") or [])
+        history.append(copy.deepcopy(event))
+        state["history"] = history[-18:]
+        state["last_action"] = copy.deepcopy(event)
+
+    def _target(self, state, actor, requested):
+        players = state["players"]
+        if isinstance(requested, str) and requested:
+            if requested == actor or requested not in players or not players[requested]["alive"]:
+                raise ValueError("target_public_key must name an active rival")
+            return requested
+        rivals = [
+            key
+            for key in state["turn_order"]
+            if key != actor and state["players"][key]["alive"]
+        ]
+        if len(rivals) == 1:
+            return rivals[0]
+        raise ValueError("target_public_key is required when multiple rivals remain")
+
+    @staticmethod
+    def _damage(state, target, amount):
+        player = state["players"][target]
+        absorbed = min(int(player["shield"]), amount)
+        player["shield"] -= absorbed
+        damage = amount - absorbed
+        before = int(player["health"])
+        player["health"] = max(0, before - damage)
+        dealt = before - int(player["health"])
+        if player["health"] == 0:
+            player["alive"] = False
+        return dealt, absorbed
+
+    def _concede(self, state, public_key):
+        player = state["players"][public_key]
+        player["health"] = 0
+        player["alive"] = False
+        event = {
+            "kind": "conceded",
+            "turn": int(state["turn_number"]),
+            "actor": public_key,
+            "summary": f"Seat {player['seat'] + 1} released its signal.",
+        }
+        self._remember(state, event)
+        return self._finish_turn(state, public_key, [event])
+
+    def _finish_turn(self, state, actor, events):
+        alive = [
+            key for key in state["turn_order"] if state["players"][key]["alive"]
+        ]
+        if len(alive) <= 1:
+            winner = alive[0] if alive else "draw"
+            return self._complete(state, winner, events)
+        if int(state["turn_number"]) >= int(GAME["combat"]["max_turns"]):
+            scores = {
+                key: int(state["players"][key]["health"])
+                + int(state["players"][key]["shield"])
+                for key in alive
+            }
+            highest = max(scores.values())
+            leaders = [key for key, score in scores.items() if score == highest]
+            return self._complete(
+                state, leaders[0] if len(leaders) == 1 else "draw", events
+            )
+        order = state["turn_order"]
+        index = order.index(actor)
+        next_player = ""
+        for offset in range(1, len(order) + 1):
+            candidate = order[(index + offset) % len(order)]
+            if state["players"][candidate]["alive"]:
+                next_player = candidate
+                break
+        if not next_player:
+            return self._complete(state, "draw", events)
+        state["turn_number"] = int(state["turn_number"]) + 1
+        state["current_player"] = next_player
+        player = state["players"][next_player]
+        player["energy"] = min(
+            int(player["max_energy"]),
+            int(player["energy"]) + int(GAME["combat"]["energy_per_turn"]),
+        )
+        return {"state": state, "events": events}
+
+    def _complete(self, state, winner, events):
+        state["phase"] = "complete"
+        state["winner"] = winner
+        state["current_player"] = ""
+        event = {
+            "kind": "game_over",
+            "turn": int(state["turn_number"]),
+            "actor": "",
+            "winner": winner,
+            "summary": "The arena resolved with a draw."
+            if winner == "draw"
+            else f"Seat {state['players'][winner]['seat'] + 1} holds the final signal.",
+        }
+        self._remember(state, event)
+        return {
+            "state": state,
+            "events": events + [event],
+            "completed": True,
+            "outcome": winner,
+        }

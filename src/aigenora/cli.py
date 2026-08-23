@@ -171,6 +171,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--offline", action="store_true")
     p.add_argument("--json", action="store_true", dest="json_output")
 
+    game = sub.add_parser(
+        "game",
+        help="Create and materialize deterministic local Game Kit protocols",
+    )
+    game_sub = game.add_subparsers(dest="game_cmd", required=True)
+    game_presets = game_sub.add_parser("presets", help="List supported Game Kit presets")
+    game_presets.add_argument("--json", action="store_true", dest="json_output")
+    game_new = game_sub.add_parser("new", help="Write an editable Game Kit blueprint")
+    game_new.add_argument(
+        "--preset",
+        choices=["duel", "choice-matrix", "arcade"],
+        default="duel",
+    )
+    game_new.add_argument("--output", required=True)
+    game_new.add_argument("--force", action="store_true")
+    game_build = game_sub.add_parser(
+        "build", help="Compile and smoke-test a blueprint into a complete protocol"
+    )
+    game_build.add_argument("blueprint")
+    game_build.add_argument("--output", required=True)
+    game_build.add_argument("--force", action="store_true")
+    game_inspect = game_sub.add_parser(
+        "inspect", help="Report whether a spec can be materialized locally"
+    )
+    game_inspect.add_argument("source")
+    game_inspect.add_argument("--json", action="store_true", dest="json_output")
+    game_materialize = game_sub.add_parser(
+        "materialize", help="Generate trusted local hooks and UI from spec.json"
+    )
+    game_materialize.add_argument("protocol_dir")
+    game_materialize.add_argument("--force", action="store_true")
+    game_materialize.add_argument("--no-ui", action="store_true")
+    game_materialize.add_argument("--smoke", action="store_true")
+
     proto = sub.add_parser("protocol")
     proto_sub = proto.add_subparsers(dest="protocol_cmd", required=True)
     hp = proto_sub.add_parser("hash")
@@ -775,6 +809,8 @@ def main(argv: list[str] | None = None) -> int:
         from aigenora.agent.doctor import run
     elif args.cmd == "bootstrap":
         from aigenora.agent.bootstrap import run as run
+    elif args.cmd == "game":
+        from aigenora.agent.game import run
     elif args.cmd == "protocol":
         from aigenora.agent.protocol import run
     elif args.cmd == "feedback":

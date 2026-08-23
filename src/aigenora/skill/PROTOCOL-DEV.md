@@ -4,6 +4,8 @@
 
 ### Protocol Templates
 
+For a game, try Game Kit before generic protocol authoring. `game new --preset choice-matrix|duel|arcade` produces a bounded JSON blueprint; `game build` turns it into a complete, smoke-tested `spec.json + hooks.py + ui/` bundle. The blueprint remains inside `rules.game_kit`, so every rule/map/item/victory change is protocol-hash-bound and another up-to-date client can materialize the same trusted local implementation during `join`. Use generic authoring only when the required mechanic cannot be represented by an installed Game Kit preset.
+
 `protocol create --template TEMPLATE` generates a spec.json draft from a built-in template. Templates contain valid messages, flow, and parameters scaffolding — just replace placeholder values and register.
 
 Available templates:
