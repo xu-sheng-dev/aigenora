@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Trusted Agent Task · Aigenora</title>
+  <style>
+    :root{--ink:#101c2b;--paper:#f4f6fa;--line:#c9d3e0;--accent:#2b5d8a;--muted:#5c6b7d}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--paper);color:var(--ink);font:14px/1.55 system-ui,Segoe UI,sans-serif}
+    main{max-width:760px;margin:auto;padding:26px 18px 40px}
+    .mark{color:var(--accent);font:10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.22em}
+    h1{margin:6px 0 4px;font-size:26px;font-weight:600}
+    .sub{color:var(--muted);font-size:12.5px;margin-bottom:18px}
+    .card{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px 16px;margin-bottom:14px}
+    .card h2{margin:0 0 8px;font:10px ui-monospace,Consolas,monospace;letter-spacing:.16em;color:var(--accent)}
+    dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:0}
+    dt{color:var(--muted)}dd{margin:0;font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+    .state{display:inline-block;padding:2px 9px;border-radius:11px;background:#e4edf5;color:var(--accent);font:700 11px ui-monospace,Consolas,monospace;letter-spacing:.08em}
+    ul{margin:0;padding-left:18px}.note{margin-bottom:6px;overflow-wrap:anywhere}
+    .status{min-height:20px;color:var(--muted);font:11px ui-monospace,Consolas,monospace}.status.error{color:#b03a2e}
+    code{background:#eef2f7;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
+  </style>
+</head>
+<body>
+<main>
+  <div class="mark">AIGENORA · TRUSTED PEER CHANNEL</div>
+  <h1>Trusted Agent Task</h1>
+  <p class="sub">Read-only status view for <code>trusted-agent-task-v1</code> sessions. The operating
+  surface for cross-device collaboration is the <code>aigenora collab</code> CLI (submit / status /
+  chat / answer / pull on the coordinator, worker on the peer host); this page only observes the
+  generic-engine smoke session.</p>
+  <section class="card">
+    <h2>TASK STATUS</h2>
+    <dl>
+      <dt>task_id</dt><dd id="task-id">—</dd>
+      <dt>state</dt><dd><span class="state" id="state">WAITING</span></dd>
+      <dt>revision</dt><dd id="revision">—</dd>
+      <dt>events</dt><dd id="events">—</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>COORDINATOR NOTES</h2>
+    <ul id="notes"><li class="note">No notes yet.</li></ul>
+  </section>
+  <div class="status" id="status" role="status"></div>
+</main>
+<script>
+(function(){
+  "use strict";
+  var ORIGIN=new URLSearchParams(location.search).get("parent")||location.origin,pending={};
+  function post(message){parent.postMessage(Object.assign({source:"aigenora-ui"},message),ORIGIN)}
+  function request(method,body){return new Promise(function(resolve,reject){var id="task_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),timer=setTimeout(function(){delete pending[id];reject(new Error("bridge timeout"))},5000);pending[id]=function(value){clearTimeout(timer);resolve(value)};post({type:"request",id:id,method:method,body:body})})}
+  window.addEventListener("message",function(event){if(event.origin!==ORIGIN)return;var data=event.data||{};if(data.source!=="aigenora-broadcast")return;if(data.type==="hello-ack"){request("snapshot").then(receive).catch(fail);return}if(data.type==="response"&&pending[data.id]){var cb=pending[data.id];delete pending[data.id];cb(data);return}if(data.type==="push"&&data.event==="snapshot")apply(data.data)});
+  function receive(response){if(response.ok)apply(response.data);else fail(new Error((response.data&&(response.data.error||response.data.reason))||response.error||("HTTP "+response.status)))}
+  function apply(snapshot){
+    if(!snapshot||typeof snapshot!=="object")return;
+    var view=snapshot.public_view||snapshot.public||snapshot;
+    var status=view.last_response||view.response||view;
+    document.getElementById("task-id").textContent=String(status.task_id||view.task_id||"—");
+    var state=String(status.state||view.state||"waiting").toUpperCase();
+    document.getElementById("state").textContent=state;
+    document.getElementById("revision").textContent=String(status.revision??view.revision??"—");
+    var events=status.events||view.events||[];
+    document.getElementById("events").textContent=Array.isArray(events)?String(events.length):"—";
+    var notes=status.notes||view.notes||[];
+    var box=document.getElementById("notes");box.replaceChildren();
+    if(!Array.isArray(notes)||!notes.length){var li=document.createElement("li");li.className="note";li.textContent="No notes yet.";box.append(li);return}
+    notes.forEach(function(note){var li=document.createElement("li");li.className="note";li.textContent=(note.from?note.from+": ":"")+String(note.text||note.message||"");box.append(li)})
+  }
+  function fail(error){var el=document.getElementById("status");el.textContent=error.message||String(error);el.className="status error"}
+  post({type:"hello",capabilities:["snapshot"]});
+})();
+</script>
+</body>
+</html>
