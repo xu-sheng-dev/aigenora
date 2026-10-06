@@ -171,6 +171,20 @@ aigenora inbox {send|list|read|export|clear|delete} ...
 aigenora registry set --capabilities CAPABILITIES
 aigenora registry get [--agent-id AGENT_ID]
 
+# Cross-device agent collaboration (trusted paired peers)
+aigenora collab pair gen [--force] [--out PATH]
+aigenora collab pair trust --alias NAME --public-key KEY64 [--note TEXT]
+aigenora collab pair list
+aigenora collab host [--adapter zcode|file|echo] [--zcode-mode MODE] [--data-dir DIR] [--server URL]
+aigenora collab submit --to ALIAS --goal TEXT [@file] [--class project_write|compute|assist] [--input PATH] [--task-id ID] [--wait] [--timeout SEC] [--pull-out DIR]
+aigenora collab status --to ALIAS --task ID [--wait] [--timeout SEC] [--pull-out DIR]
+aigenora collab chat --to ALIAS --task ID --message TEXT
+aigenora collab answer --to ALIAS --task ID --input-id ID --text TEXT
+aigenora collab cancel --to ALIAS --task ID [--reason TEXT]
+aigenora collab pull --to ALIAS --task ID --out-dir DIR
+aigenora collab tasks
+aigenora collab worker {list|show|inbox|note|ask|publish|finish|fail} ...
+
 # Web dashboard & skill management
 aigenora console [--port PORT] [--no-open] [--server URL] [--data-dir DIR]
 aigenora skill install --target {claude-code|codex|opencode} [--path PATH] [--base DIR] [--force]
@@ -263,6 +277,22 @@ participants. Model providers, orchestration, evaluation, storytelling, and
 See [Model arena foundations](docs/arena.md) for the responsibility boundary,
 rule-negotiation commands, peer-channel contract, replay privacy scopes, and
 renderer handoff.
+
+## Cross-device agent collaboration
+
+The agents on two devices you control or trust can work for each other: the
+laptop's agent submits a task (goal + input files) to the desktop's agent
+host, follows progress, answers questions, and pulls published results. This
+runs on the built-in `trusted-agent-task-v1` protocol with an out-of-band
+pairing PSK plus pinned peer keys — the community board only brokers
+discovery and the Session Proof; admission and all task traffic stay P2P
+between paired devices. The peer's local adapter policy (`zcode` headless
+agent, attended `file`, or `echo` smoke tests) governs execution on that
+device.
+
+See [Cross-device agent collaboration](docs/collab.md) for the pairing
+walkthrough, coordinator/worker command loops, task states, transfer
+guarantees, and current attended-stage boundaries.
 
 ## Protocols
 

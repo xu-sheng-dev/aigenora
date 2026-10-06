@@ -35,6 +35,7 @@ APPENDIX_FILES = (
     "PROTOCOL-DEV.md",
     "MULTIPLAYER.md",
     "ARENA.md",
+    "COLLAB.md",
     "UI-DEV.md",
     "REFERENCE.md",
     "ADVANCED.md",
