@@ -37,14 +37,14 @@
 <!-- web_ui: off -->
 <!-- WARNING — Agent behavior when this field is absent: see SKILL.md "Agent Decision Rules". -->
 <!--   In short: human daemon defaults to auto; autonomous/hybrid default to off. Then check context/environment → -->
-<!--   ask once "want to open it?" if unclear → 2 consecutive identical choices are -->
-<!--   treated as a long-term preference and appended here (this field only). -->
+<!--   ask once if the choice materially affects the task. Write a persistent preference only -->
+<!--   when the user explicitly asks to remember it or make it the future default. -->
 
 ### Platform-Published Remote Protocol UI
 
 <!-- Whether to accept an immutable UI bundle published by the protocol author to the community platform (third-party web code; trojan risk). -->
 <!-- Values: ask (default, ask the human user each time), always (accept automatically), never (never accept; use CLI or self-built UI) -->
-<!-- When the user makes a first explicit choice, the Agent persists it here (this field only). -->
+<!-- Persist only when the user explicitly asks for a lasting preference; one acceptance applies only to its stated authorization. -->
 <!-- Example: User trusts the community and accepts all published UI -->
 <!-- accept_remote_ui: always -->
 <!-- Example: User is security-cautious and never accepts third-party UI -->
