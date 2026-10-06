@@ -1,0 +1,200 @@
+{
+  "name": "Trusted Agent Task",
+  "spec_version": "1.0",
+  "description": "Trusted cross-device agent collaboration: durable task delegation, artifact batch transfer, and agent-to-agent guidance messages (M1a in-stream admission profile)",
+  "type": "service",
+  "family": "trusted-agent-task-v1",
+  "flow": {"mode": "session_loop"},
+  "messages": [
+    {
+      "name": "task_submit",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["task_submit"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "request_digest": {"type": "hash", "required": true},
+        "task_goal": {"type": "text", "max_length": 262144, "required": true},
+        "execution_class": {"type": "enum", "values": ["project_write", "compute", "assist"], "required": true},
+        "input_manifest": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": false},
+        "expires_at_ms": {"type": "integer", "min": 0, "required": true}
+      }
+    },
+    {
+      "name": "agent_note",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["agent_note"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "note_id": {"type": "id", "required": true},
+        "note_text": {"type": "text", "max_length": 65536, "required": true}
+      }
+    },
+    {
+      "name": "status_query",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["status_query"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "after_event_id": {"type": "integer", "min": 0, "required": true}
+      }
+    },
+    {
+      "name": "artifact_offer",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["artifact_offer"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "artifact_id": {"type": "id", "required": true},
+        "artifact_kind": {"type": "enum", "values": ["input", "result"], "required": true},
+        "files": {"type": "json", "container": "array", "max_total_bytes": 1048576, "required": true}
+      }
+    },
+    {
+      "name": "artifact_put",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["artifact_put"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "artifact_id": {"type": "id", "required": true},
+        "chunks": {"type": "json", "container": "array", "max_total_bytes": 2097152, "required": true}
+      }
+    },
+    {
+      "name": "artifact_pull",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["artifact_pull"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "artifact_id": {"type": "id", "required": true},
+        "paths": {"type": "json", "container": "array", "max_total_bytes": 1048576, "required": true},
+        "cursor": {"type": "json", "container": "object", "max_total_bytes": 262144, "required": false}
+      }
+    },
+    {
+      "name": "result_ack",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["result_ack"], "required": true},
+        "task_id": {"type": "id", "required": true}
+      }
+    },
+    {
+      "name": "cancel_request",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["cancel_request"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "reason": {"type": "text", "max_length": 2000, "required": false}
+      }
+    },
+    {
+      "name": "input_submit",
+      "direction": "guest_to_host",
+      "fields": {
+        "action": {"type": "enum", "values": ["input_submit"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "input_id": {"type": "id", "required": true},
+        "answer": {"type": "text", "max_length": 65536, "required": true}
+      }
+    },
+    {
+      "name": "task_received",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["task_received"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "accepted": {"type": "boolean", "required": true},
+        "state": {"type": "enum", "values": ["received", "waiting_inputs", "queued", "dispatching", "running", "waiting_local_operator", "cancel_requested", "execution_unknown", "export_check", "completed", "failed", "rejected", "cancelled", "expired"], "required": true},
+        "reason_code": {"type": "enum", "values": ["ok", "duplicate", "idempotency_conflict", "not_authorized", "queue_full", "storage_full", "message_expired", "clock_skew_detected", "state_conflict"], "required": true},
+        "revision": {"type": "integer", "min": 0, "required": true},
+        "detail": {"type": "text", "max_length": 2000, "required": false}
+      }
+    },
+    {
+      "name": "task_status",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["task_status"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "state": {"type": "enum", "values": ["received", "waiting_inputs", "queued", "dispatching", "running", "waiting_local_operator", "cancel_requested", "execution_unknown", "export_check", "completed", "failed", "rejected", "cancelled", "expired"], "required": true},
+        "revision": {"type": "integer", "min": 0, "required": true},
+        "events": {"type": "json", "container": "array", "max_total_bytes": 524288, "required": true},
+        "notes": {"type": "json", "container": "array", "max_total_bytes": 524288, "required": true},
+        "execution": {"type": "json", "container": "object", "max_total_bytes": 65536, "required": false},
+        "input_request": {"type": "json", "container": "object", "max_total_bytes": 65536, "required": false},
+        "result_manifest": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": false}
+      }
+    },
+    {
+      "name": "artifact_ack",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["artifact_ack"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "artifact_id": {"type": "id", "required": true},
+        "artifact_state": {"type": "enum", "values": ["partial", "complete", "verified_failed"], "required": true},
+        "files": {"type": "json", "container": "array", "max_total_bytes": 1048576, "required": true}
+      }
+    },
+    {
+      "name": "artifact_data",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["artifact_data"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "artifact_id": {"type": "id", "required": true},
+        "chunks": {"type": "json", "container": "array", "max_total_bytes": 2097152, "required": true},
+        "cursor": {"type": "json", "container": "object", "max_total_bytes": 262144, "required": true},
+        "done": {"type": "boolean", "required": true}
+      }
+    },
+    {
+      "name": "note_ack",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["note_ack"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "note_id": {"type": "id", "required": true},
+        "duplicate": {"type": "boolean", "required": false}
+      }
+    },
+    {
+      "name": "cancel_ack",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["cancel_ack"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "state": {"type": "enum", "values": ["received", "waiting_inputs", "queued", "dispatching", "running", "waiting_local_operator", "cancel_requested", "execution_unknown", "export_check", "completed", "failed", "rejected", "cancelled", "expired"], "required": true}
+      }
+    },
+    {
+      "name": "input_ack",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["input_ack"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "input_id": {"type": "id", "required": true}
+      }
+    },
+    {
+      "name": "receipt",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["receipt"], "required": true},
+        "task_id": {"type": "id", "required": true},
+        "result_state": {"type": "enum", "values": ["completed", "failed", "cancelled"], "required": true},
+        "summary": {"type": "text", "max_length": 65536, "required": true},
+        "result_manifest": {"type": "json", "container": "object", "max_total_bytes": 1048576, "required": false}
+      }
+    },
+    {
+      "name": "error",
+      "direction": "host_to_guest",
+      "fields": {
+        "action": {"type": "enum", "values": ["error"], "required": true},
+        "error_code": {"type": "enum", "values": ["invalid_message", "unknown_task", "task_state_conflict", "idempotency_conflict", "storage_full", "path_unsafe", "artifact_incomplete", "artifact_unknown", "unauthorized", "message_expired", "clock_skew_detected", "queue_busy", "adapter_error", "internal_error"], "required": true},
+        "detail": {"type": "text", "max_length": 500, "required": true}
+      }
+    }
+  ]
+}

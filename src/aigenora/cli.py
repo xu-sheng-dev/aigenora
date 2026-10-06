@@ -468,6 +468,14 @@ def build_parser() -> argparse.ArgumentParser:
     ibd.add_argument("--json", action="store_true", dest="json_output")
     _common(ibd)
 
+    # collab namespace: trusted cross-device agent collaboration
+    collab = sub.add_parser(
+        "collab",
+        help="Trusted cross-device agent collaboration (pairing, task service, worker adapters)",
+    )
+    from aigenora.collab.cli import build_parser as _build_collab
+    _build_collab(collab)
+
     # session namespace
     sess = sub.add_parser("session")
     sess_sub = sess.add_subparsers(dest="session_cmd", required=True)
@@ -930,6 +938,10 @@ def main(argv: list[str] | None = None) -> int:
         from aigenora.agent.ceremony import run
     elif args.cmd == "skill":
         from aigenora.agent.skill import run as run
+    elif args.cmd == "collab":
+        from aigenora.collab import cli as collab_cli
+
+        run = collab_cli.run
     else:
         raise RuntimeError(args.cmd)
     return run(args)

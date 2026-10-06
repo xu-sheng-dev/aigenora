@@ -378,8 +378,18 @@
       "description": "1v1 MOBA-style hero duel with declarative balance (v015). Hero numbers (HP/mana/regen/atk + 3 skills) live in options.balance, held identically by both sides; per round commit-reveal a move (normal/skill_a/skill_b/ult), damage resolves simultaneously; first to drop the foe's HP to 0 (or higher HP at max_rounds) wins.",
       "type": "game",
       "family": "hero-duel",
-      "tags": ["game", "hero-duel", "moba", "balance"],
-      "capabilities": ["hero_duel", "declarative_balance", "simultaneous_damage", "skill_cooldown"],
+      "tags": [
+        "game",
+        "hero-duel",
+        "moba",
+        "balance"
+      ],
+      "capabilities": [
+        "hero_duel",
+        "declarative_balance",
+        "simultaneous_damage",
+        "skill_cooldown"
+      ],
       "status": "active",
       "protocol_id": "df2d0709aa159798680cfcb7106d4d3b0a8eee002b5644044dc0ed0b8d06092a",
       "path": "df2d0709/aa159798680cfcb7106d4d3b0a8eee002b5644044dc0ed0b8d06092a",
@@ -392,22 +402,90 @@
           "options": {
             "max_rounds": 30,
             "balance": {
-              "warrior": {"hp": 250, "mana": 80, "mana_regen": 15, "atk": 25,
-                "skill_a": {"dmg": 50, "cost": 20, "cd": 2},
-                "skill_b": {"dmg": 70, "cost": 35, "cd": 3},
-                "ult": {"dmg": 120, "cost": 60, "cd": 5}},
-              "mage": {"hp": 150, "mana": 120, "mana_regen": 20, "atk": 12,
-                "skill_a": {"dmg": 60, "cost": 25, "cd": 2},
-                "skill_b": {"dmg": 90, "cost": 45, "cd": 3},
-                "ult": {"dmg": 180, "cost": 80, "cd": 5}},
-              "assassin": {"hp": 180, "mana": 60, "mana_regen": 12, "atk": 35,
-                "skill_a": {"dmg": 45, "cost": 15, "cd": 1},
-                "skill_b": {"dmg": 65, "cost": 30, "cd": 2},
-                "ult": {"dmg": 110, "cost": 50, "cd": 4}},
-              "tank": {"hp": 350, "mana": 70, "mana_regen": 14, "atk": 18,
-                "skill_a": {"dmg": 35, "cost": 18, "cd": 2},
-                "skill_b": {"dmg": 55, "cost": 30, "cd": 3},
-                "ult": {"dmg": 90, "cost": 55, "cd": 5}}
+              "warrior": {
+                "hp": 250,
+                "mana": 80,
+                "mana_regen": 15,
+                "atk": 25,
+                "skill_a": {
+                  "dmg": 50,
+                  "cost": 20,
+                  "cd": 2
+                },
+                "skill_b": {
+                  "dmg": 70,
+                  "cost": 35,
+                  "cd": 3
+                },
+                "ult": {
+                  "dmg": 120,
+                  "cost": 60,
+                  "cd": 5
+                }
+              },
+              "mage": {
+                "hp": 150,
+                "mana": 120,
+                "mana_regen": 20,
+                "atk": 12,
+                "skill_a": {
+                  "dmg": 60,
+                  "cost": 25,
+                  "cd": 2
+                },
+                "skill_b": {
+                  "dmg": 90,
+                  "cost": 45,
+                  "cd": 3
+                },
+                "ult": {
+                  "dmg": 180,
+                  "cost": 80,
+                  "cd": 5
+                }
+              },
+              "assassin": {
+                "hp": 180,
+                "mana": 60,
+                "mana_regen": 12,
+                "atk": 35,
+                "skill_a": {
+                  "dmg": 45,
+                  "cost": 15,
+                  "cd": 1
+                },
+                "skill_b": {
+                  "dmg": 65,
+                  "cost": 30,
+                  "cd": 2
+                },
+                "ult": {
+                  "dmg": 110,
+                  "cost": 50,
+                  "cd": 4
+                }
+              },
+              "tank": {
+                "hp": 350,
+                "mana": 70,
+                "mana_regen": 14,
+                "atk": 18,
+                "skill_a": {
+                  "dmg": 35,
+                  "cost": 18,
+                  "cd": 2
+                },
+                "skill_b": {
+                  "dmg": 55,
+                  "cost": 30,
+                  "cd": 3
+                },
+                "ult": {
+                  "dmg": 90,
+                  "cost": 55,
+                  "cd": 5
+                }
+              }
             }
           }
         }
@@ -424,8 +502,18 @@
       "description": "Shedding card game over the mental_poker engine (v016 M2). Cheat-detectable fair dealing: hidden cards are never sent in cleartext (each drawn card is privately recovered via oblivious transfer) and a post-game opening + witness audit catches dealt-card peeking and forged keys. NOT for high-stakes use. Simplified: no starting discard (first play unconstrained) and drawing ends the turn.",
       "type": "game",
       "family": "crazy-eights",
-      "tags": ["game", "cards", "crazy-eights", "shedding"],
-      "capabilities": ["turn-based", "mental-poker", "draw", "cheat-detectable"],
+      "tags": [
+        "game",
+        "cards",
+        "crazy-eights",
+        "shedding"
+      ],
+      "capabilities": [
+        "turn-based",
+        "mental-poker",
+        "draw",
+        "cheat-detectable"
+      ],
       "status": "active",
       "protocol_id": "3a3c352ac09a83a3c0877a5585fcd8c03fa4b85b873601f2fe3ba734474a64ae",
       "path": "3a3c352a/c09a83a3c0877a5585fcd8c03fa4b85b873601f2fe3ba734474a64ae",
@@ -433,9 +521,24 @@
       "created_reason": "v016 M2: mental_poker shedding card game (Crazy Eights)",
       "default_profile": "standard",
       "profiles": {
-        "quick": {"description": "3-card hand, fast", "options": {"hand_size": 3}},
-        "standard": {"description": "5-card hand", "options": {"hand_size": 5}},
-        "long": {"description": "7-card hand", "options": {"hand_size": 7}}
+        "quick": {
+          "description": "3-card hand, fast",
+          "options": {
+            "hand_size": 3
+          }
+        },
+        "standard": {
+          "description": "5-card hand",
+          "options": {
+            "hand_size": 5
+          }
+        },
+        "long": {
+          "description": "7-card hand",
+          "options": {
+            "hand_size": 7
+          }
+        }
       },
       "entrypoints": {
         "host": "aigenora host --protocol-dir",
@@ -449,8 +552,18 @@
       "description": "Trick-taking card game over the mental_poker engine (v016 M2). Cheat-detectable fair dealing: hidden cards are never sent in cleartext (each drawn card is privately recovered via oblivious transfer) and a post-game opening + witness audit catches dealt-card peeking and forged keys. NOT for high-stakes use. Simplified (ADR-8/9): deterministic trump suit (same every game, no indicator card); fixed leader/follower (host leads, guest follows); symmetric refills.",
       "type": "game",
       "family": "briscola",
-      "tags": ["game", "cards", "briscola", "trick-taking"],
-      "capabilities": ["turn-based", "mental-poker", "trick-taking", "cheat-detectable"],
+      "tags": [
+        "game",
+        "cards",
+        "briscola",
+        "trick-taking"
+      ],
+      "capabilities": [
+        "turn-based",
+        "mental-poker",
+        "trick-taking",
+        "cheat-detectable"
+      ],
       "status": "active",
       "protocol_id": "f508d605c7dc9c8aeffd7bf1441e283ebe9ed83c768e36c05d02e056cdd51867",
       "path": "f508d605/c7dc9c8aeffd7bf1441e283ebe9ed83c768e36c05d02e056cdd51867",
@@ -458,7 +571,10 @@
       "created_reason": "v016 M2: mental_poker trick-taking card game (Briscola)",
       "default_profile": "standard",
       "profiles": {
-        "standard": {"description": "40-card deck, 3-card hands, 120-point game", "options": {}}
+        "standard": {
+          "description": "40-card deck, 3-card hands, 120-point game",
+          "options": {}
+        }
       },
       "entrypoints": {
         "host": "aigenora host --protocol-dir",
@@ -472,8 +588,20 @@
       "description": "Host-authoritative multi-member chat with one global message order, late join, stable seats, signed delta replay, periodic checkpoints, and lease-fenced Leader failover.",
       "type": "chat",
       "family": "community-room",
-      "tags": ["chat", "multiplayer", "authoritative-group", "failover", "webui"],
-      "capabilities": ["authoritative_group", "late_join", "global_order", "exact_recovery", "webui"],
+      "tags": [
+        "chat",
+        "multiplayer",
+        "authoritative-group",
+        "failover",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "late_join",
+        "global_order",
+        "exact_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "9a8a512873c4ad083b2692c06221b789002ce3fd813da2c8dd71501eb8b054ec",
       "path": "9a8a5128/73c4ad083b2692c06221b789002ce3fd813da2c8dd71501eb8b054ec",
@@ -483,11 +611,17 @@
       "profiles": {
         "standard": {
           "description": "Public room with a 200-message retained timeline",
-          "options": {"history_limit": 200, "initial_topic": "Community room"}
+          "options": {
+            "history_limit": 200,
+            "initial_topic": "Community room"
+          }
         },
         "compact": {
           "description": "Small retained timeline for short-lived rooms",
-          "options": {"history_limit": 50, "initial_topic": "Quick room"}
+          "options": {
+            "history_limit": 50,
+            "initial_topic": "Quick room"
+          }
         }
       },
       "entrypoints": {
@@ -503,8 +637,23 @@
       "description": "Recoverable multi-member meeting with an agenda, FIFO speaking queue, replaceable ballots, action items, and a facilitator role independent from the network Leader.",
       "type": "chat",
       "family": "meeting-room",
-      "tags": ["meeting", "multiplayer", "agenda", "vote", "failover", "webui"],
-      "capabilities": ["authoritative_group", "agenda", "speaking_queue", "voting", "action_items", "exact_recovery", "webui"],
+      "tags": [
+        "meeting",
+        "multiplayer",
+        "agenda",
+        "vote",
+        "failover",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "agenda",
+        "speaking_queue",
+        "voting",
+        "action_items",
+        "exact_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "182ceaf26c288909862ad2f753c1e03858daac7e2550a18d2a856adfac02b58d",
       "path": "182ceaf2/6c288909862ad2f753c1e03858daac7e2550a18d2a856adfac02b58d",
@@ -514,11 +663,17 @@
       "profiles": {
         "standard": {
           "description": "Working meeting with up to 20 agenda items",
-          "options": {"meeting_title": "Working session", "max_agenda_items": 20}
+          "options": {
+            "meeting_title": "Working session",
+            "max_agenda_items": 20
+          }
         },
         "workshop": {
           "description": "Extended workshop agenda",
-          "options": {"meeting_title": "Workshop", "max_agenda_items": 40}
+          "options": {
+            "meeting_title": "Workshop",
+            "max_agenda_items": 40
+          }
         }
       },
       "entrypoints": {
@@ -534,8 +689,23 @@
       "description": "Fixed four-seat, two-deck Landlord game with private hands, ordered bidding, supported combination validation, team scoring, and privacy-preserving round restart on Leader migration.",
       "type": "game",
       "family": "four-player-landlord",
-      "tags": ["game", "cards", "multiplayer", "landlord", "private-hands", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "team_scoring", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "cards",
+        "multiplayer",
+        "landlord",
+        "private-hands",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "team_scoring",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "bbc0d9890d6481c3cd269fbfb466a3b7830e9d102638a14f2b7ddbae9da70d36",
       "path": "bbc0d989/0d6481c3cd269fbfb466a3b7830e9d102638a14f2b7ddbae9da70d36",
@@ -561,8 +731,24 @@
       "description": "Original four-player tactical card battle with one shared draw pile, private hands, public units and relics, spells, fatigue, and privacy-preserving Leader recovery.",
       "type": "game",
       "family": "aether-sigil",
-      "tags": ["game", "cards", "multiplayer", "shared-deck", "private-hands", "original", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "public_zones", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "cards",
+        "multiplayer",
+        "shared-deck",
+        "private-hands",
+        "original",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "public_zones",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "cbdb124e0db9be540099dbb7f7229bd9075251b5d6838f1ea943083d631570c5",
       "path": "cbdb124e/0db9be540099dbb7f7229bd9075251b5d6838f1ea943083d631570c5",
@@ -572,11 +758,15 @@
       "profiles": {
         "standard": {
           "description": "20 life, 72-card shared pile",
-          "options": {"starting_life": 20}
+          "options": {
+            "starting_life": 20
+          }
         },
         "long": {
           "description": "30 life, 72-card shared pile",
-          "options": {"starting_life": 30}
+          "options": {
+            "starting_life": 30
+          }
         }
       },
       "entrypoints": {
@@ -592,8 +782,26 @@
       "description": "Fixed four-seat partnership Upgrade with two decks, trump declarations, a hidden kitty, pairs and tractors, structured following, point capture, and level progression.",
       "type": "game",
       "family": "upgrade-tractor",
-      "tags": ["game", "cards", "multiplayer", "upgrade", "tractor", "partnership", "private-hands", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "partnership_scoring", "structured_tricks", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "cards",
+        "multiplayer",
+        "upgrade",
+        "tractor",
+        "partnership",
+        "private-hands",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "partnership_scoring",
+        "structured_tricks",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "acdf987218b5382bbf5f4c0008d6766e97ca6c1ae12f3cf2becd2afa9ad6f88e",
       "path": "acdf9872/18b5382bbf5f4c0008d6766e97ca6c1ae12f3cf2becd2afa9ad6f88e",
@@ -603,11 +811,19 @@
       "profiles": {
         "quick": {
           "description": "Short level race from 2 through 4",
-          "options": {"start_level": 2, "target_level": 4, "max_hands": 8}
+          "options": {
+            "start_level": 2,
+            "target_level": 4,
+            "max_hands": 8
+          }
         },
         "standard": {
           "description": "Full level race from 2 through A",
-          "options": {"start_level": 2, "target_level": 14, "max_hands": 16}
+          "options": {
+            "start_level": 2,
+            "target_level": 14,
+            "max_hands": 16
+          }
         }
       },
       "entrypoints": {
@@ -623,8 +839,26 @@
       "description": "Fixed four-seat bridge board with a legal auction, declarer-controlled dummy, strict follow-suit tricks, duplicate scoring, and private-hand recovery.",
       "type": "game",
       "family": "contract-bridge",
-      "tags": ["game", "cards", "multiplayer", "bridge", "partnership", "private-hands", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "auction", "dummy_control", "duplicate_scoring", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "cards",
+        "multiplayer",
+        "bridge",
+        "partnership",
+        "private-hands",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "auction",
+        "dummy_control",
+        "duplicate_scoring",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "5d69cf0e7ff90b2b60191fb43ab2448d0bf9153555b827199c1d77bc3ea78f3e",
       "path": "5d69cf0e/7ff90b2b60191fb43ab2448d0bf9153555b827199c1d77bc3ea78f3e",
@@ -634,7 +868,9 @@
       "profiles": {
         "standard": {
           "description": "One duplicate-scored board",
-          "options": {"board_number": 1}
+          "options": {
+            "board_number": 1
+          }
         }
       },
       "entrypoints": {
@@ -650,8 +886,25 @@
       "description": "Fixed four-seat 136-tile Mahjong core with private hands, public rivers and melds, deterministic claim priority, three winning shapes, and transparent compact scoring.",
       "type": "game",
       "family": "classical-mahjong",
-      "tags": ["game", "tiles", "multiplayer", "mahjong", "shared-deck", "private-hands", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "public_melds", "claim_priority", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "tiles",
+        "multiplayer",
+        "mahjong",
+        "shared-deck",
+        "private-hands",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "public_melds",
+        "claim_priority",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "b4b52ae592fb2fe9808c0bc4976eaee7ca1ce9fdb4638dc72bd88f18403def01",
       "path": "b4b52ae5/92fb2fe9808c0bc4976eaee7ca1ce9fdb4638dc72bd88f18403def01",
@@ -661,11 +914,17 @@
       "profiles": {
         "quick": {
           "description": "One hand with 25,000 starting points",
-          "options": {"starting_points": 25000, "max_hands": 1}
+          "options": {
+            "starting_points": 25000,
+            "max_hands": 1
+          }
         },
         "standard": {
           "description": "Four hands with rotating dealer",
-          "options": {"starting_points": 25000, "max_hands": 4}
+          "options": {
+            "starting_points": 25000,
+            "max_hands": 4
+          }
         }
       },
       "entrypoints": {
@@ -681,8 +940,26 @@
       "description": "Fixed four-seat no-limit Hold'em with blinds, four betting streets, all-ins, short-raise reopening rules, side pots, split pots, and private hole cards.",
       "type": "game",
       "family": "texas-holdem",
-      "tags": ["game", "cards", "multiplayer", "poker", "holdem", "private-hands", "webui"],
-      "capabilities": ["authoritative_group", "fixed_four_players", "shared_deck", "private_hands", "no_limit_betting", "side_pots", "showdown", "restart_round_recovery", "webui"],
+      "tags": [
+        "game",
+        "cards",
+        "multiplayer",
+        "poker",
+        "holdem",
+        "private-hands",
+        "webui"
+      ],
+      "capabilities": [
+        "authoritative_group",
+        "fixed_four_players",
+        "shared_deck",
+        "private_hands",
+        "no_limit_betting",
+        "side_pots",
+        "showdown",
+        "restart_round_recovery",
+        "webui"
+      ],
       "status": "active",
       "protocol_id": "ba17afdceb178d206e7f3ba614b29751f36ec749f3039fa471995707f6fd66c7",
       "path": "ba17afdc/eb178d206e7f3ba614b29751f36ec749f3039fa471995707f6fd66c7",
@@ -692,11 +969,21 @@
       "profiles": {
         "quick": {
           "description": "One 500-chip hand at 5/10 blinds",
-          "options": {"starting_stack": 500, "small_blind": 5, "big_blind": 10, "max_hands": 1}
+          "options": {
+            "starting_stack": 500,
+            "small_blind": 5,
+            "big_blind": 10,
+            "max_hands": 1
+          }
         },
         "standard": {
           "description": "Eight 1,000-chip hands at 5/10 blinds",
-          "options": {"starting_stack": 1000, "small_blind": 5, "big_blind": 10, "max_hands": 8}
+          "options": {
+            "starting_stack": 1000,
+            "small_blind": 5,
+            "big_blind": 10,
+            "max_hands": 8
+          }
         }
       },
       "entrypoints": {
@@ -712,8 +999,19 @@
       "description": "Host-authoritative real-time strategy reference game. Local Agents micro-control every owned tank while humans issue macro orders; rules, map, army size, balance and neutral powerups are match-configurable.",
       "type": "game",
       "family": "tank-battle",
-      "tags": ["game", "tank-battle", "rts", "authoritative-realtime"],
-      "capabilities": ["authoritative_realtime", "agent_micro_control", "macro_orders", "dynamic_rules", "full_frame_journal"],
+      "tags": [
+        "game",
+        "tank-battle",
+        "rts",
+        "authoritative-realtime"
+      ],
+      "capabilities": [
+        "authoritative_realtime",
+        "agent_micro_control",
+        "macro_orders",
+        "dynamic_rules",
+        "full_frame_journal"
+      ],
       "status": "active",
       "protocol_id": "24765cedb54ad04ad234c8d5a65f56825fedecb1f12cd296a175d658cb4c802d",
       "path": "24765ced/b54ad04ad234c8d5a65f56825fedecb1f12cd296a175d658cb4c802d",
@@ -723,15 +1021,30 @@
       "profiles": {
         "quick": {
           "description": "3v3 short match without neutral powerups",
-          "options": {"team_size": 3, "max_ticks": 900, "pickup_mode": "none", "friendly_fire": false}
+          "options": {
+            "team_size": 3,
+            "max_ticks": 900,
+            "pickup_mode": "none",
+            "friendly_fire": false
+          }
         },
         "standard": {
           "description": "5v5 match with neutral powerups",
-          "options": {"team_size": 5, "max_ticks": 1800, "pickup_mode": "powerups", "friendly_fire": false}
+          "options": {
+            "team_size": 5,
+            "max_ticks": 1800,
+            "pickup_mode": "powerups",
+            "friendly_fire": false
+          }
         },
         "large": {
           "description": "10v10 large battle with neutral powerups",
-          "options": {"team_size": 10, "max_ticks": 2400, "pickup_mode": "powerups", "friendly_fire": false}
+          "options": {
+            "team_size": 10,
+            "max_ticks": 2400,
+            "pickup_mode": "powerups",
+            "friendly_fire": false
+          }
         }
       },
       "entrypoints": {
@@ -739,6 +1052,30 @@
         "guest": "aigenora guest --protocol-dir",
         "hooks": "hooks.py"
       }
+    },
+    {
+      "alias": "trusted-agent-task-v1",
+      "name": "Trusted Agent Task",
+      "description": "Trusted cross-device agent collaboration: durable task delegation, artifact batch transfer, agent-to-agent guidance",
+      "type": "service",
+      "family": "trusted-agent-task-v1",
+      "tags": [
+        "collab",
+        "trusted-agent-task",
+        "task-delegation"
+      ],
+      "capabilities": [
+        "task_submit",
+        "artifact_transfer",
+        "agent_notes",
+        "durable_state"
+      ],
+      "status": "active",
+      "protocol_id": "8cd35f96dd028318b7da11e0ac579953e0e13016deef85bc9aacc1636ab50dec",
+      "path": "8cd35f96/dd028318b7da11e0ac579953e0e13016deef85bc9aacc1636ab50dec",
+      "parent_protocol_id": null,
+      "created_reason": "cross-device agent collaboration M1a",
+      "default_profile": null
     }
   ]
 }
